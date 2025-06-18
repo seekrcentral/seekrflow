@@ -10,6 +10,7 @@ description = "Automate seekr handling with seekrflow to decrease time and manua
 dynamic = ["version"]
 readme = "README.md"
 authors = [
+    { name = "Anand Ojha", email = "aojha@flatironinstitute.org " },
     { name = "Lane Votapka", email = "lvotapka100@gmail.com" }
 ]
 license = "MIT"
@@ -18,11 +19,18 @@ license-files = ["LICENSE"]
 classifiers = [
     "Programming Language :: Python :: 3",
 ]
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 # Declare any run-time dependencies that should be installed with the package.
-#dependencies = [
-#    "importlib-resources;python_version<'3.10'",
-#]
+dependencies = [
+    "numpy",
+    "attrs",
+    "cattrs",
+    "mdtraj",
+    "parmed",
+    # "seekr",
+    "pdbfixer",
+    "rdkit",
+]
 
 # Update the urls once the hosting is set up.
 #[project.urls]
@@ -66,7 +74,7 @@ seekrflow = [
 ]
 
 [tool.versioningit]
-default-version = "1+unknown"
+default-version = "2.1.7"
 
 [tool.versioningit.format]
 distance = "{base_version}+{distance}.{vcs}{rev}"
@@ -78,7 +86,7 @@ distance-dirty = "{base_version}+{distance}.{vcs}{rev}.dirty"
 method = "git"  # <- The method name
 # Parameters to pass to the method:
 match = ["*"]
-default-tag = "1.0.0"
+default-tag = "2.1.7"
 
 [tool.versioningit.write]
 file = "seekrflow/_version.py"
