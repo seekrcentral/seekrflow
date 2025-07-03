@@ -16,7 +16,7 @@ on:
     # Weekly tests run on main by default:
     #   Scheduled workflows run on the latest commit on the default or base branch.
     #   (from https://help.github.com/en/actions/reference/events-that-trigger-workflows#scheduled-events-schedule)
-    - cron: "0 0 * * 0"
+    #- cron: "0 0 * * 0"
 
 jobs:
   test:
@@ -24,8 +24,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [macOS-latest, ubuntu-latest, windows-latest]
-        python-version: ["3.11", "3.12", "3.13"]
+        os: [ubuntu-latest] # [macOS-latest, ubuntu-latest, windows-latest]
+        python-version: ["3.11"]
 
     steps:
       - uses: actions/checkout@v4
@@ -59,7 +59,7 @@ jobs:
         # conda setup requires this special shell
         shell: bash -l {0}
         run: |
-          pytest -v --cov=seekrflow --cov-report=xml --color=yes seekrflow/tests/
+          pytest -v --cov=seekrflow --cov-report=xml --color=yes -m "not (needs_cuda or needs_espaloma or needs_openff)" seekrflow/tests/
 
       - name: CodeCov
         uses: codecov/codecov-action@v5

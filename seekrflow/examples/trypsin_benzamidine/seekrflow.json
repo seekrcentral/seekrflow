@@ -1,0 +1,82 @@
+{
+    "name": "tryp_ben",
+    "structure_version": "1.0",
+    "workflow_type": "protein_ligand",
+    "receptor_ligand_pdb": "protein_ligand.pdb",
+    "ligand_sdf_file": "",
+    "ligand_resname": "BEN",
+    "ligand_indices": [],
+    "work_directory": "work",
+    "basename_output": "complex",
+    "solvent_padding": 0.9,
+    "ionic_strength": 0.15,
+    "hmass": 1.008,
+    "nonbonded_cutoff": 0.9,
+    "temperature": 300.0,
+    "friction": 1.0,
+    "pressure": null,
+    "barostat_period": null,
+    "stepsize": 0.002,
+    "parametrizer": {
+        "forcefield": "gaff-2.11",
+        "water_model": "tip3p",
+        "auxiliary_forcefield_files": ["amber/ff14SB.xml",
+            "amber/tip3p_standard.xml",
+            "amber/tip3p_HFE_multivalent.xml"]
+    },
+    "pdb_fixer_settings": {
+        "remove_extra_chains": true,
+        "find_missing_residues": true,
+        "find_and_replace_nonstandard_residues": true,
+        "remove_heterogens": true,
+        "find_and_add_missing_atoms": true,
+        "add_missing_hydrogens_pH": null
+    },
+    "pdb2pqr_settings": {
+        "forcefield": "AMBER",
+        "forcefield_output_format": "AMBER",
+        "pH": 7.0
+    },
+    "hidr_settings": {
+        "type": "hidr_metaD",
+        "gaussian_height": 1.0,
+        "gaussian_width": 0.05,
+        "bias_factor": 10.0
+    },
+    "seekr_settings": {
+        "type": "MMVT",
+        "md_output_interval": 10000,
+        "md_steps_per_anchor": 1000000,
+        "anchor_radius_list": [
+            0.5,
+            0.6,
+            0.7,
+            0.8,
+            0.9,
+            1.0,
+            1.1,
+            1.2,
+            1.3,
+            1.4,
+            1.5,
+            1.6
+        ]
+    },
+    "bd_settings": {
+        "type": "BD",
+        "binary_directory": "",
+        "receptor_pqr_filename": null,
+        "ligand_pqr_filename": null,
+        "num_trajectories": 10000,
+        "num_threads": 1
+    },
+    "md_parameters_topology": null,
+    "starting_pdb_filename": "",
+    "run_settings": {
+        "resources": [],
+        "bd_stage_resource_name": "local",
+        "hidr_stage_resource_name": "local",
+        "seekr_stage_resource_name": "local",
+        "allow_parsl_usage_tracking": false
+    }
+}

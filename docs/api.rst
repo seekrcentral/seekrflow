@@ -1,7 +1,6 @@
-API Documentation
-=================
+API Reference
+=============
 
-.. autosummary::
-   :toctree: autosummary
+This section provides detailed documentation for all modules, classes, and functions in seekrflow.
 
-   seekrflow.canvas
+Coming soon...

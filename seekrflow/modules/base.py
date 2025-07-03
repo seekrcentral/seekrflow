@@ -19,6 +19,8 @@ def initialize_ref_indices(
     for ref_integer in ref_integers:
         # Variable not used - just catches integer conversion errors
         ref_integer_int = int(ref_integer)
+        assert ref_integer_int >= 0, \
+            "Reference indices must be non-negative integers. Found: {}".format(ref_integer)
     
     return list(map(int, ref_integers))
 
@@ -38,4 +40,5 @@ def get_ligand_indices(
         selection_string = "resname {} and not type H"
     ligand_indices = list(traj.topology.select(selection_string.format(ligand_resname)))
     assert len(ligand_indices), "Selection not found: resname {}".format(ligand_resname)
-    return ligand_indices
+    ligand_indices_ints = [int(index) for index in ligand_indices]
+    return ligand_indices_ints

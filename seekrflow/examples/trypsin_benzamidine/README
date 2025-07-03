@@ -1,0 +1,18 @@
+To make the seekrflow input, one could run the following:
+
+python ~/seekrflow/seekrflow/tools/make_input.py seekrflow.json
+
+And open and modify the inputs as desired, especially the "receptor_ligand_pdb", and "ligand_resname", "auxiliary_forcefield_files", "anchor_radius_list", and run_settings entries. Most of the rest is automatic
+
+Next, we can perform automatic parameterization:
+
+WARNING: make sure to indicate in tutorials and documentation that automatic parametrization
+can get protein chains wrong - what if there's a dimer?
+
+python ~/seekrflow/seekrflow/parametrize.py protein_ligand.pdb -i seekrflow.json -L BEN
+
+Next, prepare the model:
+
+python ~/seekrflow/seekrflow/flow.py seekrflow.json prepare
+
+python ~/seekrflow/seekrflow/flow.py seekrflow.json run

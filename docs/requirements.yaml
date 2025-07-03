@@ -1,22 +1,18 @@
 name: docs_seekrflow
 channels:
-
   - conda-forge
-
   - defaults
 dependencies:
     # Base depends
-  - python
+  - python=3.12
   - pip
-  
+  - cython
   - pydata-sphinx-theme
   - sphinx-design
   - sphinx-copybutton
-
-
-
-
+  
     # Pip-only installs
   - pip:
-    - -e ../
+    - sphinx-autoapi
+    - sphinx-rtd-theme
 

@@ -1,0 +1,57 @@
+{
+    "name": "",
+    "structure_version": "1.0",
+    "workflow_type": "protein_ligand",
+    "receptor_ligand_pdb": "",
+    "ligand_sdf_file": "",
+    "ligand_resname": "APN",
+    "ligand_indices": [],
+    "receptor_selection": "resname MGO",
+    "work_directory": "",
+    "basename_output": "complex",
+    "solvent_padding": 0.9,
+    "ionic_strength": 0.15,
+    "hmass": 1.008,
+    "nonbonded_cutoff": 0.9,
+    "temperature": 300.0,
+    "friction": 1.0,
+    "pressure": null,
+    "barostat_period": null,
+    "stepsize": 0.002,
+    "parametrizer": null,
+    "pdb_fixer_settings": null,
+    "pdb2pqr_settings": null,
+    "hidr_settings": {
+        "type": "hidr_metaD",
+        "gaussian_height": 0.5,
+        "gaussian_width": 0.05,
+        "bias_factor": 10.0
+    },
+    "seekr_settings": {
+        "type": "MMVT",
+        "md_output_interval": 10000,
+        "md_steps_per_anchor": 1000000,
+        "anchor_radius_list": [0.05, 0.15, 0.25, 0.35, 0.45, 0.55, 0.65, 0.75, 
+                               0.85, 0.95, 1.05, 1.15, 1.25, 1.35]
+    },
+    "bd_settings": {
+        "type": "BD",
+        "binary_directory": "",
+        "receptor_pqr_filename": "../params_and_structures/BCD_receptor.pqr",
+        "ligand_pqr_filename": "",
+        "num_trajectories": 10000,
+        "num_threads": 1
+    },
+    "md_parameters_topology": {
+        "type": "Amber",
+        "prmtop_filename": ""
+    },
+    "starting_pdb_filename": "",
+    "run_settings": {
+        "resources": [],
+        "bd_stage_resource_name": "local",
+        "hidr_stage_resource_name": "local",
+        "seekr_stage_resource_name": "local",
+        "allow_parsl_usage_tracking": false
+    }
+}
