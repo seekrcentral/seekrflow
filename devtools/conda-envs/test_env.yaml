@@ -6,7 +6,7 @@ dependencies:
     # Base depends
   - python
   - pip
-  - numpy
+  - numpy=2.3
   - attrs
   - cattrs
   - rdkit
