@@ -88,14 +88,16 @@ def host_guest_seekrflow_amber_parametrized_persistent(tmpdir_factory):
     host_guest_seekrflow_amber_parametrized_persistent_obj \
         = create_seekrflow.create_parametrized_host_guest_amber_seekrflow()
     host_guest_seekrflow_amber_parametrized_persistent_obj.work_directory = str(workdir)
+    host_guest_seekrflow_amber_parametrized_persistent_obj.ligand_resname = "APN"
+    host_guest_seekrflow_amber_parametrized_persistent_obj.receptor_selection = "resname MGO"
     return host_guest_seekrflow_amber_parametrized_persistent_obj
 
 @pytest.fixture()
-def host_guest_seekrflow_system_xml_parametrized(host_guest_seekrflow_amber_parametrized_persistent):
+def host_guest_seekrflow_amber_parametrized(host_guest_seekrflow_amber_parametrized_persistent):
     """
     Create a model object that is not persistent. But this at least
     doesn't require us to generate an entirely new model.
     """
-    host_guest_seekrflow_system_xml_param_obj = copy.deepcopy(
+    host_guest_seekrflow_amber_param_obj = copy.deepcopy(
         host_guest_seekrflow_amber_parametrized_persistent)
-    return host_guest_seekrflow_system_xml_param_obj
+    return host_guest_seekrflow_amber_param_obj

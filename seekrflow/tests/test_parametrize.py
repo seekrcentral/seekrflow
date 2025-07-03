@@ -54,8 +54,10 @@ class TestParametrizeHelperFunctions:
         tmp.close()
         return tmp.name
 
+    @pytest.mark.needs_openff
     def test_split_receptor_ligand_basic(self):
         """Test basic receptor-ligand splitting functionality"""
+        import seekrflow.parametrize as parametrize
         with tempfile.TemporaryDirectory() as tmpdir:
             # Create test PDB
             pdb_file = self._create_test_pdb()
@@ -99,8 +101,10 @@ class TestParametrizeHelperFunctions:
             
             os.unlink(pdb_file)
 
+    @pytest.mark.needs_openff
     def test_split_receptor_ligand_empty_ligand_indices(self):
         """Test split function with empty ligand indices"""
+        import seekrflow.parametrize as parametrize
         with tempfile.TemporaryDirectory() as tmpdir:
             pdb_file = self._create_test_pdb()
             
@@ -118,8 +122,10 @@ class TestParametrizeHelperFunctions:
             
             os.unlink(pdb_file)
 
+    @pytest.mark.needs_openff
     def test_choose_only_receptor_atoms(self):
         """Test the choose_only_receptor_atoms function"""
+        import seekrflow.parametrize as parametrize
         with tempfile.TemporaryDirectory() as tmpdir:
             # Create test PDB files with different chains
             complex_pdb = os.path.join(tmpdir, "complex.pdb")
@@ -163,8 +169,10 @@ class TestParametrizeHelperFunctions:
 class TestParametrizeIntegration:
     """Integration tests for parametrize functionality"""
     
+    @pytest.mark.needs_openff
     def test_parametrize_file_copying(self):
         """Test that input files are properly copied to work directory"""
+        import seekrflow.parametrize as parametrize
         with tempfile.TemporaryDirectory() as tmpdir:
             # Use the existing test file instead of creating a minimal one
             test_data_dir = os.path.join(os.path.dirname(__file__), "data")
