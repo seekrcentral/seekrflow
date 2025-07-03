@@ -11,11 +11,11 @@ import parmed
 
 import seekrflow.modules.base as base
 import seekrflow.modules.structures as structures
-import seekrflow.parametrize as parametrize
 import seekrflow.tests.create_seekrflow as create_seekrflow
 
 @pytest.mark.needs_openff
 def test_parametrize_amber_tryp_ben(tryp_ben_seekrflow_amber_unparametrized):
+    import seekrflow.parametrize as parametrize
     flow = tryp_ben_seekrflow_amber_unparametrized
     flow.ligand_indices = base.get_ligand_indices(flow.receptor_ligand_pdb, flow.ligand_resname)
     flow.make_work_directory(flow.work_directory)
@@ -24,6 +24,7 @@ def test_parametrize_amber_tryp_ben(tryp_ben_seekrflow_amber_unparametrized):
 @pytest.mark.needs_espaloma
 @pytest.mark.needs_openff
 def test_parametrize_espaloma_tryp_ben(tryp_ben_seekrflow_espaloma_unparametrized):
+    import seekrflow.parametrize as parametrize
     flow = tryp_ben_seekrflow_espaloma_unparametrized
     flow.ligand_indices = base.get_ligand_indices(flow.receptor_ligand_pdb, flow.ligand_resname)
     flow.make_work_directory(flow.work_directory)

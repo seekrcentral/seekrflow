@@ -11,7 +11,8 @@ dependencies:
   - cattrs
   - rdkit
   - parmed
-  - openmm
+  - openmm=8.1
+  - seekr2_openmm_plugin
 
     # Testing
   - pytest

@@ -59,6 +59,10 @@ jobs:
         # conda setup requires this special shell
         shell: bash -l {0}
         run: |
+          git clone https://github.com/seekrcentral/seekr2.git
+          cd seekr2
+          python -m pip install . --no-deps
+          cd ..
           pytest -v --cov=seekrflow --cov-report=xml --color=yes -m "not (needs_cuda or needs_espaloma or needs_openff)" seekrflow/tests/
 
       - name: CodeCov
