@@ -10,6 +10,7 @@ dependencies:
   - attrs
   - cattrs
   - rdkit
+  - parmed
 
     # Testing
   - pytest
@@ -19,6 +20,5 @@ dependencies:
     # Pip-only installs
   - pip:
     - mdtraj
-    - parmed
     - parsl
 
