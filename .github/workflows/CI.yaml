@@ -71,6 +71,7 @@ jobs:
         # conda setup requires this special shell
         shell: bash -l {0}
         run: |
+          export PATH="/home/runner/work/seekrflow/seekrflow/browndye2/bin:$PATH"
           git clone https://github.com/seekrcentral/seekr2.git
           cd seekr2
           python -m pip install . --no-deps
