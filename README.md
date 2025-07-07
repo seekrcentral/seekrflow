@@ -179,7 +179,7 @@ python ~/seekr2/seekr2/analyze.py work/root/model.xml
 ## Authors and Contributors
 
 The following people have contributed directly to the coding and validation
-efforts of SEEKR2 (listed an alphabetical order of last name). 
+efforts of seekrflow (listed an alphabetical order of last name). 
 Thanks also to everyone who has helped or will help improve this project by 
 providing feedback, bug reports, or other comments.
 
@@ -196,7 +196,7 @@ If you use seekrflow, please cite the following paper:
 
 * PAPER HERE
 
-One should also cite SEEKR2's dependencies:
+One should also cite SEEKR2 and its dependencies:
 
 * Votapka, L. W.; Stokely, A. M.; Ojha, A. A.; Amaro, R. E. SEEKR2: Versatile Multiscale Milestoning Utilizing the OpenMM Molecular Dynamics Engine. J. Chem. Inf. Mod. 2022 62 (13), 3253-3262. DOI: 10.1021/acs.jcim.2c00501
 

@@ -169,7 +169,7 @@ The only change will be to the arguments to the parametrize.py script, (although
 could also be made at the level of the ```seekrflow.json``` configuration file). We must
 point to the location of the espaloma force field file, and also, specify a new working directory.
 
-. code-block:: bash
+.. code-block:: bash
 
     cd seekrflow/seekrflow/examples/trypsin_benzamidine
     mamba activate SEEKRFLOW_PARAM
