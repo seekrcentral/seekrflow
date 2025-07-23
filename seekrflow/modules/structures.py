@@ -762,6 +762,10 @@ class Seekrflow:
         default=Factory(list),
         validator=validators.instance_of(list),
         )
+    receptor_indices: typing.List[int] = field(
+        default=Factory(list),
+        validator=validators.instance_of(list),
+        )
     receptor_selection: str = field(
         default="protein",
         validator=validators.instance_of(str),

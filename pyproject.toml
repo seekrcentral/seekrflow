@@ -34,8 +34,8 @@ dependencies = [
 
 # Update the urls once the hosting is set up.
 #[project.urls]
-#"Source" = "https://github.com/seekrcentral/seekrflow/"
-#"Documentation" = "https://seekrflow.readthedocs.io/"
+"Source" = "https://github.com/seekrcentral/seekrflow/"
+"Documentation" = "https://seekrflow.readthedocs.io/"
 
 [project.optional-dependencies]
 test = [

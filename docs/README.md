@@ -1,11 +1,11 @@
-# Compiling seekr2's Documentation
+# Compiling seekrflow's Documentation
 
 The docs for this project are built with [Sphinx](http://www.sphinx-doc.org/en/master/).
 To compile the docs, first ensure that Sphinx and the ReadTheDocs theme are installed.
 
 
 ```bash
-conda install sphinx sphinx_rtd_theme 
+conda install sphinx sphinx_rtd_theme sphinx-design sphinx-copybutton
 ```
 
 

@@ -93,8 +93,12 @@ def create_mmvt_receptor_ligand_com_com_model_input_seekr2(
     cv_input1 = seekr2_common_cv.Spherical_cv_input()
     receptor_atoms, ligand_atoms = cvs.get_receptor_ligand_com_com_selections(
         seekrflow, starting_pdb_full_path, alpha_carbon_ligand_threshold)
-    cv_input1.group1 = receptor_atoms
-    cv_input1.group2 = ligand_atoms
+    if len(seekrflow.receptor_indices) == 0:
+        seekrflow.receptor_indices = receptor_atoms
+    if len(seekrflow.ligand_indices) == 0:
+        seekrflow.ligand_indices = ligand_atoms
+    cv_input1.group1 = seekrflow.receptor_indices
+    cv_input1.group2 = seekrflow.ligand_indices
     cv_input1.input_anchors = []
     radius_list = seekrflow.seekr_settings.anchor_radius_list
     assert len(radius_list) > 0, \
@@ -143,7 +147,7 @@ def create_mmvt_receptor_ligand_com_com_model_input_seekr2(
     if seekrflow.bd_settings is not None:
         # TODO: fill out from parametrize
         bd_rec_indices, bd_lig_indices = cvs.get_bd_receptor_ligand_selections(
-            seekrflow, starting_pdb_full_path, receptor_atoms, ligand_atoms)
+            seekrflow, starting_pdb_full_path, seekrflow.receptor_indices, seekrflow.ligand_indices)
         model_input.browndye_settings_input \
             = seekr2_common_prepare.Browndye_settings_input()
         model_input.browndye_settings_input.binary_directory = seekrflow.bd_settings.binary_directory

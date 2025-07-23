@@ -376,6 +376,9 @@ def transfer_files_to_from_remote_resource(
         remote_collection_id = resource.transfer_settings.remote_collection_id
         transfer_files_with_globus(remote_root_directory_name, local_directory, remote_path, 
                                     local_collection_id, remote_collection_id, backwards=backwards)
+                                    
+        # TODO: confirm that the files were transferred successfully before continuing.
+        # To prevent later errors if the file transfer failed quietly (as has happened).
     else:
         raise NotImplementedError(
             "Only globus transfer is implemented.")
@@ -471,7 +474,8 @@ def run_model(
 
     anchors_to_run = seekr_anchors_to_run(model)
 
-    if seekrflow.run_settings.bd_stage_resource_name == "local":
+    if (seekrflow.run_settings.bd_stage_resource_name == "local") \
+            and (model.using_bd()):
         bd_local_executor = assign_local_executor(
             label="bd_executor",
             cores_per_worker=bd_n_threads)

@@ -29,7 +29,7 @@ curl -O https://github.com/conda-forge/miniforge/releases/latest/download/Minifo
 bash Miniforge3-$(uname)-$(uname -m).sh
 ```
 
-Once this has been done, set up a new environments:
+Once this has been done, set up a new environment:
 
 ```sh
 mamba create -n SEEKR2 python=3.11 --yes
@@ -174,7 +174,7 @@ python ~/seekr2/seekr2/analyze.py work/root/model.xml
 
 ### Important Options and Hints
 
-* In general, seekrflow, SEEKR2, and SeekrTools programs can be run with the '-h' argument to see all available options. Please see https://seekr2.readthedocs.io/en/latest for a detailed description of programs and options.
+* In general, seekrflow, SEEKR2, and SeekrTools programs can be run with the '-h' argument to see all available options. Please see https://seekrflow.readthedocs.io/en/latest for a detailed description of programs and options.
 
 ## Authors and Contributors
 
@@ -224,7 +224,7 @@ You may also optionally cite the following papers related to SEEKR2:
 
 ### Copyright
 
-Copyright (c) 2024, Lane Votapka
+Copyright (c) 2025, Lane Votapka
 
 
 #### Acknowledgements

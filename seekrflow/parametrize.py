@@ -48,6 +48,8 @@ def _split_receptor_ligand(
     """
     Split the receptor-ligand complex into separate PDB files for the receptor and the ligand.
     """
+    print("os.path.abspath(os.curdir):", os.path.abspath(os.curdir))
+    print("seekrflow.receptor_ligand_pdb:", seekrflow.receptor_ligand_pdb)
     full_structure = parmed.load_file(seekrflow.receptor_ligand_pdb, skip_bonds=True)
     #param_dir = seekrflow.get_parametrize_directory()
     receptor_filename = os.path.join(structures.PARAMETRIZE, RECEPTOR_PDB_FILENAME)
@@ -150,8 +152,10 @@ def _make_pqr_files(
     
     # First, handle the ligand
     ligand_first_index = seekrflow.ligand_indices[0]
+    print("ligand_first_index:", ligand_first_index)
     ligand_first_atom = parmed_complex.atoms[ligand_first_index]
     ligand_first_atom_resname = ligand_first_atom.residue.name
+    print("ligand_first_atom_resname:", ligand_first_atom_resname)
     ligand_structure_all_resids = parmed_complex[f":{ligand_first_atom_resname}"]
     last_resnum = None
     last_chain = None
@@ -347,14 +351,15 @@ def _create_complex(
         barostat = None
     
     # TODO: these need to be set in the seekrflow object
-    FF_FILES = [
-        "amber/ff14SB.xml",
-        "amber/tip3p_standard.xml",
-        "amber/tip3p_HFE_multivalent.xml"
-    ]
+    #FF_FILES = [
+    #    "amber/ff14SB.xml",
+    #    "amber/tip3p_standard.xml",
+    #    "amber/tip3p_HFE_multivalent.xml"
+    #]
     
     system_generator = SystemGenerator(
-        forcefields=FF_FILES, 
+        #forcefields=FF_FILES, 
+        forcefields=seekrflow.parametrizer.auxiliary_forcefield_files,
         forcefield_kwargs=forcefield_kwargs, 
         periodic_forcefield_kwargs=periodic_forcefield_kwargs, 
         barostat=barostat, 
@@ -437,6 +442,7 @@ def parametrize(
     work_copy_receptor_ligand_pdb = os.path.join(
         seekrflow.work_directory, os.path.basename(seekrflow.receptor_ligand_pdb))
     copyfile(seekrflow.receptor_ligand_pdb, work_copy_receptor_ligand_pdb)
+    seekrflow.receptor_ligand_pdb = os.path.basename(work_copy_receptor_ligand_pdb)
     if seekrflow.ligand_sdf_file != "":
         work_copy_ligand_sdf = os.path.join(
             seekrflow.work_directory, DEFAULT_LIGAND_SDF_FILENAME)
@@ -585,9 +591,7 @@ def main() -> None:
         seekrflow.ligand_indices = ligand_indices
         seekrflow.ligand_resname = ligand_resname
     else:
-        if seekrflow.ligand_indices != "":
-            seekrflow.ligand_indices = base.initialize_ref_indices(seekrflow.ligand_indices)
-        else:
+        if len(seekrflow.ligand_indices) == 0:
             if seekrflow.ligand_resname != "":
                 seekrflow.ligand_indices = base.get_ligand_indices(receptor_ligand_pdb, seekrflow.ligand_resname)
             else:

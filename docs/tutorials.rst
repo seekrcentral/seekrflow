@@ -285,7 +285,7 @@ one will likely need to modify in order to complete this tutorial.
 
 - "globus_compute_endpoint_id": This is the Globus Compute endpoint ID that will be used to submit jobs 
   to the remote system. This should be set to the endpoint ID that you created for your remote system. 
-  You can find this ID by running ```globus compute endpoint list``` in the terminal of the remote HCP
+  You can find this ID by running ```globus-compute-endpoint list``` in the terminal of the remote HCP
   resource.
 
 - "transfer_settings":
