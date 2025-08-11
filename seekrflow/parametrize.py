@@ -122,6 +122,8 @@ def _make_pqr_files(
     """
     Make PQR files for the receptor and ligand.
     """
+    # TODO: check BD_dock.py within seekrdock tools for pretty good code
+    # to write receptor and ligand PQRs
     #param_dir = seekrflow.get_parametrize_directory()
     # Assign mbondi2 radii to atoms
     for atom in parmed_complex.atoms:

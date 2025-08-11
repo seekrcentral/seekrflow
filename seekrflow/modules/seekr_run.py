@@ -5,6 +5,7 @@ Using the seekr API as well as parsl, run stages of the seekr calculation.
 """
 
 import os
+import re
 import typing
 from collections import defaultdict
 
@@ -188,6 +189,22 @@ def transfer_files_with_globus(
     print("Transfer complete!")
     return
 
+# Search for output patterns that mean a walltime timeout
+TIMEOUT_PAT = re.compile(r"(DUE TO TIME LIMIT|TIMEOUT|signal 9|SIGKILL)", re.I)
+
+def retry_handler(exc, task_record):
+    # Return a backoff (seconds) to retry, or <0 to stop.
+    try:
+        # Look in recorded stderr for SLURM timeout breadcrumbs
+        stderr = task_record.stderr
+        if stderr:
+            with open(stderr, "r", errors="ignore") as f:
+                if TIMEOUT_PAT.search(f.read()):
+                    return 60  # retry after 60s
+    except Exception:
+        pass
+    return -1  # do not retry other failures
+
 def slurm_remote_workflow(args):
     import os
     import sys
@@ -265,6 +282,7 @@ def slurm_remote_workflow(args):
         working_dir=working_dir,
         #worker_debug=False,
         max_workers_per_node=max_workers_per_node,
+        available_accelerators=1,
         provider=SlurmProvider(
             partition=partition,
             account=account,
@@ -279,7 +297,7 @@ def slurm_remote_workflow(args):
             scheduler_options=scheduler_options,
             worker_init=worker_init,
             exclusive=False,
-            launcher=SrunLauncher(),
+            launcher=SrunLauncher(overrides="--kill-on-bad-exit=0"),
             
         ),
     )
@@ -287,6 +305,8 @@ def slurm_remote_workflow(args):
     parsl.clear()
     my_config = Config(
         executors=[my_executor],
+        retries=10,
+        retry_handler=retry_handler,
         strategy="simple",
         usage_tracking=usage_tracking
     )
@@ -395,15 +415,9 @@ def assign_remote_workflow(
         indices: list | None = None,
     ) -> typing.Any:
     
-    if resource.init_blocks is None:
-        init_blocks = num_blocks
-    else:
-        init_blocks = resource.init_blocks
-    
-    if resource.max_blocks is None:
-        max_blocks = num_blocks
-    else:
-        max_blocks = resource.max_blocks
+    init_blocks = num_blocks
+    max_blocks = num_blocks
+    print(f"Using {num_blocks} blocks for this run")
 
     if resource.type == "slurm_remote":
         slurm_args = [
