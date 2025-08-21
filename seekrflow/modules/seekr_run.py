@@ -5,7 +5,6 @@ Using the seekr API as well as parsl, run stages of the seekr calculation.
 """
 
 import os
-import re
 import typing
 from collections import defaultdict
 
@@ -188,25 +187,41 @@ def transfer_files_with_globus(
 
     print("Transfer complete!")
     return
+    
+def transfer_files_with_rsync(
+        local_path: str, 
+        remote_path: str, 
+        remote_hostname: str, 
+        remote_username: str | None = None, 
+        remote_password: str | None = None, 
+        port: int | None = 22, 
+        backwards: bool = False
+        ) -> None:
+    import fabric
+    import patchwork.transfers
+    print(f"Filetree transfer task submitted to {remote_hostname} with rsync")
+    c = fabric.Connection(host=remote_hostname, user=remote_username, 
+                           port=port)
+    if not local_path.endswith("/"):
+        local_path += "/"
+    if not remote_path.endswith("/"):
+        remote_path += "/"
+    if backwards:
+        # Transferring from remote to local
+        #c.get(remote=remote_path, local=local_path)
+        patchwork.transfers.rsync(c, source=remote_path, target=local_path, rsync_opts="-q")
 
-# Search for output patterns that mean a walltime timeout
-TIMEOUT_PAT = re.compile(r"(DUE TO TIME LIMIT|TIMEOUT|signal 9|SIGKILL)", re.I)
-
-def retry_handler(exc, task_record):
-    # Return a backoff (seconds) to retry, or <0 to stop.
-    try:
-        # Look in recorded stderr for SLURM timeout breadcrumbs
-        stderr = task_record.stderr
-        if stderr:
-            with open(stderr, "r", errors="ignore") as f:
-                if TIMEOUT_PAT.search(f.read()):
-                    return 60  # retry after 60s
-    except Exception:
-        pass
-    return -1  # do not retry other failures
+    else:
+        # Transferring from local to remote
+        #c.put(local=local_path, remote=remote_path)
+        patchwork.transfers.rsync(c, source=local_path, target=remote_path, rsync_opts="-q")
+    
+    print("Transfer complete!")
+    exit()
 
 def slurm_remote_workflow(args):
     import os
+    import re
     import sys
     import parsl
     from parsl.app.app import bash_app
@@ -214,7 +229,22 @@ def slurm_remote_workflow(args):
     from parsl.launchers import SrunLauncher
     from parsl.config import Config
     from parsl.executors import HighThroughputExecutor
+    
+    # Search for output patterns that mean a walltime timeout
+    TIMEOUT_PAT = re.compile(r"(DUE TO TIME LIMIT|TIMEOUT|signal 9|SIGKILL)", re.I)
 
+    def retry_handler(exc, task_record):
+        try:
+            # Look in recorded stderr for SLURM timeout breadcrumbs
+            stderr = task_record.stderr
+            if stderr:
+                with open(stderr, "r", errors="ignore") as f:
+                    if TIMEOUT_PAT.search(f.read()):
+                        return 1  # retry after 60s
+        except Exception:
+            pass
+        return 100  # do not retry other failures
+    
     def bd_finished_wkflow(
             model: seekr2_base.Model,
             ) -> bool: 
@@ -291,7 +321,7 @@ def slurm_remote_workflow(args):
             cores_per_node=cores_per_node,
             mem_per_node=mem_per_node,
             init_blocks=init_blocks,
-            max_blocks=max_blocks, # TODO: make this configurable
+            max_blocks=max_blocks,
             parallelism=1.0,
             walltime=time_limit,
             scheduler_options=scheduler_options,
@@ -399,9 +429,19 @@ def transfer_files_to_from_remote_resource(
                                     
         # TODO: confirm that the files were transferred successfully before continuing.
         # To prevent later errors if the file transfer failed quietly (as has happened).
+        
+    elif resource.transfer_settings.type == "rsync":
+        remote_path = os.path.join(resource.remote_working_directory, remote_root_directory_name)
+        remote_hostname = resource.transfer_settings.remote_hostname
+        remote_username = resource.transfer_settings.remote_username
+        remote_password = resource.transfer_settings.remote_password
+        port = resource.transfer_settings.port
+        transfer_files_with_rsync(local_directory, remote_path, remote_hostname, remote_username, 
+                                   remote_password, port, backwards=backwards)
+                                    
     else:
         raise NotImplementedError(
-            "Only globus transfer is implemented.")
+            "Only rsync and globus transfers are implemented.")
     return
 
 def assign_remote_workflow(

@@ -197,7 +197,7 @@ Prerequisites
   - PDBFixer
   - PDB2PQR
   - openmmforcefields
-  - Globus Endpoints
+  - Globus Endpoints (optional)
   - Globus Compute SDK
 - Access to a remote HPC system, where you can submit jobs and manage resources.
 
@@ -207,8 +207,9 @@ Full SEEKR calculations almost always require a power GPU cluster or supercomput
 files to and from a remote system, as well as managing job submissions with SLURM/PBS scripts can be 
 slow and cumbersome. This tutorial shows how to use seekrflow to streamline this process, although
 care must be taken to ensure that the remote system is configured correctly, and that the
-Globus endpoints are set up properly. So make sure that all dependences are installed on both the
-local and remote machines, and that the remote machine is set up as defined in :doc:`getting_started`.
+Globus endpoints are set up properly (unless one wants to use rsync). So make sure that all dependences 
+are installed on both the local and remote machines, and that the remote machine is set up as defined 
+in :doc:`getting_started`.
 
 Step 3.2: Prepare the Configuration JSON Files
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -291,7 +292,7 @@ one will likely need to modify in order to complete this tutorial.
 - "transfer_settings":
   
   - "type": This should be set to "globus" to use Globus for file transfers. At present, only
-    Globus transfers are supported.
+    Globus and rsync transfers are supported.
   - "local_collection_id": The Globus collection (endpoint) ID for the local system. One can find
      it by getting globus_connect_personal running on one's own machine, and then using the Globus
      web portal "Collections" page to find its UUID.
@@ -307,6 +308,15 @@ one will likely need to modify in order to complete this tutorial.
 
 - "allow_parsl_usage_tracking": If set to True, Parsl will collect usage statistics and send them 
   to the Parsl team. This is optional, but helps improve the library.
+
+.. note::
+
+    It is also possible to use rsync to transfer files between local and remote machines. In that
+    case, one would use the "rsync" type within the "transfer_settings" attribute. The *rsync* type
+    has many optional attributes, including "remote_hostname", "remote_username", "remote_password",
+    and "port", which can be used to transfer files to and from the remote machine without using
+    Globus Endpoints. However, Globus can be helpful to avoid password and two-factor authentication
+    on certain HPC systems, which might make using rsync cumbersome.
 
 Step 3.3: Run Seekrflow on a Remote HPC System
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

@@ -260,7 +260,7 @@ Configure the endpoint:
     globus-compute-endpoint configure my_seekr_endpoint
 
 At this point, one should modify the file at ~/.globus-compute/my_seekr_endpoint/config.yaml 
-in order to properly make full use of the HSP resource's full capabilities.
+in order to properly make full use of the HPC resource's full capabilities.
 
 Here is an example Globus Compute Endpoint configuration file that I used for the NCSA Delta supercomputer:
 
@@ -332,6 +332,7 @@ transfer files to and from the remote HPC system using Globus.
 Follow the instructions here: https://www.globus.org/globus-connect-personal
 
 --or-- For a typical Linux/Unix installation:
+
 .. code-block:: bash
 
     curl -O https://downloads.globus.org/globus-connect-personal/linux/stable/globusconnectpersonal-latest.tgz

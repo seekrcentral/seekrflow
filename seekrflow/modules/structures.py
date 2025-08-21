@@ -559,7 +559,29 @@ class Transfer_settings_globus(Transfer_settings_base):
         default="",
         validator=validators.instance_of(str),
         )
-    
+
+@define
+class Transfer_settings_rsync(Transfer_settings_base):
+    """
+    Rsync transfer settings for transferring files.
+    """
+    type: typing.Literal["rsync"] = "rsync"
+    remote_hostname: str = field(
+        default="",
+        validator=validators.instance_of(str),
+        )
+    remote_username: str | None = field(
+        default=None,
+        validator=validators.optional(validators.instance_of(str)),
+        )
+    remote_password: str | None = field(
+        default=None,
+        validator=validators.optional(validators.instance_of(str)),
+        )
+    port: int = field(
+        default=22,
+        validator=validators.instance_of(int)
+        )
 
 @define
 class Resource_base:
@@ -684,9 +706,9 @@ class Resource_remote_slurm(Resource_remote_base):
         default="",
         validator=validators.instance_of(str),
         )
-    transfer_settings: Transfer_settings_globus = field(
+    transfer_settings: Transfer_settings_rsync | Transfer_settings_globus = field(
         default=Factory(Transfer_settings_globus),
-        validator=validators.instance_of(Transfer_settings_globus),
+        #validator=validators.instance_of(Transfer_settings_globus),
         )
     
 @define
