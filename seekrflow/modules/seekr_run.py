@@ -195,13 +195,22 @@ def transfer_files_with_rsync(
         remote_username: str | None = None, 
         remote_password: str | None = None, 
         port: int | None = 22, 
+        private_key_filename: str | None = None, 
+        private_key_passphrase: str | None = None, 
         backwards: bool = False
         ) -> None:
     import fabric
     import patchwork.transfers
     print(f"Filetree transfer task submitted to {remote_hostname} with rsync")
+    fabric_kwargs = {}
+    if remote_password:
+        fabric_kwargs['password'] = remote_password
+    if private_key_filename:
+        fabric_kwargs['key_filename'] = private_key_filename
+    if private_key_passphrase:
+        fabric_kwargs['passphrase'] = private_key_passphrase
     c = fabric.Connection(host=remote_hostname, user=remote_username, 
-                           port=port)
+                           port=port, connect_kwargs=fabric_kwargs)
     if not local_path.endswith("/"):
         local_path += "/"
     if not remote_path.endswith("/"):
@@ -217,7 +226,7 @@ def transfer_files_with_rsync(
         patchwork.transfers.rsync(c, source=local_path, target=remote_path, rsync_opts="-q")
     
     print("Transfer complete!")
-    exit()
+    return
 
 def slurm_remote_workflow(args):
     import os
@@ -436,9 +445,12 @@ def transfer_files_to_from_remote_resource(
         remote_username = resource.transfer_settings.remote_username
         remote_password = resource.transfer_settings.remote_password
         port = resource.transfer_settings.port
+        private_key_filename = resource.transfer_settings.private_key_filename
+        private_key_passphrase = resource.transfer_settings.private_key_passphrase
         transfer_files_with_rsync(local_directory, remote_path, remote_hostname, remote_username, 
-                                   remote_password, port, backwards=backwards)
-                                    
+                                   remote_password, port, private_key_filename=private_key_filename,
+                                   private_key_passphrase=private_key_passphrase, 
+                                   backwards=backwards)
     else:
         raise NotImplementedError(
             "Only rsync and globus transfers are implemented.")

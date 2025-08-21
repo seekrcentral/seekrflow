@@ -314,9 +314,10 @@ one will likely need to modify in order to complete this tutorial.
     It is also possible to use rsync to transfer files between local and remote machines. In that
     case, one would use the "rsync" type within the "transfer_settings" attribute. The *rsync* type
     has many optional attributes, including "remote_hostname", "remote_username", "remote_password",
-    and "port", which can be used to transfer files to and from the remote machine without using
-    Globus Endpoints. However, Globus can be helpful to avoid password and two-factor authentication
-    on certain HPC systems, which might make using rsync cumbersome.
+    "port", "private_key_filename", and "private_key_passphrase", which can be used to transfer 
+    files to and from the remote machine without using Globus Endpoints. However, Globus can be 
+    helpful to avoid password and two-factor authentication on certain HPC systems, which might 
+    make using rsync cumbersome.
 
 Step 3.3: Run Seekrflow on a Remote HPC System
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

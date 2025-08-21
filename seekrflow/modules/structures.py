@@ -582,6 +582,14 @@ class Transfer_settings_rsync(Transfer_settings_base):
         default=22,
         validator=validators.instance_of(int)
         )
+    private_key_filename: str | None = field(
+        default=None,
+        validator=validators.optional(validators.instance_of(str)),
+        )
+    private_key_passphrase: str | None = field(
+        default=None,
+        validator=validators.optional(validators.instance_of(str)),
+        )
 
 @define
 class Resource_base:
