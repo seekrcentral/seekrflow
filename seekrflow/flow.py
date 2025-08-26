@@ -22,7 +22,8 @@ RUN_SEEKRFLOW_BASE = "seekrflow_pre_run_{}.json"
 
 def flow(
         seekrflow: structures.Seekrflow, 
-        instruction: str
+        instruction: str,
+        no_transfer_before: bool = False,
         ) -> None | typing.Tuple[str, str]:
     """
     Execute the instructed seekrflow stage.
@@ -35,7 +36,7 @@ def flow(
         seekrflow_base = PREPARE_SEEKRFLOW_BASE
         # Run
         print("Running system...")
-        seekr_run.run_model(seekrflow)
+        seekr_run.run_model(seekrflow, no_transfer_before)
         
         return seekrflow_glob, seekrflow_base
         
@@ -48,12 +49,13 @@ def flow(
     elif instruction == "run":
         # Run the system
         print("Running system...")
-        seekr_run.run_model(seekrflow)
+        seekr_run.run_model(seekrflow, no_transfer_before)
         return None, None
         
     else:
         raise ValueError(
-            f"Invalid instruction '{instruction}'. Options are: 'any', 'prepare', 'run'.")
+            f"Invalid instruction '{instruction}'. Options are: 'any', "
+            f"'prepare', 'run'.")
     
 
 def main():
@@ -72,11 +74,17 @@ def main():
         "-w", "--work_directory", dest="work_directory",
         metavar="WORK_DIRECTORY", type=str, default=None,
         help="Path to the work directory for the parametrization.")
+    argparser.add_argument(
+        "-t", "--no_transfer_before", dest="no_transfer_before", action="store_true",
+        help="If set, do not transfer files before launching. This could be useful "
+        "if, say, one is reattaching to a job and does not want to modify the state "
+        "of the computing files.")
     args = argparser.parse_args()
     args = vars(args)
     input_json = pathlib.Path(args["input_json"])
     instruction = args["instruction"]
-    
+    no_transfer_before = args["no_transfer_before"]
+
     assert input_json.exists(), \
         f"Input JSON file {input_json} does not exist."
     seekrflow = structures.load_seekrflow(input_json)
@@ -89,16 +97,18 @@ def main():
     os.chdir(work_dir)
     if len(seekrflow.ligand_indices) == 0:
         if seekrflow.ligand_resname != "":
-            seekrflow.ligand_indices = base.get_ligand_indices(seekrflow.starting_pdb_filename, 
-                                                               seekrflow.ligand_resname)
+            seekrflow.ligand_indices = base.get_ligand_indices(
+                seekrflow.starting_pdb_filename, seekrflow.ligand_resname)
         else:
             seekrflow.ligand_indices = []
     os.chdir(curdir)
-    seekrflow_glob, seekrflow_base = flow(seekrflow, instruction)
+    seekrflow_glob, seekrflow_base = flow(
+        seekrflow, instruction, no_transfer_before)
     if seekrflow_glob is not None and seekrflow_base is not None:
         seekrflow.work_directory = str(work_dir)
-        structures.save_new_seekrflow(seekrflow, seekrflow_glob, seekrflow_base,
-                                    save_old_seekrflow=True, directory=seekrflow.work_directory)
+        structures.save_new_seekrflow(
+            seekrflow, seekrflow_glob, seekrflow_base, save_old_seekrflow=True, 
+            directory=seekrflow.work_directory)
 
 if __name__ == "__main__":
     main()

@@ -239,16 +239,20 @@ class Forcefield_parameters:
             forcefield_basename = os.path.basename(forcefield_filename)
             anchor_forcefield_full_path = os.path.join(dest_directory,
                                                     forcefield_basename)
-            copyfile(os.path.expanduser(forcefield_filename), anchor_forcefield_full_path)
-            new_md_parameters_topology.built_in_forcefield_filenames.append(forcefield_basename)
+            copyfile(os.path.expanduser(forcefield_filename), 
+                     anchor_forcefield_full_path)
+            new_md_parameters_topology.built_in_forcefield_filenames.append(
+                forcefield_basename)
 
         new_md_parameters_topology.custom_forcefield_filenames = []
         for forcefield_filename in self.custom_forcefield_filenames:
             forcefield_basename = os.path.basename(forcefield_filename)
             anchor_forcefield_full_path = os.path.join(dest_directory,
                                                     forcefield_basename)
-            copyfile(os.path.expanduser(forcefield_filename), anchor_forcefield_full_path)
-            new_md_parameters_topology.custom_forcefield_filenames.append(forcefield_basename)
+            copyfile(os.path.expanduser(forcefield_filename), 
+                     anchor_forcefield_full_path)
+            new_md_parameters_topology.custom_forcefield_filenames.append(
+                forcefield_basename)
 
         return
     
@@ -292,7 +296,8 @@ class Openmm_system:
           system_basename = os.path.basename(self.system_filename)
           anchor_system_full_path = os.path.join(dest_directory,
                                               system_basename)
-          copyfile(os.path.expanduser(self.system_filename), anchor_system_full_path)
+          copyfile(os.path.expanduser(self.system_filename), 
+                   anchor_system_full_path)
           new_md_parameters_topology.system_filename = system_basename
           return
     
@@ -318,8 +323,8 @@ class Openmm_system:
         
 
 Parameters_topology = typing.Union[
-    Amber_parameters_topology, Gromacs_parameters_topology, Charmm_parameters_topology, 
-    Forcefield_parameters, Openmm_system]
+    Amber_parameters_topology, Gromacs_parameters_topology, \
+    Charmm_parameters_topology, Forcefield_parameters, Openmm_system]
 # ================== END COMMENT ===================
 
 @define
@@ -539,6 +544,55 @@ class MMVT_seekr_settings:
         ))
 
 @define
+class Remote_interface_base:
+    """
+    Base remote interface settings class.
+    """
+    type: typing.Literal["base"] = "base"
+
+@define
+class Remote_interface_ssh(Remote_interface_base):
+    """
+    SSH remote interface settings class.
+    """
+    type: typing.Literal["ssh"] = "ssh"
+    hostname: str = field(
+        default="",
+        validator=validators.instance_of(str),
+    )
+    username: str | None = field(
+        default=None,
+        validator=validators.optional(validators.instance_of(str)),
+    )
+    password: str | None = field(
+        default=None,
+        validator=validators.optional(validators.instance_of(str)),
+    )
+    port: int = field(
+        default=22,
+        validator=validators.optional(validators.instance_of(int)),
+    )
+    private_key_filename: str = field(
+        default=None,
+        validator=validators.optional(validators.instance_of(str)),
+    )
+    private_key_passphrase: str = field(
+        default=None,
+        validator=validators.optional(validators.instance_of(str)),
+    )
+
+@define
+class Remote_interface_globus_compute_sdk(Remote_interface_base):
+    """
+    Globus Compute SDK remote interface settings class.
+    """
+    type: typing.Literal["globus_compute_sdk"] = "globus_compute_sdk"
+    endpoint_id: str = field(
+        default="",
+        validator=validators.instance_of(str),
+    )
+
+@define
 class Transfer_settings_base:
     """
     Base transfer settings class.
@@ -662,10 +716,6 @@ class Resource_remote_slurm(Resource_remote_base):
         default="",
         validator=validators.instance_of(str),
         )
-    max_workers_per_node: int = field(
-        default=1,
-        validator=validators.instance_of(int),
-        )
     partition: str = field(
         default="",
         validator=validators.instance_of(str),
@@ -690,14 +740,6 @@ class Resource_remote_slurm(Resource_remote_base):
         default=4,
         validator=validators.instance_of(int),
         )
-    init_blocks: int | None = field(
-        default=None,
-        validator=validators.optional(validators.instance_of(int)),
-        )
-    max_blocks: int | None = field(
-        default=None,
-        validator=validators.optional(validators.instance_of(int)),
-        )
     time_limit: str = field(
         default="00:30:00",
         validator=validators.instance_of(str),
@@ -710,10 +752,14 @@ class Resource_remote_slurm(Resource_remote_base):
         default="",
         validator=validators.instance_of(str),
         )
-    globus_compute_endpoint_id: str = field(
-        default="",
-        validator=validators.instance_of(str),
-        )
+    #globus_compute_endpoint_id: str = field(
+    #    default="",
+    #    validator=validators.instance_of(str),
+    #    )
+    remote_interface: Remote_interface_globus_compute_sdk | Remote_interface_ssh = field(
+        default=Factory(Remote_interface_globus_compute_sdk),
+        #validator=validators.instance_of(Remote_interface_base),
+    )
     transfer_settings: Transfer_settings_rsync | Transfer_settings_globus = field(
         default=Factory(Transfer_settings_globus),
         #validator=validators.instance_of(Transfer_settings_globus),
@@ -767,7 +813,15 @@ class Seekrflow:
         default="my_name",
         validator=validators.instance_of(str),
         )
-    structure_version: str = field(default="1.0",
+    # NOTE: structure version 1.0 had a globus_compute_endpoint_id directly
+    #  within the slurm_remote resource object. This was deprecated in 1.1
+    #  in order to support different remote_interfaces, such as SSH, by
+    #  including a remote_interface attribute instead with the settings 
+    #  specific to that remote resource. In addition, some attributes were
+    #  removed from the resource objects since remote workflows no longer
+    #  employ parsl. I did not attempt to implement backwards compatibility
+    #  to structure v1.0 because seekrflow was not yet released.
+    structure_version: str = field(default="1.1",
                                  validator=validators.instance_of(str))
     workflow_type: str = field(
         default="protein_ligand",

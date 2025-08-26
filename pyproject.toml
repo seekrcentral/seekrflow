@@ -30,8 +30,7 @@ dependencies = [
     # "seekr",
     "rdkit",
     "parsl",
-    "fabric",
-    "patchwork",
+    "fabric"
 ]
 
 # Update the urls once the hosting is set up.
