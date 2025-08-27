@@ -221,6 +221,7 @@ to use SSH or Globus Compute SDK in order to control the jobs. They both functio
 very similarly, but here are the pros and cons of each.
 
 .. list-table:: SSH vs Globus Compute SDK Comparison
+   :widths: 20 20 20
    :header-rows: 1
 
    * - Remote System Approach
