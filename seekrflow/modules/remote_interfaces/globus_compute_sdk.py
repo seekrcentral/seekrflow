@@ -79,7 +79,14 @@ def submit_remote_workflow_with_globus_compute(
                     future_status = gcx.submit_to_registered_function(
                         function_id=function_id_status, args=(args,))
                     result = future_status.result()
-                    prettify.prettify_job_info(result, color=True)
+                    if not result:
+                        print("No job information available.")
+                    elif "rows" not in result:
+                        print("No job information available.")
+                        if "std_err" in result:
+                            print(f"STDERR: {result['std_err']}")
+                    else:
+                        prettify.prettify_job_info(result, color=True)
                     print(f"Options: print (i)nformation, (d)etach, or (k)ill with file "
                           f"transfer back or (K)ill without file transfer back: ", end="",
                           flush=True)

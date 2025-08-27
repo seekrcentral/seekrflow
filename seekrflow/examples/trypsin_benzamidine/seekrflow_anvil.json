@@ -87,10 +87,12 @@
                 "cores_per_node": 4,
                 "memory_per_node": 50,
                 "time_limit": "00:30:00",
-                "scheduler_options": "#SBATCH --gres gpu:1 --gpus-per-node=1",
+                "scheduler_options": "--gres gpu:1 --gpus-per-node=1",
                 "worker_init": "module load modtree/gpu; conda activate SEEKR2",
-                "globus_compute_endpoint_id": "YOUR GLOBUS COMPUTE ENDPOINT",
-                "transfer_settings": {
+                "remote_interface": {
+                    "type": "globus_compute_sdk",
+                    "endpoint_id": "YOUR GLOBUS COMPUTE ENDPOINT"
+                },"transfer_settings": {
                     "type": "globus",
                     "local_collection_id": "YOUR LOCAL COLLECTION ID",
                     "remote_collection_id": "c42f0096-2d87-42f9-8e6a-edd08f2e1834"

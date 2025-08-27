@@ -21,7 +21,7 @@ def test_seekrflow_creation_with_defaults():
     """Test that Seekrflow can be created with default values"""
     flow = structures.Seekrflow()
     assert flow.name == "my_name"
-    assert flow.structure_version == "1.0"
+    assert flow.structure_version == "1.1"
     assert flow.workflow_type == "protein_ligand"
     assert flow.work_directory == "work"
     assert flow.basename_output == "complex"

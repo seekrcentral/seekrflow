@@ -491,6 +491,7 @@ def slurm_remote_cancel_workflow(args):
     """
     Cancel a SLURM job remotely from within a Globus compute instance.
     """
+    import os
     import json
     import shlex
     import pathlib
@@ -576,8 +577,9 @@ def slurm_remote_cancel_workflow(args):
 
     work_dir = pathlib.Path(working_dir)
     state_path = get_state_dir(work_dir) / "latest.json"
-    cancel_args = {"state": state_path}
-    cmd_cancel(cancel_args)
+    if os.path.exists(state_path):
+        cancel_args = {"state": state_path}
+        cmd_cancel(cancel_args)
     return
 
 def slurm_remote_status_workflow(args):
@@ -585,6 +587,7 @@ def slurm_remote_status_workflow(args):
     Get the status of a SLURM job remotely from within a Globus compute 
     instance.
     """
+    import os
     import time
     import json
     import pathlib
@@ -691,6 +694,10 @@ def slurm_remote_status_workflow(args):
 
     work_dir = pathlib.Path(working_dir)
     state_path = get_state_dir(work_dir) / "latest.json"
-    status_args = {"state": state_path}
-    result = cmd_status(status_args)
+    if os.path.exists(state_path):
+        status_args = {"state": state_path}
+        result = cmd_status(status_args)
+    else:
+        err = "State file not found."
+        result = {"ok": False, "stderr": err}
     return result

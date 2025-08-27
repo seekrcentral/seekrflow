@@ -232,9 +232,7 @@ def run_model(
     transferred_files = defaultdict(bool)
     local_executors = []
 
-    # DEBUG
-    #anchors_to_run = seekr_anchors_to_run(model)
-    anchors_to_run = list(range(24))
+    anchors_to_run = seekr_anchors_to_run(model)
 
     if (seekrflow.run_settings.bd_stage_resource_name == "local") \
             and (model.using_bd()):

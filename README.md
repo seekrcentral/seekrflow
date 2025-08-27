@@ -194,7 +194,7 @@ For BibTex files of many of the following citations, please visit: https://seekr
 
 If you use seekrflow, please cite the following paper:
 
-* PAPER HERE
+* Anupam A. Ojha, Lane W. Votapka, Shiksha Dutta, Anson F. Noland, Sonya M. Hanson, Rommie E. Amaro, seekrflow: Towards end-to-end automated simulation pipeline with machine-learned force fields for accelerated drug-target kinetic and thermodynamic predictions, bioRxiv 2025.08.13.669965; doi: https://doi.org/10.1101/2025.08.13.669965
 
 One should also cite SEEKR2 and its dependencies:
 

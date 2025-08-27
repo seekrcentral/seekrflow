@@ -216,11 +216,31 @@ To test seekrflow, run the following command in the seekrflow/ directory:
 Installing Dependencies for Remote Execution on HPC Systems
 -----------------------------------------------------------
 
-Install Globus Compute SDK
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+If one want to use seekrflow to run SEEKR on a remote system, one must decide whether
+to use SSH or Globus Compute SDK in order to control the jobs. They both function
+very similarly, but here are the pros and cons of each.
 
-To use remote execution on high-performance computing (HPC) systems, you will need to install 
-the Globus Compute SDK. This allows you to run SEEKR2 jobs on remote resources.
+.. list-table:: Table Title
+   :widths: 20 20
+   :header-rows: 1
+
+   * - Remote System Approach
+     - Pros
+     - Cons
+   * - SSH
+     - Simple, supported on most Linux systems
+     - Requires password or key-based authentication, passwords in plain text, cannot bypass 2-factor authentication
+   * - Globus Compute SDK
+     - Only an endpoint id is needed, avoiding password and 2-factor authentication.
+     - More complicated setup of software and settings
+
+Install Globus Compute SDK (optional - if not using SSH)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+To use remote execution on high-performance computing (HPC) systems with Globus Compute SDK, 
+you will need to install the package. This allows you to run SEEKR2 
+jobs on remote resources while avoiding annoying things like passwords and 2-factor 
+authentication.
 
 .. important::
     The python versions must be the same (or very similar at least) across the local and remote machines.
@@ -268,7 +288,7 @@ Here is an example Globus Compute Endpoint configuration file that I used for th
 
     display_name: null
     engine:
-    max_workers_per_node: 1
+    max_workers_per_node: 2
     provider:
         worker_init: "source $HOME/.bashrc; conda activate SEEKR2; export OPENMM_CUDA_COMPILER=`which nvcc`"
         init_blocks: 1
@@ -278,8 +298,9 @@ Here is an example Globus Compute Endpoint configuration file that I used for th
     type: GlobusComputeEngine
 
 .. note::
-    This configuration applies to the head/login node *before* SLURM/PBS job submission. The "parsl"
-    Python library will be used to actually submit the jobs to the HPC system using SLURM or PBS.
+    This configuration applies to the head/login node *before* SLURM/PBS job submission. 
+    Notice that the **max_workers_per_node** is set to **2** for proper handling of the
+    Globus compute SDK client in seekrflow.
 
 Start the endpoint.
 
@@ -288,7 +309,8 @@ Start the endpoint.
     globus-compute-endpoint start my_seekr_endpoint
 
 You will need to authenticate with Globus on a browser to start the endpoint, and enter the 
-Authorization code given in the browser into the terminal.
+Authorization code given in the browser into the terminal. This authentication session 
+should last for a number of days or weeks, depending on your Globus account settings.
 
 One can see the endpoint, as well as its endpoint ID, and those of any other endpoints, 
 by listing them:
@@ -305,13 +327,6 @@ One can also stop the endpoint if/when desired:
 
     globus-compute-endpoint stop my_seekr_endpoint
 
-Parsl must be installed on the remote system (or install seekrflow on the remote system - 
-which will automatically install parsl):
-
-.. code-block:: bash
-
-    pip install parsl
-
 Before submitting remote jobs, always check the endpoints to make sure they are started
 on the remote machine, and start them if they are not.
 
@@ -323,10 +338,14 @@ on the remote machine, and start them if they are not.
 More information about Globus endpoints and the Globus SDK can be found here: 
 https://globus-compute.readthedocs.io/en/latest/endpoints/endpoints.html
 
-Install Globus Connect Personal
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Install Globus Connect Personal (optional)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Install the latest version of Globus Connect Personal on your local machine. This allows you to
+File transfers may be done with Globus or with rsync. Some resources prefer the use
+of Globus for large file transfers, instead of rsync.
+
+If you want to use Globus to transfer files to and from your remote machine, install 
+the latest version of Globus Connect Personal on your local machine. This allows you to
 transfer files to and from the remote HPC system using Globus.
 
 Follow the instructions here: https://www.globus.org/globus-connect-personal
