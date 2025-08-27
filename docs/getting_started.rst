@@ -221,7 +221,7 @@ to use SSH or Globus Compute SDK in order to control the jobs. They both functio
 very similarly, but here are the pros and cons of each.
 
 .. list-table:: Table Title
-   :widths: 20 20
+   :widths: 25 35 40
    :header-rows: 1
 
    * - Remote System Approach
