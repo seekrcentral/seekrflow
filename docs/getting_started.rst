@@ -220,8 +220,7 @@ If one want to use seekrflow to run SEEKR on a remote system, one must decide wh
 to use SSH or Globus Compute SDK in order to control the jobs. They both function
 very similarly, but here are the pros and cons of each.
 
-.. list-table:: Table Title
-   :widths: 25 35 40
+.. list-table:: SSH vs Globus Compute SDK Comparison
    :header-rows: 1
 
    * - Remote System Approach
