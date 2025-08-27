@@ -27,14 +27,13 @@ dependencies = [
     "cattrs",
     "mdtraj",
     "parmed",
-    # "seekr",
     "rdkit",
     "parsl",
     "fabric"
 ]
 
 # Update the urls once the hosting is set up.
-#[project.urls]
+[project.urls]
 "Source" = "https://github.com/seekrcentral/seekrflow/"
 "Documentation" = "https://seekrflow.readthedocs.io/"
 

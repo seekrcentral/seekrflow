@@ -5,7 +5,7 @@ Provide workflow submission with globus compute SDK.
 """
 
 import sys
-import time
+import ast
 import shlex
 import select
 import typing
@@ -39,42 +39,34 @@ def submit_remote_workflow_with_ssh(
             args_list.append(f"[{','.join(map(str, arg))}]")
         else:
             args_list.append(f"{arg}")
-    
-    arg_str = shlex.quote(",".join(args_list))
-    #arg_str = shlex.quote(",".join(args_list))
+
+    arg_str = "(" + ",".join(args_list) + ")"
     run_workflow_source_code = inspect.getsource(run_workflow)
+    # NOTE: can we always assume that the wanted function is in the first line?
+    #  Answer: yes - but we have to be intentional about coding the other workflows
+    #  that way.
     run_func_name = run_workflow_source_code.split("\n")[0].split("def ")[1].split("(")[0]
     status_workflow_source_code = inspect.getsource(status_workflow)
     status_func_name = status_workflow_source_code.split("\n")[0].split("def ")[1].split("(")[0]
     cancel_workflow_source_code = inspect.getsource(cancel_workflow)
     cancel_func_name = cancel_workflow_source_code.split("\n")[0].split("def ")[1].split("(")[0]
 
-    # TODO: cannot assume it is SLURM - pass the function name as an arg
-    #run_call_raw_str = f"{run_workflow_source_code}\n{run_func_name}({arg_str})"
-    run_call_raw_str \
-        = f"import seekrflow; print(dir(seekrflow)); from seekrflow import modules as seekrflow_modules\n"\
-          f"seekrflow_modules.modules.workload_managers.slurm.slurm_remote_run_workflow\n"\
-          f"{run_func_name}({arg_str})"
+    run_call_raw_str = f"{run_workflow_source_code}{run_func_name}({arg_str})"
     run_call_str = shlex.quote(run_call_raw_str)
     run_cmd = f"python3 -u -c {run_call_str}"
 
-    status_call_raw_str \
-        = f"from seekrflow import modules as seekrflow_modules\n"\
-          f"seekrflow_modules.modules.workload_managers.slurm.slurm_remote_status_workflow\n"\
-          f"{status_func_name}({arg_str})"
+    status_call_raw_str = f"{status_workflow_source_code}print({status_func_name}({arg_str}))"
     status_call_str = shlex.quote(status_call_raw_str)
     status_cmd = f"python3 -u -c {status_call_str}"
 
-    cancel_call_raw_str \
-        = f"from seekrflow import modules as seekrflow_modules\n"\
-          f"seekrflow_modules.modules.workload_managers.slurm.slurm_remote_cancel_workflow\n"\
-          f"{cancel_func_name}({arg_str})"
+    cancel_call_raw_str = f"{cancel_workflow_source_code}{cancel_func_name}({arg_str})"
     cancel_call_str = shlex.quote(cancel_call_raw_str)
     cancel_cmd = f"python3 -u -c {cancel_call_str}"
+    
     # Buffers where Fabric’s I/O threads will write output in real-time
     out_buf_run, err_buf_run = StringIO(), StringIO()
     out_buf_status, err_buf_status = StringIO(), StringIO()
-    out_buf_cancel, err_buf_cancel = StringIO(), StringIO()
+    
     # Run in async mode; don't allocate a PTY so stdout/stderr stay distinct
     promise_run = c.run(
         run_cmd,
@@ -93,7 +85,6 @@ def submit_remote_workflow_with_ssh(
             "should continue to run until: completion, the time limit is "
             "exceeded, or an error is encountered. In such a case, re-running "
             "seekrflow 'run' will re-establish contact with SLURM and reattach.")
-    keep_running = True
     killing_job = False
     file_transfer_back = True
     print(f"Options: print (i)nformation, (d)etach, or (k)ill with file "
@@ -101,17 +92,6 @@ def submit_remote_workflow_with_ssh(
             flush=True)
     try:
         while not promise_run.runner.process_is_finished:  # poll the remote process
-            so = out_buf_run.getvalue()
-            if len(so) > seen_out:
-                print(so[seen_out:], end="")
-                seen_out = len(so)
-
-            se = err_buf_run.getvalue()
-            if len(se) > seen_err:
-                print(se[seen_err:], end="", file=sys.stderr)
-                seen_err = len(se)
-
-
             rlist, _, _ = select.select([sys.stdin], [], [], INTERVAL)
             if rlist:
                 user_input = sys.stdin.readline().strip()
@@ -119,11 +99,20 @@ def submit_remote_workflow_with_ssh(
                     
                     result_status = c.run(
                         status_cmd,
-                        asynchronous=False,     # returns immediately with a Promise
+                        asynchronous=False,
+                        pty=False,
+                        out_stream=out_buf_status,
+                        err_stream=err_buf_status,
                     )
-                    print("result_status:", result_status.stdout)
+                    stdout_str = out_buf_status.getvalue()
+                    #print("result_status:", result_status.stdout)
+                    try:
+                        val = ast.literal_eval(stdout_str)
+                        if isinstance(val, dict):
+                            prettify.prettify_job_info(val, color=True)
+                    except Exception as e:
+                        print(f"Error: {e}")
 
-                    #prettify.prettify_job_info(result_status, color=True)
                     print(f"Options: print (i)nformation, (d)etach, or (k)ill with file "
                           f"transfer back or (K)ill without file transfer back: ", end="",
                           flush=True)
@@ -133,7 +122,6 @@ def submit_remote_workflow_with_ssh(
                         touch_cmd.format(path=stop_flag),
                         asynchronous=False,     # returns immediately with a Promise
                     )
-                    keep_running = False
                     file_transfer_back = False
 
                 elif user_input == "k":
@@ -146,14 +134,11 @@ def submit_remote_workflow_with_ssh(
                     file_transfer_back = False
 
                 if killing_job:
-                    
                     result_status = c.run(
-                        status_cmd,
+                        cancel_cmd,
                         asynchronous=False,     # returns immediately with a Promise
                     )
                     
-                    keep_running = False
-
         # Process finished — grab the final Result (exit code, full buffers, etc.)
         so = out_buf_run.getvalue()
         if len(so) > seen_out:
@@ -164,75 +149,12 @@ def submit_remote_workflow_with_ssh(
         if len(se) > seen_err:
             print(se[seen_err:], end="", file=sys.stderr)
             seen_err = len(se)
-        result = promise_run.join()
+        promise_run.join()
         c.close()
-        return result
+        return file_transfer_back
 
     finally:
         # Best-effort cleanup if the loop exits unexpectedly
         if not promise_run.runner.process_is_finished:
             promise_run.runner.stop()
         c.close()
-
-    with Executor(endpoint) as gcx:
-        gcx.serializer = ComputeSerializer(strategy_code=CombinedCode())
-        function_id = gcx.register_function(run_workflow, description="run")
-        future = gcx.submit_to_registered_function(function_id=function_id, 
-                                                   args=(args,))
-        function_id_status = gcx.register_function(status_workflow, 
-                                                   description="status")
-        function_id_scancel = gcx.register_function(cancel_workflow, 
-                                                    description="cancelling")
-        print("Jobs queued...")
-        print(f"If seekrflow is killed or loses connection, SLURM job(s) "
-              "should continue to run until: completion, the time limit is "
-              "exceeded, or an error is encountered. In such a case, re-running "
-              "seekrflow 'run' will re-establish contact with SLURM and reattach.")
-        
-        keep_running = True
-        killing_job = False
-        file_transfer_back = True
-        print(f"Options: print (i)nformation, (d)etach, or (k)ill with file "
-              "transfer back or (K)ill without file transfer back: ", end="", 
-              flush=True)
-        while keep_running:
-            rlist, _, _ = select.select([sys.stdin], [], [], INTERVAL)
-            if rlist:
-                user_input = sys.stdin.readline().strip()
-                if user_input == "i":
-                    
-                    future_status = gcx.submit_to_registered_function(
-                        function_id=function_id_status, args=(args,))
-                    result = future_status.result()
-                    prettify.prettify_job_info(result, color=True)
-                    print(f"Options: print (i)nformation, (d)etach, or (k)ill with file "
-                          f"transfer back or (K)ill without file transfer back: ", end="",
-                          flush=True)
-                elif user_input == "d":
-                    print(f"Detaching job...")
-                    gcx.submit(touch, path=stop_flag)
-                    keep_running = False
-                    file_transfer_back = False
-
-                elif user_input == "k":
-                    print(f"Killing job with file transfer...")
-                    killing_job = True
-
-                elif user_input == "K":
-                    print(f"Killing job without file transfer...")
-                    killing_job = True
-                    file_transfer_back = False
-
-                if killing_job:
-                    
-                    future_scancel = gcx.submit_to_registered_function(
-                        function_id=function_id_scancel, args=(args,))
-                    future_scancel.result()
-                    keep_running = False
-
-                if future.done():
-                    print("Task is DONE.")
-                    keep_running = False
-
-    future.result()
-    return file_transfer_back

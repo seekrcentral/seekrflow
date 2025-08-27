@@ -392,8 +392,6 @@ def slurm_remote_run_workflow(args):
             latest.symlink_to(state_path.name)
         except Exception:
             (state_dir / "latest.json").write_text(json.dumps(asdict(st), indent=2))
-        print(json.dumps({"jobid": jobid, "state_file": str(state_path), 
-                          "array_spec": array_spec}, indent=2))
         
     def cmd_status(args):
         st = RunState.load(pathlib.Path(args["state"]))
@@ -418,7 +416,6 @@ def slurm_remote_run_workflow(args):
         kill_jobs = False
         interval = float(args.get("interval", DEFAULT_INTERVAL))
         st = RunState.load(pathlib.Path(args["state"]))
-        print(f"Attached to job {st.jobid}.")
         while True:
             states = get_array_states(st.jobid, st.n_tasks)
             n_done = sum(1 for s in states.values() if s in SLURM_DONE \
@@ -426,8 +423,8 @@ def slurm_remote_run_workflow(args):
             n_fail = sum(1 for s in states.values() if s in SLURM_FAILISH)
             n_act = sum(1 for s in states.values() if s not in SLURM_DONE)
             if n_done == st.n_tasks or (n_act == 0 and n_done + n_fail == st.n_tasks):
-                print(f"[{time.strftime('%H:%M:%S')}] Done: {n_done}, "
-                      f"Failed: {n_fail}, Active: {n_act}", flush=True)
+                #print(f"[{time.strftime('%H:%M:%S')}] Done: {n_done}, "
+                #      f"Failed: {n_fail}, Active: {n_act}", flush=True)
                 break
                 
             for key, value in states.items():
@@ -451,7 +448,6 @@ def slurm_remote_run_workflow(args):
         # NOTE: Keep! There might be a reason to kill jobs from within the workflow someday
         st = RunState.load(pathlib.Path(args["state"]))
         out = run(["bash", "-lc", f"scancel {shlex.quote(st.jobid)}"], check=False)
-        print(f"scancel issued for job {st.jobid}")
 
     """
     # TODO: to be implemented in version 3.0
@@ -577,7 +573,6 @@ def slurm_remote_cancel_workflow(args):
         st = RunState.load(pathlib.Path(args["state"]))
         out = run(["bash", "-lc", f"scancel {shlex.quote(st.jobid)}"], 
                   check=True)
-        print(f"scancel issued for job {st.jobid}")
 
     work_dir = pathlib.Path(working_dir)
     state_path = get_state_dir(work_dir) / "latest.json"
