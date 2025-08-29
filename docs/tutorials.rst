@@ -213,10 +213,10 @@ in :doc:`getting_started`.
 
 Step 3.2: Prepare the Configuration JSON Files
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-A couple of example configuration files are provided in the directory, named ```seekrflow_delta.json``` 
-and ``seekrflow_anvil.json``. If one opens these files, one will see a large section filled out
-titled *run_settings*. This section contains *Parsl* and *Globus* settings, which are used to
-transfer files to and from the remote system, as well as to submit jobs to the remote system. One 
+An example configuration file is provided in the directory, named ```seekrflow_remote.json``` . 
+If one opens this file, one will see a large section filled out
+titled *run_settings*. This section contains settings, which are used to
+transfer files to and from the remote system, as well as to submit jobs to the remote system, either 'delta' or 'anvil'. One 
 will need to configure these settings to their own system - they will be different for everyone, and
 it's impossible for me to anticipate the changes you will make, so you will need to be proactive and
 resourceful in order to get this tutorial completed. Yet, if you can complete this tutorial, you
@@ -284,10 +284,14 @@ one will likely need to modify in order to complete this tutorial.
   should consult the HPC documentation, and probably experiment with debug/test job submissions in order
   to find the correct settings for their system.
 
-- "globus_compute_endpoint_id": This is the Globus Compute endpoint ID that will be used to submit jobs 
-  to the remote system. This should be set to the endpoint ID that you created for your remote system. 
-  You can find this ID by running ```globus-compute-endpoint list``` in the terminal of the remote HCP
-  resource.
+- "remote_interface":
+  
+  - "type": This should be set to "globus_compute_sdk" to use Globus Compute for remote job handling. 
+    At present, only Globus Compute and SSH remote job handling are supported.
+  - "endpoint_id": This is the Globus Compute endpoint ID that will be used to submit jobs 
+    to the remote system. This should be set to the endpoint ID that you created for your remote system. 
+    You can find this ID by running ```globus-compute-endpoint list``` in the terminal of the remote HCP
+    resource.
 
 - "transfer_settings":
   
@@ -313,11 +317,25 @@ one will likely need to modify in order to complete this tutorial.
 
     It is also possible to use rsync to transfer files between local and remote machines. In that
     case, one would use the "rsync" type within the "transfer_settings" attribute. The *rsync* type
-    has many optional attributes, including "remote_hostname", "remote_username", "remote_password",
+    has many optional attributes, including "hostname", "username", "password",
     "port", "private_key_filename", and "private_key_passphrase", which can be used to transfer 
     files to and from the remote machine without using Globus Endpoints. However, Globus can be 
     helpful to avoid password and two-factor authentication on certain HPC systems, which might 
-    make using rsync cumbersome.
+    make using rsync cumbersome. However, if one has set up one's ~/.ssh/config file automatically
+    with usernames, passwords, and/or private keys, then only the "hostname" alias will be needed
+    within the "transfer_settings" attribute.
+    
+.. note::
+
+    Similarly to rsync, it is possible to use SSH to control your remote job, instead of Globus Compute.
+    In that case, one would use the "ssh" type within the "remote_interface" attribute. The *ssh* type,
+    like rsync, has many optional attributes, including "hostname", "username", "password",
+    "port", "private_key_filename", and "private_key_passphrase", which can be used to control one's
+    remote job without using Globus Compute SDK. However, Globus Compute SDK can be 
+    helpful to avoid password and two-factor authentication on certain HPC systems, which might 
+    make using SSH cumbersome. However, if one has set up one's ~/.ssh/config file automatically
+    with usernames, passwords, and/or private keys, then only the "hostname" alias will be needed
+    within the "transfer_settings" attribute.
 
 Step 3.3: Run Seekrflow on a Remote HPC System
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

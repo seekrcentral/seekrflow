@@ -76,6 +76,32 @@
         "resources": [
             {
                 "type": "slurm_remote",
+                "name": "delta",
+                "remote_seekr2_directory": "$HOME/seekr2/seekr2/",
+                "remote_seekrtools_directory": "$HOME/seekrtools/seekrtools/",
+                "remote_working_directory": "/scratch/kif/$USER/seekrflow_playground/",
+                "max_workers_per_node": 1,
+                "partition": "gpuA100x4,gpuA40x4",
+                "account": "YOUR ACCOUNT NAME",
+                "constraint": "scratch",
+                "nodes_per_block": 1,
+                "cores_per_node": 32,
+                "memory_per_node": 64000,
+                "time_limit": "00:30:00",
+                "scheduler_options": "--gpus-per-node=1 --gpu-bind=closest",
+                "worker_init": "source $HOME/.bashrc; conda activate SEEKR2; export OPENMM_CUDA_COMPILER=`which nvcc`",
+                "remote_interface": {
+                    "type": "globus_compute_sdk",
+                    "endpoint_id": "YOUR GLOBUS COMPUTE ENDPOINT"
+                },
+                "transfer_settings": {
+                    "type": "globus",
+                    "local_collection_id": "YOUR LOCAL COLLECTION ID",
+                    "remote_collection_id": "7e936164-de58-4e3d-85da-21aa23c07169"
+                }
+            },
+            {
+                "type": "slurm_remote",
                 "name": "anvil",
                 "remote_seekr2_directory": "$HOME/seekr2/seekr2/",
                 "remote_seekrtools_directory": "$HOME/seekrtools/seekrtools/",
@@ -85,7 +111,7 @@
                 "account": "YOUR ACCOUNT NAME",
                 "nodes_per_block": 1,
                 "cores_per_node": 4,
-                "memory_per_node": 50,
+                "memory_per_node": 64000,
                 "time_limit": "00:30:00",
                 "scheduler_options": "--gres gpu:1 --gpus-per-node=1",
                 "worker_init": "module load modtree/gpu; conda activate SEEKR2",
@@ -97,11 +123,36 @@
                     "local_collection_id": "YOUR LOCAL COLLECTION ID",
                     "remote_collection_id": "c42f0096-2d87-42f9-8e6a-edd08f2e1834"
                 }
+            },
+            {
+                "type": "slurm_remote",
+                "name": "delta_ssh_and_rsync",
+                "remote_seekr2_directory": "$HOME/seekr2/seekr2/",
+                "remote_seekrtools_directory": "$HOME/seekrtools/seekrtools/",
+                "remote_working_directory": "/scratch/kif/$USER/seekrflow_playground/",
+                "max_workers_per_node": 1,
+                "partition": "gpuA100x4,gpuA40x4",
+                "account": "YOUR ACCOUNT NAME",
+                "constraint": "scratch",
+                "nodes_per_block": 1,
+                "cores_per_node": 32,
+                "memory_per_node": 64000,
+                "time_limit": "00:30:00",
+                "scheduler_options": "--gpus-per-node=1 --gpu-bind=closest",
+                "worker_init": "source $HOME/.bashrc; conda activate SEEKR2; export OPENMM_CUDA_COMPILER=`which nvcc`",
+                "remote_interface": {
+                    "type": "ssh",
+                    "hostname": "login.delta.ncsa.illinois.edu"
+                },
+                "transfer_settings": {
+                    "type": "rsync",
+                    "hostname": "login.delta.ncsa.illinois.edu"
+                }
             }
         ],
         "bd_stage_resource_name": "local",
         "hidr_stage_resource_name": "anvil",
-        "seekr_stage_resource_name": "anvil",
+        "seekr_stage_resource_name": "delta",
         "allow_parsl_usage_tracking": false
     }
 }

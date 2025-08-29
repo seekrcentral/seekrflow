@@ -620,15 +620,15 @@ class Transfer_settings_rsync(Transfer_settings_base):
     Rsync transfer settings for transferring files.
     """
     type: typing.Literal["rsync"] = "rsync"
-    remote_hostname: str = field(
+    hostname: str = field(
         default="",
         validator=validators.instance_of(str),
         )
-    remote_username: str | None = field(
+    username: str | None = field(
         default=None,
         validator=validators.optional(validators.instance_of(str)),
         )
-    remote_password: str | None = field(
+    password: str | None = field(
         default=None,
         validator=validators.optional(validators.instance_of(str)),
         )
