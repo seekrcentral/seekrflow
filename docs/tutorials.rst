@@ -17,13 +17,21 @@ Prerequisites
 ~~~~~~~~~~~~~
 
 - seekrflow installed and working (see :doc:`getting_started`) along with all required, recommended, and optional dependencies, including:
+
   - SEEKR2
+  
   - SeekrTools
+  
   - Browndye2
+  
   - OpenEye Toolkits
+  
   - PDBFixer
+  
   - PDB2PQR
+  
   - openmmforcefields
+  
 - Basic understanding of molecular dynamics simulations and SEEKR (https://github.com/seekrcentral/seekr2)
 
 Step 1.1: Prepare Your System

@@ -55,7 +55,7 @@ def alpha_carbon_selection_within_cutoff(
         if len(ca_selection_list) == 0:
             # then just continue this loop, no CA found for this residue
             continue
-        ca_index = ca_selection_list[0]
+        ca_index = int(ca_selection_list[0])
         alpha_carbon_indices.append(ca_index)
 
     if len(alpha_carbon_indices) == 0 and receptor_selection != "protein":
@@ -64,7 +64,7 @@ def alpha_carbon_selection_within_cutoff(
             ca_selection_str = "not element H and resid {}".format(resid)
             ca_selection_list = list(traj.topology.select(ca_selection_str))
             if len(ca_selection_list) > 0:
-                alpha_carbon_indices += ca_selection_list
+                alpha_carbon_indices += [int(i) for i in ca_selection_list]
     
     alpha_carbon_indices.sort()
     return alpha_carbon_indices

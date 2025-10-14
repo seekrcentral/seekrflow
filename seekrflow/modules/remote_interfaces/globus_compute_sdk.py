@@ -27,6 +27,8 @@ def submit_remote_workflow_with_globus_compute(
     idle = d.get("idle_workers")
     total = d.get("total_workers")
     pending = d.get("pending_tasks") or d.get("outstanding_tasks")
+    # DEBUG
+    print("status:", status)
 
     if s == "online":
         if total is not None and idle == 0:
@@ -66,6 +68,7 @@ def submit_remote_workflow_with_globus_compute(
         
         keep_running = True
         killing_job = False
+        on_retry = 0
         file_transfer_back = True
         print(f"Options: print (i)nformation, (d)etach, or (k)ill with file "
               "transfer back or (K)ill without file transfer back: ", end="", 
@@ -104,6 +107,12 @@ def submit_remote_workflow_with_globus_compute(
                     print(f"Killing job without file transfer...")
                     killing_job = True
                     file_transfer_back = False
+                    
+                else:
+                    print(f"Command not recognized: {user_input}.")
+                    print(f"Options: print (i)nformation, (d)etach, or (k)ill with file "
+                          f"transfer back or (K)ill without file transfer back: ", end="",
+                          flush=True)
 
                 if killing_job:
                     
@@ -115,6 +124,15 @@ def submit_remote_workflow_with_globus_compute(
                 if future.done():
                     print("Task is DONE.")
                     keep_running = False
+                    
+            status = c.get_endpoint_status(endpoint)
+            s = (status.get("status") or "unknown").lower()
+            if s == "online":
+                on_retry = 0
+            else:
+                on_retry += 1
+                print("status:", s, "on_retry:", on_retry)
+                
 
     future.result()
     return file_transfer_back

@@ -675,7 +675,11 @@ def slurm_remote_status_workflow(args):
         limit = None
         # id, part, name, user, state, elapsed, timelimit, nodes, cpus, reason
         fmt = "%i|%P|%j|%u|%T|%M|%l|%D|%C|%R"
-        rc, out, err = run(base)
+        try:
+            rc, out, err = run(base)
+        except RuntimeError:
+            return {"ok": False, "stderr": "RuntimeError", "rc": 1, "cmd": " ".join(
+                base + ["-h","-o",fmt])}
         if rc != 0:
             return {"ok": False, "stderr": err, "rc": rc, "cmd": " ".join(
                 base + ["-h","-o",fmt])}
