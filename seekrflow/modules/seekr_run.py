@@ -206,7 +206,9 @@ def assign_remote_workflow(
             
 def run_model(
         seekrflow: structures.Seekrflow,
-        no_transfer_before: bool = False
+        transfer_before: bool = False,
+        transfer_from_host_only: bool = False,
+        force_overwrite: bool = False,
         ) -> None:
     """
     Run the SEEKR calculation using parsl.
@@ -218,9 +220,7 @@ def run_model(
     # Load the model
     model_filename = os.path.join(source_directory, "model.xml")
     model = seekr2_base.load_model(model_filename)
-    # TODO: implement a argument entry for this.
-    force_overwrite = False
-
+    
     if seekrflow.bd_settings is not None:
         bd_n_threads = seekrflow.bd_settings.num_threads
     

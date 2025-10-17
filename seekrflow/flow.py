@@ -23,7 +23,8 @@ RUN_SEEKRFLOW_BASE = "seekrflow_pre_run_{}.json"
 def flow(
         seekrflow: structures.Seekrflow, 
         instruction: str,
-        no_transfer_before: bool = False,
+        transfer_before: bool = False,
+        transfer_from_host_only: bool = False,
         ) -> None | typing.Tuple[str, str]:
     """
     Execute the instructed seekrflow stage.
@@ -36,8 +37,8 @@ def flow(
         seekrflow_base = PREPARE_SEEKRFLOW_BASE
         # Run
         print("Running system...")
-        seekr_run.run_model(seekrflow, no_transfer_before)
-        
+        seekr_run.run_model(seekrflow, transfer_before, transfer_from_host_only)
+
         return seekrflow_glob, seekrflow_base
         
     elif instruction == "prepare":
@@ -49,7 +50,7 @@ def flow(
     elif instruction == "run":
         # Run the system
         print("Running system...")
-        seekr_run.run_model(seekrflow, no_transfer_before)
+        seekr_run.run_model(seekrflow, transfer_before, transfer_from_host_only)
         return None, None
         
     else:
@@ -60,7 +61,7 @@ def flow(
 
 def main():
     argparser = argparse.ArgumentParser(
-        description="Automates the preparation and running of SEEKR calculations"
+        description="Automates the preparation and running of seekr calculations"
         "for particular purposes, such as a ligand-receptor calculation.")
     argparser.add_argument(
         "input_json", metavar="INPUT_JSON", type=str, 
@@ -75,15 +76,25 @@ def main():
         metavar="WORK_DIRECTORY", type=str, default=None,
         help="Path to the work directory for the parametrization.")
     argparser.add_argument(
-        "-t", "--no_transfer_before", dest="no_transfer_before", action="store_true",
-        help="If set, do not transfer files before launching. This could be useful "
-        "if, say, one is reattaching to a job and does not want to modify the state "
-        "of the computing files.")
+        "-t", "--transfer_before", dest="transfer_before", action="store_true",
+        help="If set, transfer files to remote host. This is done automatically "\
+            "if the model.xml file does not already exist on the remote host. "\
+            "However, if you have already transferred files and want to "\
+            "re-transfer them, use this flag.")
+    argparser.add_argument(
+        "-T", "--transfer_from_host_only", dest="transfer_from_host_only", 
+        action="store_true", help="If set, transfer files from the remote host "\
+            "without doing any preparation or running.")
+    argparser.add_argument(
+        "-f", "--force_overwrite", dest="force_overwrite", action="store_true",
+        help="If set, activate force overwrite for all seekr runs.")
+
     args = argparser.parse_args()
     args = vars(args)
     input_json = pathlib.Path(args["input_json"])
     instruction = args["instruction"]
-    no_transfer_before = args["no_transfer_before"]
+    transfer_before = args["transfer_before"]
+    transfer_from_host_only = args["transfer_from_host_only"]
 
     assert input_json.exists(), \
         f"Input JSON file {input_json} does not exist."
@@ -103,7 +114,7 @@ def main():
             seekrflow.ligand_indices = []
     os.chdir(curdir)
     seekrflow_glob, seekrflow_base = flow(
-        seekrflow, instruction, no_transfer_before)
+        seekrflow, instruction, transfer_before, transfer_from_host_only)
     if seekrflow_glob is not None and seekrflow_base is not None:
         seekrflow.work_directory = str(work_dir)
         structures.save_new_seekrflow(
