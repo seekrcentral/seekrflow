@@ -60,8 +60,8 @@ there are several key settings that one would define based on their preferences,
 as the *name* of the project, the type of *workflow* being employed, as well as physical
 parameters or simulation settings, like *temperature*, *nonbonded cutoff*, etc.
 
-In this tutorial, we will be using seekrflow to parametrize a system for which only the
-structure is known. Therefore, the *parametrizer* section of the configuration file
+In this tutorial, we will be using seekrflow to parameterize a system for which only the
+structure is known. Therefore, the *parameterizer* section of the configuration file
 has been filled out. We also have some settings for outside programs like *pdb2pqr*
 and *PDBFixer* which are used for configuration.
 
@@ -69,26 +69,26 @@ Also, take a look at the ``protein_ligand.pdb`` file. This file contains the ini
 of the protein and ligand. One may view it in your favorite standard molecular viewer such as
 VMD, PyMOL, Chimera, Maestro, or NGLView.
 
-Step 1.3: Run the Parametrization
+Step 1.3: Run the Parameterization
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Enter the example trypsin-benzamidine directory and execute the parametrization workflow
+Enter the example trypsin-benzamidine directory and execute the parameterization workflow
 
 .. code-block:: bash
 
     cd seekrflow/seekrflow/examples/trypsin_benzamidine
     mamba activate SEEKRFLOW_PARAM
-    python ~/seekrflow/seekrflow/parametrize.py protein_ligand.pdb --input_json seekrflow.json
+    python ~/seekrflow/seekrflow/parameterize.py protein_ligand.pdb --input_json seekrflow.json
 
 Within a few minutes, a directory named "work" will be created, which will contain a directory
-"parametrize", along with some other files. Within this directory, the forcefield parameters
+"parameterize", along with some other files. Within this directory, the forcefield parameters
 specified within the configuration JSON file will be used to generate a system for MD simulations,
 as well as creating PQR files for the ligand and protein for a BD simulation. Using these defaults,
-the protein will be parametrized with AMBER FF14SB, the ligand with AMBER GAFF2.11, and the 
+the protein will be parameterized with AMBER FF14SB, the ligand with AMBER GAFF2.11, and the 
 system will be solvated with waters and ions from TIP3P.
 
-Once the parametrization is complete, one ought to check the system carefully to ensure that
-parameters were assigned correctly. The parametrization script will automatically perform
+Once the parameterization is complete, one ought to check the system carefully to ensure that
+parameters were assigned correctly. The parameterization script will automatically perform
 minimization and a short equilibration to check for system stability. However, one should also
 load their solvated structure into a molecular viewer to ensure that the charges are assigned
 reasonably, and that the solvent doesn't contain any artifacts, for instance. One should ideally
@@ -97,21 +97,21 @@ the system is ready for production runs.
 
 .. caution::
 
-    This parametrization feature in seekrflow is convenient, but relies on experimental tools
+    This parameterization feature in seekrflow is convenient, but relies on experimental tools
     such as OpenFF, and could potentially introduce incorrect parameters (hence why it is
     placed in a separate script from the main workflow). Ideally, one should
-    carefully produce their own parametrized system by hand, using tools such as AMBER's LEAP,
+    carefully produce their own parameterized system by hand, using tools such as AMBER's LEAP,
     CharmmGUI, or OpenFF's tools step-by-step. However, if you're feeling adventurous, the
-    seekrflow automated parametrization feature is here for your convenience.
+    seekrflow automated parameterization feature is here for your convenience.
 
 An additional file has also been created inside work/ - a new copy of the ``seekrflow.json`` file
-with the parametrization settings filled in. This file is used to run the SEEKR calculation, and 
+with the parameterization settings filled in. This file is used to run the SEEKR calculation, and
 should be used from now on - not the original ``seekrflow.json`` file outside of the work/ directory.
 
 Step 1.4: Run the SEEKR stages
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Once the parametrization is complete, you can proceed to run the rest of the workflow
+Once the parameterization is complete, you can proceed to run the rest of the workflow
 and prepare and run the SEEKR calculation:
 
 .. code-block:: bash
@@ -142,10 +142,10 @@ you should see a (very coarse) approximation of the k-off and k-on of trypsin-be
     choose all settings and validate the correctness and optimality of all settings, force 
     field parameters, and starting structures.
 
-Tutorial 2: Parametrizing the System with Espaloma
+Tutorial 2: Parameterizing the System with Espaloma
 --------------------------------------------------
 
-This tutorial shows how one would parametrize a system using the Espaloma force field.
+This tutorial shows how one would parameterize a system using the Espaloma force field.
 
 Prerequisites
 ~~~~~~~~~~~~~
@@ -171,9 +171,9 @@ are chosen based on either the AM1-BCC method, or a neural network trained to re
 AM1-BCC charges. This approach will entirely replace parameters for both the ligand as well
 as the protein, although TIP3P will continue to be used for the solvent.
 
-Step 2.2: Parametrizing with Espaloma and Seekrflow
+Step 2.2: Parameterizing with Espaloma and Seekrflow
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-The only change will be to the arguments to the parametrize.py script, (although these changes
+The only change will be to the arguments to the parameterize.py script, (although these changes
 could also be made at the level of the ```seekrflow.json``` configuration file). We must
 point to the location of the espaloma force field file, and also, specify a new working directory.
 
@@ -181,7 +181,7 @@ point to the location of the espaloma force field file, and also, specify a new 
 
     cd seekrflow/seekrflow/examples/trypsin_benzamidine
     mamba activate SEEKRFLOW_PARAM
-    python ~/seekrflow/seekrflow/parametrize.py protein_ligand.pdb --input_json seekrflow.json --external_ff_file /path/to/espaloma-0.3.2.pt --work_directory work_espaloma
+    python ~/seekrflow/seekrflow/parameterize.py protein_ligand.pdb --input_json seekrflow.json --external_ff_file /path/to/espaloma-0.3.2.pt --work_directory work_espaloma
 
 For more information about espaloma, see the Github repository at https://github.com/choderalab/espaloma.
 
@@ -372,9 +372,9 @@ This tutorial shows how to run a calculation when the force field parameters alr
 exist for a molecular system - in this case, a host-guest system.
 
 This host-guest system (where the host is beta-cyclodextrin (BCD) and the guest is one of a
-collection of small molecules like 1-butanol), has been parametrized much more optimally than with a
+collection of small molecules like 1-butanol), has been parameterized much more optimally than with a
 generic small-molecular force field like AMBER GAFF. We want to use these existing
-parameters, not anything we would make with parametrize.py in seekrflow.
+parameters, not anything we would make with parameterize.py in seekrflow.
 
 Prerequisites
 ~~~~~~~~~~~~~
@@ -402,7 +402,7 @@ within a AMBER-formatted ``.parm7`` file, as well as PQR files to use for BD. Th
 defined within the ``seekrflow_1_butanol.json`` file, and one can open this file to see how they 
 are featured.
 
-Next, run the parametrization workflow:
+Next, run the parameterization workflow:
 
 .. code-block:: bash
 
@@ -410,7 +410,7 @@ Next, run the parametrization workflow:
     python ~/seekrflow/seekrflow/flow.py work_butanol/seekrflow.json run
     python ~/seekr2/seekr2/analyze.py work_butanol/root/model.xml
 
-This tutorial gave an example for how to run SEEKR with a system that has already been parametrized.
+This tutorial gave an example for how to run SEEKR with a system that has already been parameterized.
 
 
 Tutorial 5: Host-Guest System: Set up a Batch Job with the seekrflow API  

@@ -13,9 +13,9 @@ Automate seekr handling with seekrflow to decrease time and manual intervention 
 
 The seekr (simulation-enabled estimation of kinetic rates) program facilitates the preparation, running, and
 analysis of molecular kinetics calculations using a multiscale molecular dynamics (MD) / Brownian dynamics (BD) 
-simulation framework along with a combination of enhanced sampling methods such as milestoning, steered molecular dynamics (SMD) and metadynamics (MetaD). Nevertheless, running a seekr calculation can be difficult, time-consuming, and error-prone. Parametrization of a system for MD requires time and expertise. Preparing the input files for a seekr calculation is similarly tedious and time-consuming. Running a SEEKR calculation often requires transferring files to a high-performance-computing (HPC) resource, and then writing and submitting several SLURM or PBS scripts per system in order to efficiently conduct the calculations. In addition, all the previously mentioned steps can become exponentially difficult and time-consuming if several systems or batches of seekr jobs must be run.
+simulation framework along with a combination of enhanced sampling methods such as milestoning, steered molecular dynamics (SMD) and metadynamics (MetaD). Nevertheless, running a seekr calculation can be difficult, time-consuming, and error-prone. Parameterization of a system for MD requires time and expertise. Preparing the input files for a seekr calculation is similarly tedious and time-consuming. Running a SEEKR calculation often requires transferring files to a high-performance-computing (HPC) resource, and then writing and submitting several SLURM or PBS scripts per system in order to efficiently conduct the calculations. In addition, all the previously mentioned steps can become exponentially difficult and time-consuming if several systems or batches of seekr jobs must be run.
 
-The seekrflow program aims to remedy the difficulty of using seekr by establishing commonly-used workflows that facilitate the preparation of a seekr calculation. Parametrization (careful!), preparation, and running of seekr calculations are all automated in seekrflow.
+The seekrflow program aims to remedy the difficulty of using seekr by establishing commonly-used workflows that facilitate the preparation of a seekr calculation. Parameterization (careful!), preparation, and running of seekr calculations are all automated in seekrflow.
 
 This README is only a quickstart guide to get seekrflow up and running as soon as possible on a local computer. To see more detailed **instructions** and **tutorials**, including how to get seekrflow up and running on a remote HPC machine, please see https://seekrflow.readthedocs.io/en/latest or the docs/ subfolder.
 
@@ -35,7 +35,7 @@ Once this has been done, set up a new environment:
 mamba create -n SEEKR2 python=3.11 --yes
 ```
 
-If you plan to use seekrflow for parametrization, you will probably need a second environment to avoid conflicts.
+If you plan to use seekrflow for parameterization, you will probably need a second environment to avoid conflicts.
 ```sh
 mamba create -n SEEKRFLOW_PARAM python=3.11 --yes
 ```
@@ -49,17 +49,17 @@ Make sure git is installed to clone repositories. If git isn't already installed
 mamba install git --yes
 ```
 
-#### PDBFixer (recommended; needed for parametrization)
+#### PDBFixer (recommended; needed for parameterization)
 
-PDBfixer is recommended to install in case one wants to run the parametrization using seekrflow.
+PDBfixer is recommended to install in case one wants to run the parameterization using seekrflow.
 
 ```sh
 mamba activate SEEKRFLOW_PARAM
 mamba install pdbfixer --yes
 ```
 
-#### OpenEye Toolkits (recommended; possibly needed for parametrization)
-The OpenEye Toolkits are used for quantum chemistry-based force field parameterization. The OpenEye toolkits require a valid OpenEye academic license, free for academic users but must be obtained directly from https://www.eyesopen.com/academic-licensing. Seekrflow uses it to generate SDF files from PDB files of small molecules. If you do not plan to use seekrflow for parametrization, or will already have SDF files for your small molecules, then you do not need to install OpenEye.
+#### OpenEye Toolkits (recommended; possibly needed for parameterization)
+The OpenEye Toolkits are used for quantum chemistry-based force field parameterization. The OpenEye toolkits require a valid OpenEye academic license, free for academic users but must be obtained directly from https://www.eyesopen.com/academic-licensing. Seekrflow uses it to generate SDF files from PDB files of small molecules. If you do not plan to use seekrflow for parameterization, or will already have SDF files for your small molecules, then you do not need to install OpenEye.
 
 ```sh
 mamba install openeye::openeye-toolkits --yes
@@ -82,7 +82,7 @@ Then apply the change within the current terminal session.
 source ~/.bashrc
 ```
 
-#### OpenMM Forcefields(recommended; needed for parametrization)
+#### OpenMM Forcefields(recommended; needed for parameterization)
 
 ```sh
 mamba install openmmforcefields --yes
@@ -90,7 +90,7 @@ mamba install openmmforcefields --yes
 
 #### Espaloma Machine-learned Forcefield (optional)
 
-If you want to parametrize your molecular system with the machine-learned forcefield espaloma, you will need to install it.
+If you want to parameterize your molecular system with the machine-learned forcefield espaloma, you will need to install it.
 ```sh
 mamba install espaloma=0.3.2 --yes
 ```
@@ -164,7 +164,7 @@ A seekrflow calculation will need a input JSON file to run, as well as a startin
 
 ```sh
 mamba activate SEEKRFLOW_PARAM
-python ~/seekrflow/seekrflow/parametrize.py protein_ligand.pdb -i seekrflow.json
+python ~/seekrflow/seekrflow/parameterize.py protein_ligand.pdb -i seekrflow.json
 mamba deactivate
 mamba activate SEEKR2
 python ~/seekrflow/seekrflow/flow.py work/seekrflow.json prepare

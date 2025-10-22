@@ -14,534 +14,18 @@ from shutil import copyfile
 from attrs import define, field, validators, Factory
 import cattrs
 from cattrs.strategies import include_subclasses
-#import seekr.modules.engines.structures as seekr_engines_structures
-import parmed
-import openmm
-import openmm.app as openmm_app
+
+import seekrflow.modules.base as base
+import seekrflow.modules.workflows.protein_ligand_seekr2.structures \
+    as protein_ligand_seekr2_structures
+import seekrflow.modules.workflows.protein_ligand_membrane_seekr2.structures \
+    as protein_ligand_membrane_seekr2_structures
+import seekrflow.modules.parameterize_structures as parameterizer_structures
 
 WORK = "work"
-PARAMETRIZE = "parametrize"
+PARAMETERIZE = "parameterize"
 ROOT = "root"
 RUN = "run"
-
-# ================== BEGIN COMMENT ===================
-# TODO: remove these structures once seekr3 becomes the default
-# and the old seekr program is no longer needed.
-@define
-class Amber_parameters_topology:
-    type: typing.Literal["Amber"] = "Amber"
-    prmtop_filename: str = field(default="",
-                                validator=validators.instance_of(str))
-    
-    def same_parameters(
-            self, 
-            other: "Parameters_topology"
-            ) -> bool:
-        assert self.type == other.type, "Type mismatch."
-        if self.prmtop_filename == other.prmtop_filename:
-            return True
-        else:
-            return False
-        
-    def copy_files(self,
-                   dest_directory: str,
-                   new_md_parameters_topology: "Parameters_topology") -> None:
-        """
-        Copy the files for the initial 'stage' from this Anchor_input
-        to the actual anchor.
-        """
-        assert self.type == new_md_parameters_topology.type, "Type mismatch."
-        assert self.prmtop_filename != "", "prmtop_filename must be defined."
-        prmtop_basename = os.path.basename(self.prmtop_filename)
-        anchor_prmtop_full_path = os.path.join(dest_directory,
-                                            prmtop_basename)
-        copyfile(os.path.expanduser(self.prmtop_filename), anchor_prmtop_full_path)
-        new_md_parameters_topology.prmtop_filename = prmtop_basename
-        return
-    
-    def make_parmed(
-            self,
-            pdb_filename: None | str = None,
-            directory: str = "."
-            ) -> parmed.Structure:
-        """
-        Create a parmed structure from the Amber parameters.
-        """
-        assert self.prmtop_filename != "", "prmtop_filename must be defined."
-        prmtop_full_path = os.path.join(directory, self.prmtop_filename)
-        if pdb_filename is None:
-            structure = parmed.load_file(prmtop_full_path)
-        else:
-            structure = parmed.load_file(prmtop_full_path, pdb_filename)
-        return structure
-    
-@define
-class Gromacs_parameters_topology:
-    type: typing.Literal["Gromacs"] = "Gromacs"
-    top_filename: str = field(default="",
-                                validator=validators.instance_of(str))
-    gro_filename: str = field(default="",
-                                validator=validators.instance_of(str))
-    
-    def same_parameters(
-            self, 
-            other: "Parameters_topology"
-            ) -> bool:
-        assert self.type == other.type, "Type mismatch."
-        if (self.top_filename == other.top_filename) \
-                and (self.gro_filename == other.gro_filename):
-            return True
-        else:
-            return False
-    
-    def copy_files(self,
-                   dest_directory: str,
-                   new_md_parameters_topology: "Parameters_topology") -> None:
-        """
-        Copy the files for the initial 'stage' from this Anchor_input
-        to the actual anchor.
-        """
-        assert self.type == new_md_parameters_topology.type, "Type mismatch."
-        assert self.top_filename != "", "top_filename must be defined."
-        assert self.gro_filename != "", "gro_filename must be defined."
-        top_basename = os.path.basename(self.top_filename)
-        anchor_top_full_path = os.path.join(dest_directory,
-                                            top_basename)
-        copyfile(os.path.expanduser(self.top_filename), anchor_top_full_path)
-        new_md_parameters_topology.top_filename = top_basename
-        gro_basename = os.path.basename(self.gro_filename)
-        anchor_gro_full_path = os.path.join(dest_directory,
-                                            gro_basename)
-        copyfile(os.path.expanduser(self.gro_filename), anchor_gro_full_path)
-        new_md_parameters_topology.gro_filename = gro_basename
-        return
-    
-    def make_parmed(
-            self,
-            pdb_filename: None | str = None,
-            directory: str = "."
-            ) -> parmed.Structure:
-        """
-        Create a parmed structure from the Gromacs parameters.
-        """
-        assert self.top_filename != "", "top_filename must be defined."
-        top_full_path = os.path.join(directory, self.top_filename)
-        gro_full_path = os.path.join(directory, self.gro_filename)
-        if pdb_filename is None:
-            structure = parmed.gromacs.GromacsTopologyFile(top_full_path)
-            gmx_gro = parmed.gromacs.GromacsGroFile.parse(gro_full_path)
-            structure.box = gmx_gro.box
-            structure.positions = gmx_gro.positions
-        else:
-            structure = parmed.load_file(top_full_path, pdb_filename)
-        return structure
-
-@define
-class Charmm_parameters_topology:
-    type: typing.Literal["Charmm"] = "Charmm"
-    psf_filename: str = field(default="",
-                                validator=validators.instance_of(str))
-    param_filename_list: list[str] = field(
-        default=Factory(list),
-        validator=validators.deep_iterable(
-            member_validator=validators.instance_of(str),
-            iterable_validator=validators.instance_of(list),
-        ))
-    
-    def same_parameters(
-            self, 
-            other: "Parameters_topology"
-            ) -> bool:
-        assert self.type == other.type, "Type mismatch."
-        if (self.psf_filename == other.psf_filename) \
-                and (self.param_filename_list == other.param_filename_list):
-            return True
-        else:
-            return False
-        
-    def copy_files(self,
-                   dest_directory: str,
-                   new_md_parameters_topology: "Parameters_topology") -> None:
-        """
-        Copy the files for the initial 'stage' from this Anchor_input
-        to the actual anchor.
-        """
-        assert self.type == new_md_parameters_topology.type, "Type mismatch."
-        assert self.psf_filename != "", "psf_filename must be defined."
-        assert len(self.param_filename_list) > 0, "param_filename_list must be defined."
-        psf_basename = os.path.basename(self.psf_filename)
-        anchor_psf_full_path = os.path.join(dest_directory,
-                                            psf_basename)
-        copyfile(os.path.expanduser(self.psf_filename), anchor_psf_full_path)
-        new_md_parameters_topology.psf_filename = psf_basename
-        new_md_parameters_topology.param_filename_list = []
-        for param_filename in self.param_filename_list:
-            param_basename = os.path.basename(param_filename)
-            anchor_param_full_path = os.path.join(dest_directory,
-                                                param_basename)
-            copyfile(os.path.expanduser(param_filename), anchor_param_full_path)
-            new_md_parameters_topology.param_filename_list.append(param_basename)
-        return
-    
-    def make_parmed(
-            self,
-            pdb_filename: None | str = None,
-            directory: str = "."
-            ) -> parmed.Structure:
-        """
-        Create a parmed structure from the Charmm parameters.
-        """
-        assert self.psf_filename != "", "psf_filename must be defined."
-        psf_full_path = os.path.join(directory, self.psf_filename)
-        if pdb_filename is None:
-            structure = parmed.load_file(psf_full_path)
-        else:
-            structure = parmed.load_file(psf_full_path, pdb_filename)
-        return structure
-    
-@define
-class Forcefield_parameters:
-    type: typing.Literal["OpenMM_forcefield"] = "OpenMM_forcefield"
-    built_in_forcefield_filenames: list[str] = field(
-        default=Factory(list),
-        validator=validators.deep_iterable(
-            member_validator=validators.instance_of(str),
-            iterable_validator=validators.instance_of(list),
-        ))
-    custom_forcefield_filenames: list[str] = field(
-        default=Factory(list),
-        validator=validators.deep_iterable(
-            member_validator=validators.instance_of(str),
-            iterable_validator=validators.instance_of(list),
-        ))
-    
-    def same_parameters(
-            self, 
-            other: "Parameters_topology"
-            ) -> bool:
-        assert self.type == other.type, "Type mismatch."
-        if (self.built_in_forcefield_filenames == other.built_in_forcefield_filenames) \
-                and (self.custom_forcefield_filenames == other.custom_forcefield_filenames):
-            return True
-        else:
-            return False
-        
-    def copy_files(self,
-                   dest_directory: str,
-                   new_md_parameters_topology: "Parameters_topology") -> None:
-        """
-        Copy the files for the initial 'stage' from this Anchor_input
-        to the actual anchor.
-        """
-        assert self.type == new_md_parameters_topology.type, "Type mismatch."
-        new_md_parameters_topology.built_in_forcefield_filenames = []
-        for forcefield_filename in self.built_in_forcefield_filenames:
-            forcefield_basename = os.path.basename(forcefield_filename)
-            anchor_forcefield_full_path = os.path.join(dest_directory,
-                                                    forcefield_basename)
-            copyfile(os.path.expanduser(forcefield_filename), 
-                     anchor_forcefield_full_path)
-            new_md_parameters_topology.built_in_forcefield_filenames.append(
-                forcefield_basename)
-
-        new_md_parameters_topology.custom_forcefield_filenames = []
-        for forcefield_filename in self.custom_forcefield_filenames:
-            forcefield_basename = os.path.basename(forcefield_filename)
-            anchor_forcefield_full_path = os.path.join(dest_directory,
-                                                    forcefield_basename)
-            copyfile(os.path.expanduser(forcefield_filename), 
-                     anchor_forcefield_full_path)
-            new_md_parameters_topology.custom_forcefield_filenames.append(
-                forcefield_basename)
-
-        return
-    
-    def make_parmed(
-            self,
-            pdb_filename: None | str = None,
-            directory: str = "."
-            ) -> parmed.Structure:
-        """
-        Create a parmed structure from the OpenMM XML parameters.
-        """
-        assert pdb_filename != "", "pdb_filename must be defined."
-        structure = parmed.load_file(pdb_filename)
-        return structure
-    
-@define
-class Openmm_system:
-    type: typing.Literal["OpenMM_system"] = "OpenMM_system"
-    system_filename: str = field(default="",
-                                validator=validators.instance_of(str))
-    
-    def same_parameters(
-            self, 
-            other: "Parameters_topology"
-            ) -> bool:
-        assert self.type == other.type, "Type mismatch."
-        if self.system_filename == other.system_filename:
-            return True
-        else:
-            return False
-        
-    def copy_files(self,
-                   dest_directory: str,
-                   new_md_parameters_topology: "Parameters_topology") -> None:
-          """
-          Copy the files for the initial 'stage' from this Anchor_input
-          to the actual anchor.
-          """
-          assert self.type == new_md_parameters_topology.type, "Type mismatch."
-          assert self.system_filename != "", "system_filename must be defined."
-          system_basename = os.path.basename(self.system_filename)
-          anchor_system_full_path = os.path.join(dest_directory,
-                                              system_basename)
-          copyfile(os.path.expanduser(self.system_filename), 
-                   anchor_system_full_path)
-          new_md_parameters_topology.system_filename = system_basename
-          return
-    
-    def make_parmed(
-            self,
-            pdb_filename: None | str = None,
-            directory: str = "."
-            ) -> parmed.Structure:
-        """
-        Create a parmed structure from the OpenMM XML parameters.
-        """
-        assert pdb_filename != "", "pdb_filename must be defined."
-        assert self.system_filename != "", "system_filename must be defined."
-        full_system_filename = os.path.join(directory, self.system_filename)
-        pdb = openmm_app.PDBFile(pdb_filename)
-        with open(full_system_filename) as f:
-            system = openmm.XmlSerializer.deserialize(f.read())
-        structure = parmed.openmm.load_topology(
-            pdb.topology, 
-            system, 
-            pdb.positions)
-        return structure
-        
-
-Parameters_topology = typing.Union[
-    Amber_parameters_topology, Gromacs_parameters_topology, \
-    Charmm_parameters_topology, Forcefield_parameters, Openmm_system]
-# ================== END COMMENT ===================
-
-@define
-class Parametrizer:
-    """
-    The parametrizer object contains the inputs needed to run the
-    parametrization of a protein-ligand complex.
-    """
-    forcefield: str = field(
-        #default="espaloma-0.3.2.pt",
-        default="gaff-2.11",
-        validator=validators.instance_of(str),
-        # TODO: possible choices?
-        )
-    water_model: str = field(
-        default="tip3p",
-        validator=validators.instance_of(str),
-        # TODO: possible choices?
-        )
-    auxiliary_forcefield_files: typing.List[str] = field(
-        default=Factory(list),
-        validator=validators.instance_of(list),
-        )
-
-@define
-class PDBFixer_settings:
-    """
-    Settings for PDBFixer.
-    """
-    remove_extra_chains: bool = field(
-        default=True,
-        validator=validators.instance_of(bool),
-        )
-    find_missing_residues: bool = field(
-        default=True,
-        validator=validators.instance_of(bool),
-        )
-    find_and_replace_nonstandard_residues: bool = field(
-        default=True,
-        validator=validators.instance_of(bool),
-        )
-    remove_heterogens: bool = field(
-        default=True,
-        validator=validators.instance_of(bool),
-        )
-    find_and_add_missing_atoms: bool = field(
-        default=True,
-        validator=validators.instance_of(bool),
-        )
-    add_missing_hydrogens_pH: float | None = None
-
-    def run(
-            self,
-            input_pdb_filename: str,
-            output_pdb_filename: str
-            ) -> None:
-        """
-        Run PDBFixer on the given PDB file and return the fixed PDB filename.
-        """
-        from pdbfixer import PDBFixer
-        fixer = PDBFixer(filename=input_pdb_filename)
-        numChains = len(list(fixer.topology.chains()))
-        if self.remove_extra_chains:
-            fixer.removeChains(range(1, numChains))
-        if self.find_missing_residues:
-            fixer.findMissingResidues()
-        if self.find_and_replace_nonstandard_residues:
-            fixer.findNonstandardResidues()
-            fixer.replaceNonstandardResidues()
-        if self.remove_heterogens:
-            fixer.removeHeterogens(keepWater=True)
-        if self.find_and_add_missing_atoms:
-            fixer.findMissingAtoms()
-            fixer.addMissingAtoms()
-        if self.add_missing_hydrogens_pH is not None:
-            fixer.addMissingHydrogens(pH=self.add_missing_hydrogens_pH)
-        openmm_app.PDBFile.writeFile(
-            fixer.topology, fixer.positions, open(output_pdb_filename, "w"))
-        return
-    
-@define
-class PDB2PQR_settings:
-    """
-    Settings for PDB2PQR.
-    """
-    forcefield: str = field(
-        default="AMBER",
-        validator=validators.instance_of(str),
-        )
-    forcefield_output_format: str = field(
-        default="AMBER",
-        validator=validators.instance_of(str),
-        )
-    pH: float | None = field(
-        default=7.0,
-        validator=validators.optional(validators.instance_of(float))
-        )
-    
-    def run(
-            self,
-            input_pdb_filename: str,
-            output_pqr_filename: str,
-            output_pdb_filename: str | None = None
-            ) -> None:
-        """
-        Run PDB2PQR on the given PDB file and return the PQR and PDB resulting
-        files with the hydrogens properly added.
-        """
-        if output_pdb_filename is not None:
-            output_pdb_string = f"--pdb-output {output_pdb_filename} "
-        else:
-            output_pdb_string = ""
-        cmd = f"pdb2pqr --ff AMBER --ffout AMBER {output_pdb_string}"\
-        +f"--with-ph {self.pH} --log-level CRITICAL --drop-water "\
-        +f"--nodebump --noopt "\
-        +f"{input_pdb_filename} {output_pqr_filename}"
-        print("running command:", cmd)
-        os.system(cmd)
-        assert os.path.exists(output_pqr_filename), \
-            f"PDB2PQR output PQR file {output_pqr_filename} was not written. "\
-            "A problem must have occurred"
-        return
-
-@define
-class BD_settings:
-    """
-    Settings for the BD calculation.
-    """
-    type: typing.Literal["BD"] = "BD"
-    binary_directory: str = field(
-        default="",
-        validator=validators.instance_of(str),
-        )
-    receptor_pqr_filename: str | None = field(
-        default=None,
-        validator=validators.optional(validators.instance_of(str)),
-        )
-    ligand_pqr_filename: str | None = field(
-        default=None,
-        validator=validators.optional(validators.instance_of(str)),
-        )
-    num_trajectories: int = field(
-        default=10000,
-        validator=validators.instance_of(int),
-        )
-    num_threads: int = field(
-        default=1,
-        validator=validators.instance_of(int),
-        )
-
-@define
-class HIDR_settings_base:
-    """
-    Base class for HIDR settings.
-    """
-    type: typing.Literal["hidr_base"] = "hidr_base"
-
-
-#class HIDR_settings_metaD(HIDR_settings_base):
-@define
-class HIDR_settings_metaD:
-    """
-    Settings for the HIDR calculation using metadynamics.
-    """
-    type: typing.Literal["hidr_metaD"] = "hidr_metaD"
-    gaussian_height: float = field(
-        default=1.0,
-        validator=validators.instance_of(float),
-        )
-    gaussian_width: float = field(
-        default=0.05,
-        validator=validators.instance_of(float),
-        )
-    bias_factor: float = field(
-        default=10.0,
-        validator=validators.instance_of(float),
-        )
-
-#class HIDR_settings_SMD(HIDR_settings_base):
-@define
-class HIDR_settings_SMD:
-    """
-    Settings for the HIDR calculation using steered molecular dynamics.
-    """
-    type: typing.Literal["hidr_SMD"] = "hidr_SMD"
-    restraint_force_constant: float = field(
-        default=90000.0,
-        validator=validators.instance_of(float),
-        )
-    translation_velocity: float = field(
-        default=0.01,
-        validator=validators.instance_of(float),
-        )
-
-
-
-#class MMVT_seekr_settings(Seekr_settings):
-@define
-class MMVT_seekr_settings:
-    """
-    Settings for the MMVT calculation.
-    """
-    type: typing.Literal["MMVT"] = "MMVT"
-    md_output_interval: int = field(
-        default=10000,
-        validator=validators.instance_of(int),
-        )
-    md_steps_per_anchor: int = field(
-        default=1000000,
-        validator=validators.instance_of(int),
-        )
-    anchor_radius_list: typing.List[float] = field(
-        default=Factory(list),
-        validator=validators.deep_iterable(
-            member_validator=validators.instance_of(float),
-            iterable_validator=validators.instance_of(list),
-        ))
 
 @define
 class Remote_interface_base:
@@ -658,39 +142,12 @@ class Resource_local(Resource_base):
     """
     Local resource for running the protocol.
     """
-    #type: typing.Literal["local"] = "local"
     pass
 
 @define
 class Resource_remote_base(Resource_base):
     """
     Base class for remote resources.
-    """
-    """    type: typing.Literal["remote"] = "remote"
-    name: str = field(
-        default="",
-        validator=validators.instance_of(str),
-        )
-    remote_seekr2_directory: str = field(
-        default="$HOME/seekr2/seekr2/",
-        validator=validators.instance_of(str),
-        )
-    remote_seekrtools_directory: str = field(
-        default="$HOME/seekrtools/seekrtools/",
-        validator=validators.instance_of(str),
-        )
-    remote_working_directory: str = field(
-        default="",
-        validator=validators.instance_of(str),
-        )
-    globus_compute_endpoint_id: str = field(
-        default="",
-        validator=validators.instance_of(str),
-        )
-    transfer_settings: Transfer_settings_base = field(
-        default=Factory(Transfer_settings_base),
-        validator=validators.instance_of(Transfer_settings_base),
-        )
     """
     pass
 
@@ -752,18 +209,12 @@ class Resource_remote_slurm(Resource_remote_base):
         default="",
         validator=validators.instance_of(str),
         )
-    #globus_compute_endpoint_id: str = field(
-    #    default="",
-    #    validator=validators.instance_of(str),
-    #    )
     remote_interface: Remote_interface_globus_compute_sdk | Remote_interface_ssh = field(
         default=Factory(Remote_interface_globus_compute_sdk),
-        #validator=validators.instance_of(Remote_interface_base),
     )
     transfer_settings: Transfer_settings_rsync | Transfer_settings_globus = field(
         default=Factory(Transfer_settings_globus),
-        #validator=validators.instance_of(Transfer_settings_globus),
-        )
+    )
     
 @define
 class Run_settings:
@@ -785,10 +236,6 @@ class Run_settings:
         default="local",
         validator=validators.instance_of(str),
         )
-    allow_parsl_usage_tracking: bool = field(
-        default=False,
-        validator=validators.instance_of(bool),
-        )
     
     def get_resource_by_name(
             self,
@@ -802,8 +249,7 @@ class Run_settings:
                 return resource
         raise ValueError(
             f"Resource with name '{resource_name}' not found in run_settings.resources.")
-    
-# TODO: make this a protein-ligand subclass of a superclass of generic seekrflows
+
 @define
 class Seekrflow:
     """
@@ -821,115 +267,35 @@ class Seekrflow:
     #  removed from the resource objects since remote workflows no longer
     #  employ parsl. I did not attempt to implement backwards compatibility
     #  to structure v1.0 because seekrflow was not yet released.
-    structure_version: str = field(default="1.1",
+    # NOTE: structure version 1.2 implemented an entirely different structure
+    #  framework. Versions after 1.1 include a workflow object with many nested
+    #  attribute objects. Additionally, several other structures are nested as
+    #  attributes within the parameterize attribute. Backwards compatibility to
+    #  structure version 1.1 was not implemented because seekrflow was not yet 
+    #  released. Removed parsl-related attributes.
+    structure_version: str = field(default="1.2",
                                  validator=validators.instance_of(str))
-    workflow_type: str = field(
-        default="protein_ligand",
-        validator=validators.instance_of(str),
-    )
-    
-    # NOTE: although this will typically not be provided in the input file, I want that
-    #  option to be available.
-    receptor_ligand_pdb: str = field(
-        default="",
-        validator=validators.instance_of(str),
+    workflow: protein_ligand_seekr2_structures.Protein_ligand_seekr2_workflow \
+         | protein_ligand_membrane_seekr2_structures.Protein_ligand_membrane_seekr2_workflow \
+        = field(
+        default=Factory(protein_ligand_seekr2_structures.Protein_ligand_seekr2_workflow),
+        validator=validators.instance_of(
+            protein_ligand_seekr2_structures.Protein_ligand_seekr2_workflow \
+            | protein_ligand_membrane_seekr2_structures.Protein_ligand_membrane_seekr2_workflow
+            ),
         )
-    ligand_sdf_file: str = field(
-        default="",
-        validator=validators.instance_of(str),
-        )
-    ligand_resname: str = field(
-        default="",
-        validator=validators.instance_of(str),
-        )
-    ligand_indices: typing.List[int] = field(
-        default=Factory(list),
-        validator=validators.instance_of(list),
-        )
-    receptor_indices: typing.List[int] = field(
-        default=Factory(list),
-        validator=validators.instance_of(list),
-        )
-    receptor_selection: str = field(
-        default="protein",
-        validator=validators.instance_of(str),
+    physical_attributes: base.Physical_attributes = field(
+        default=Factory(base.Physical_attributes),
+        validator=validators.instance_of(base.Physical_attributes),
         )
     work_directory: str = field(
         default="work",
         validator=validators.instance_of(str),
         )
-    basename_output: str = field(
-        default="complex",
-        validator=validators.instance_of(str),
+    parameterizer: parameterizer_structures.Parameterizer | None = field(
+        default=Factory(parameterizer_structures.Parameterizer),
+        validator=validators.optional(validators.instance_of(parameterizer_structures.Parameterizer)),
         )
-    solvent_padding: float | None = field(
-        default=0.9,
-        validator=validators.instance_of(float),
-        )
-    ionic_strength: float = field(
-        default=0.15,
-        validator=validators.instance_of(float),
-        )
-    hmass: float = field(
-        default=1.008,
-        validator=validators.instance_of(float),
-        )
-    nonbonded_cutoff: float | None = field(
-        default=0.9,
-        validator=validators.instance_of(float),
-        )
-    temperature: float = field(
-        default=300.0,
-        validator=validators.instance_of(float),
-        )
-    friction: float = field(
-        default=1.0,
-        validator=validators.instance_of(float),
-        )
-    pressure: float | None = field(
-        default=None,
-        validator=validators.optional(validators.instance_of(float)),
-        )
-    barostat_period: int | None = field(
-        default=None,
-        validator=validators.optional(validators.instance_of(int)),
-        )
-    stepsize: float = field(
-        default=0.002,
-        validator=validators.instance_of(float),
-        )
-    parametrizer: Parametrizer | None = field(
-        default=Factory(Parametrizer),
-        validator=validators.optional(validators.instance_of(Parametrizer)),
-        )
-    pdb_fixer_settings: PDBFixer_settings | None = field(
-        default=Factory(PDBFixer_settings),
-        validator=validators.optional(validators.instance_of(PDBFixer_settings)),
-        )
-    pdb2pqr_settings: PDB2PQR_settings | None = field(
-        default=Factory(PDB2PQR_settings),
-        validator=validators.optional(validators.instance_of(PDB2PQR_settings)),
-        )
-    hidr_settings: HIDR_settings_metaD = field(
-        default=Factory(HIDR_settings_metaD),
-        validator=validators.instance_of(HIDR_settings_metaD),
-        )
-    #seekr_settings: Seekr_settings = field(
-    seekr_settings: MMVT_seekr_settings = field(
-        default=Factory(MMVT_seekr_settings),
-        validator=validators.instance_of(MMVT_seekr_settings),
-        )
-    bd_settings: BD_settings | None = field(
-        default=Factory(BD_settings),
-        validator=validators.optional(validators.instance_of(BD_settings)),
-        )
-    # This is filled out by parametrize.py, but can be entered manually if desired.
-    md_parameters_topology: Parameters_topology | None = None
-    starting_pdb_filename: str = field(
-        default="",
-        validator=validators.instance_of(str),
-        )
-    
     run_settings: Run_settings | None = None
 
     def save(
@@ -942,7 +308,7 @@ class Seekrflow:
         converter: cattrs.Converter = cattrs.Converter()
         # Make sure that interited data classes are unstructured as their
         #  subtypes.
-        include_subclasses(HIDR_settings_base, converter)
+        include_subclasses(protein_ligand_seekr2_structures.HIDR_settings_base, converter)
         include_subclasses(Transfer_settings_base, converter)
         include_subclasses(Resource_base, converter)
         seekrflow_dict: dict = converter.unstructure(self)
@@ -971,11 +337,11 @@ class Seekrflow:
         #os.makedirs(work_dir, exist_ok=True)
         return work_dir
 
-    def get_parametrize_directory(self) -> pathlib.Path:
+    def get_parameterize_directory(self) -> pathlib.Path:
         """
         Get the directory where the preparation files are stored.
         """
-        param_dir = pathlib.Path(self.work_directory) / PARAMETRIZE
+        param_dir = pathlib.Path(self.work_directory) / PARAMETERIZE
         os.makedirs(param_dir, exist_ok=True)
         return param_dir
 
@@ -1016,7 +382,6 @@ def save_new_seekrflow(
     """
     Generate a new seekrflow file. The old seekrflow file(s) will be renamed with a 
     numerical index.
-    
     """
     
     model_path = os.path.join(directory, "seekrflow.json")

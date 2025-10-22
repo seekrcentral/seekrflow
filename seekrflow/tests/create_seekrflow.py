@@ -11,30 +11,30 @@ import seekrflow.modules.structures as structures
 
 TEST_DIRECTORY = os.path.dirname(__file__)
 
-def create_unparametrized_seekrflow(
+def create_unparameterized_seekrflow(
         starting_structure: str,
         ligand_resname: str,
         anchor_radius_list: list[float],
         ff: str = "amber",
         ) -> structures.Seekrflow:
     """
-    Create a testing seekrflow object before the parametrization step.
+    Create a testing seekrflow object before the parameterization step.
     """
     seekrflow = structures.Seekrflow()
     seekrflow.receptor_ligand_pdb = starting_structure
     seekrflow.ligand_resname = ligand_resname
-    seekrflow.parametrizer = structures.Parametrizer()
-    seekrflow.parametrizer.water_model = "tip3p"
+    seekrflow.parameterizer = structures.Parameterizer()
+    seekrflow.parameterizer.water_model = "tip3p"
     if ff == "amber":
-        seekrflow.parametrizer.forcefield = "gaff-2.11"
-        seekrflow.parametrizer.auxiliary_forcefield_files = [
+        seekrflow.parameterizer.forcefield = "gaff-2.11"
+        seekrflow.parameterizer.auxiliary_forcefield_files = [
             "amber/ff14SB.xml",
             "amber/tip3p_standard.xml",
             "amber/tip3p_HFE_multivalent.xml"
         ]
     else:
-        seekrflow.parametrizer.forcefield = ff
-        seekrflow.parametrizer.auxiliary_forcefield_files = [
+        seekrflow.parameterizer.forcefield = ff
+        seekrflow.parameterizer.auxiliary_forcefield_files = [
             "amber/ff14SB.xml",
             "amber/tip3p_standard.xml",
             "amber/tip3p_HFE_multivalent.xml"
@@ -49,7 +49,7 @@ def create_unparametrized_seekrflow(
     seekrflow.run_settings.allow_parsl_usage_tracking = False
     return seekrflow
 
-def create_parametrized_seekrflow(
+def create_parameterized_seekrflow(
         md_parameters_topology: structures.Parameters_topology,
         starting_structure: str,
         receptor_pqr_filename: str,
@@ -59,9 +59,9 @@ def create_parametrized_seekrflow(
         ff: str = "amber",
         ) -> structures.Seekrflow:
     """
-    Create a parametrized seekrflow object right before the prepare stage.
+    Create a parameterized seekrflow object right before the prepare stage.
     """
-    seekrflow = create_unparametrized_seekrflow(
+    seekrflow = create_unparameterized_seekrflow(
         starting_structure=starting_structure,
         ligand_resname=ligand_resname,
         anchor_radius_list=anchor_radius_list,
@@ -73,7 +73,7 @@ def create_parametrized_seekrflow(
     seekrflow.bd_settings.ligand_pqr_filename = ligand_pqr_filename
     return seekrflow
 
-def create_unparametrized_tryp_ben_seekrflow(
+def create_unparameterized_tryp_ben_seekrflow(
         ff: str = "amber",
         ) -> structures.Seekrflow:
     """
@@ -82,14 +82,14 @@ def create_unparametrized_tryp_ben_seekrflow(
     starting_structure = os.path.join(TEST_DIRECTORY, "data", "trypsin_benzamidine.pdb")
     ligand_resname = "BEN"
     anchor_radius_list = [0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6]
-    return create_unparametrized_seekrflow(
+    return create_unparameterized_seekrflow(
         starting_structure=starting_structure,
         ligand_resname=ligand_resname,
         anchor_radius_list=anchor_radius_list,
         ff=ff
     )
 
-def create_parametrized_tryp_ben_openmm_xml_seekrflow(
+def create_parameterized_tryp_ben_openmm_xml_seekrflow(
         ff: str = "amber",
         ) -> structures.Seekrflow:
     """
@@ -103,7 +103,7 @@ def create_parametrized_tryp_ben_openmm_xml_seekrflow(
     md_parameters_topology.system_filename = starting_system_xml
     ligand_resname = "BEN"
     anchor_radius_list = [0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6]
-    return create_parametrized_seekrflow(
+    return create_parameterized_seekrflow(
         md_parameters_topology=md_parameters_topology,
         starting_structure=starting_pdb,
         receptor_pqr_filename=receptor_pqr_filename,
@@ -113,7 +113,7 @@ def create_parametrized_tryp_ben_openmm_xml_seekrflow(
         ff=ff
     )
 
-def create_parametrized_host_guest_amber_seekrflow(
+def create_parameterized_host_guest_amber_seekrflow(
         ff: str = "amber",
         ) -> structures.Seekrflow:
     """
@@ -127,7 +127,7 @@ def create_parametrized_host_guest_amber_seekrflow(
     md_parameters_topology.prmtop_filename = starting_system_parm7
     ligand_resname = "BEN"
     anchor_radius_list = [0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6]
-    return create_parametrized_seekrflow(
+    return create_parameterized_seekrflow(
         md_parameters_topology=md_parameters_topology,
         starting_structure=starting_pdb,
         receptor_pqr_filename=receptor_pqr_filename,

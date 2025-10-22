@@ -29,7 +29,8 @@ dependencies = [
     "parmed",
     "rdkit",
     "parsl",
-    "fabric"
+    "fabric",
+    "networkx"
 ]
 
 # Update the urls once the hosting is set up.

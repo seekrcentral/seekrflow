@@ -28,7 +28,7 @@ import seekrflow.modules.workload_managers.slurm as workload_slurm
 import seekrflow.modules.remote_interfaces.globus_compute_sdk as remote_globus
 import seekrflow.modules.remote_interfaces.ssh as remote_ssh
 
-def bd_finished(
+def bd_finished_local(
         model: seekr2_base.Model,
         ) -> bool: 
     """
@@ -42,7 +42,7 @@ def bd_finished(
     else:
         return True
 
-def hidr_finished(
+def hidr_finished_local(
         model: seekr2_base.Model
         ) -> bool:
     """
@@ -58,12 +58,13 @@ def hidr_finished(
         
     return True
 
-def seekr_anchors_to_run(
+def seekr_anchors_to_run_local(
         model: seekr2_base.Model
         ) -> bool:
     """
     Check if SEEKR has finished.
     """
+    # TODO: modify this by looking at the remote machine to find which anchors need to be run.
     md_info_to_run = seekr2_run.choose_next_simulation_openmm(
         model, "any_md", None, None, None, None, False, False, None)
     anchor_indices_to_run = []
@@ -224,15 +225,12 @@ def run_model(
     if seekrflow.bd_settings is not None:
         bd_n_threads = seekrflow.bd_settings.num_threads
     
-    if seekrflow.run_settings.allow_parsl_usage_tracking:
-        usage_tracking = 3
-    else:
-        usage_tracking = 0
-
     transferred_files = defaultdict(bool)
     local_executors = []
-
-    anchors_to_run = seekr_anchors_to_run(model)
+    if seekrflow.run_settings.seekr_stage_resource_name == "local":
+        anchors_to_run = seekr_anchors_to_run_local(model)
+    else:
+        anchors_to_run = seekr_anchors_to_run_remote(model)
 
     if (seekrflow.run_settings.bd_stage_resource_name == "local") \
             and (model.using_bd()):
@@ -248,7 +246,7 @@ def run_model(
                     = seekrflow.run_settings.get_resource_by_name(
                         seekrflow.run_settings.bd_stage_resource_name)
                 if not transferred_files[seekrflow.run_settings.bd_stage_resource_name] \
-                        and not no_transfer_before:
+                        and transfer_before:
                     transfer_files_to_from_remote_resource(
                         seekrflow.name, resource, source_directory)
                     transferred_files[seekrflow.run_settings.hidr_stage_resource_name] = True

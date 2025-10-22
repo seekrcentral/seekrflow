@@ -18,7 +18,7 @@
     "pressure": null,
     "barostat_period": null,
     "stepsize": 0.002,
-    "parametrizer": null,
+    "parameterizer": null,
     "pdb_fixer_settings": null,
     "pdb2pqr_settings": null,
     "hidr_settings": {

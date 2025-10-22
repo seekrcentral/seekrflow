@@ -22,6 +22,7 @@ The easiest, quickest way to install the seekrflow is to use Mamba. If you don't
 Mamba installed, Download the Miniforge install script and run.
 
 .. code-block:: bash
+    
     curl -O https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-$(uname)-$(uname -m).sh
     bash Miniforge3-$(uname)-$(uname -m).sh
 
@@ -34,7 +35,7 @@ Once this has been done, set up a new environment:
 
     mamba create -n SEEKR2 python=3.11 --yes
 
-If you plan to use seekrflow for parametrization, you will probably need a second environment to 
+If you plan to use seekrflow for parameterization, you will probably need a second environment to 
 avoid conflicts.
 
 .. code-block:: bash
@@ -57,34 +58,34 @@ computer, run:
 
     mamba install git --yes
 
-PDBFixer (recommended; needed for parametrization)
+PDBFixer (recommended; needed for parameterization)
 +++++++++++++++++++++++++++++++++++++++++++++++++++
 
-PDBfixer is recommended to install in case one wants to run the parametrization using seekrflow.
+PDBfixer is recommended to install in case one wants to run the parameterization using seekrflow.
 
 .. code-block:: bash
 
     mamba activate SEEKRFLOW_PARAM
     mamba install pdbfixer --yes
 
-pdb2pqr (recommended; needed for parametrization)
+pdb2pqr (recommended; needed for parameterization)
 +++++++++++++++++++++++++++++++++++++++++++++++++++
 
-pdb2pqr is used in the parametrization workflow in order to choose protonation states, and
+pdb2pqr is used in the parameterization workflow in order to choose protonation states, and
 to optionally produce PQR files for BD simulations
 
 .. code-block:: bash
 
     pip install pdb2pqr
 
-OpenEye Toolkits (recommended; possibly needed for parametrization)
+OpenEye Toolkits (recommended; possibly needed for parameterization)
 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 The OpenEye Toolkits are used for quantum chemistry-based force field parameterization. 
 The OpenEye toolkits require a valid OpenEye academic license, free for academic users 
 but must be obtained directly from https://www.eyesopen.com/academic-licensing. 
 Seekrflow uses it to generate SDF files from PDB files of small molecules. If you do not 
-plan to use seekrflow for parametrization, or will already have SDF files for your small 
+plan to use seekrflow for parameterization, or will already have SDF files for your small 
 molecules, then you do not need to install OpenEye. But if you wish to install it, then 
 follow these steps.
 
@@ -112,10 +113,10 @@ Then apply the change within the current terminal session.
 
     source ~/.bashrc
 
-OpenMM Forcefields (recommended; needed for parametrization)
+OpenMM Forcefields (recommended; needed for parameterization)
 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
-If you wish to parametrize your molecular system with a common forcefield, such as AMBER FF14SB, GAFF2, 
+If you wish to parameterize your molecular system with a common forcefield, such as AMBER FF14SB, GAFF2, 
 CHARMM 36, OpenFF's SMIRNOFF, or espaloma, you will need to install the OpenMM forcefields package.
 
 .. code-block:: bash
@@ -125,7 +126,7 @@ CHARMM 36, OpenFF's SMIRNOFF, or espaloma, you will need to install the OpenMM f
 Espaloma Machine-learned Forcefield (optional)
 +++++++++++++++++++++++++++++++++++++++++++++++
 
-If you want to parametrize your molecular system with the machine-learned forcefield espaloma, 
+If you want to parameterize your molecular system with the machine-learned forcefield espaloma, 
 you will need to install it.
 
 .. code-block:: bash
@@ -254,8 +255,8 @@ On the local machine:
 On the remote HPC system, you will need to follow the steps above to create the Mamba
 environment (on the head or login node; the environment is assumed to be named "SEEKR2").
 Into this environment, install SEEKR, SeekrTools, and seekrflow. Then, make sure it is
-activated. (There is probably no need to make a parametrization environment on the remote machine,
-as it is presumed that parametrization, if any, will be performed on the local machine.)
+activated. (There is probably no need to make a parameterization environment on the remote machine,
+as it is presumed that parameterization, if any, will be performed on the local machine.)
 
 .. code-block:: bash
 
@@ -390,11 +391,11 @@ steps.
 .. code-block:: bash
 
     mamba activate SEEKRFLOW_PARAM
-    python ~/seekrflow/seekrflow/parametrize.py protein_ligand.pdb --input_json seekrflow.json --ligand_resname BEN
+    python ~/seekrflow/seekrflow/parameterize.py --input_json seekrflow.json --ligand_resname BEN
     mamba deactivate
     mamba activate SEEKR2
-    python ~/seekrflow/seekrflow/flow.py work/seekrflow.json prepare
-    python ~/seekrflow/seekrflow/flow.py work/seekrflow.json run
+    python ~/seekrflow/seekrflow/flow.py prepare --input_json seekrflow.json
+    python ~/seekrflow/seekrflow/flow.py run --input_json seekrflow.json
     python ~/seekr2/seekr2/analyze.py work/root/model.xml
 
 Important Options and Hints

@@ -4,14 +4,53 @@ modules/cvs.py
 Handle the creation of CVs for SEEKR calculations.
 """
 
+import os
 import typing
 
 import numpy as np
 import mdtraj
 import parmed
 
+import seekr2.modules.common_base as seekr2_base
+
 import seekrflow.modules.base as base
-import seekrflow.modules.structures as structures
+import seekrflow.modules.workflows.structures as workflow_structures
+import seekrflow.modules.workflows.protein_ligand_seekr2.structures as protein_ligand_seekr2_structures
+
+# NOTE: These are valid for SEEKR2 - will need to change for SEEKR3
+# TODO: move these to base?
+def assign_amber_params(input_anchor, prmtop_filename, pdb_filename):
+    input_anchor.starting_amber_params = seekr2_base.Amber_params()
+    input_anchor.starting_amber_params.prmtop_filename = prmtop_filename
+    input_anchor.starting_amber_params.pdb_coordinates_filename = pdb_filename
+    return
+
+def assign_forcefield_params(input_anchor, built_in_ff_list, custom_ff_list, 
+                             pdb_filename):
+    input_anchor.starting_forcefield_params = seekr2_base.Forcefield_params()
+    input_anchor.starting_forcefield_params.built_in_forcefield_filenames \
+        = built_in_ff_list
+    input_anchor.starting_forcefield_params.custom_forcefield_filenames \
+        = custom_ff_list
+    input_anchor.starting_forcefield_params.pdb_coordinates_filename \
+        = pdb_filename
+    return
+
+def assign_system_params(input_anchor, system_filename, pdb_filename):
+    input_anchor.starting_forcefield_params = seekr2_base.Forcefield_params()
+    input_anchor.starting_forcefield_params.system_filename \
+        = system_filename
+    input_anchor.starting_forcefield_params.pdb_coordinates_filename \
+        = pdb_filename
+    return
+
+def assign_charmm_params(input_anchor, psf_filename, charmm_ff_filenames, 
+                         pdb_filename):
+    input_anchor.starting_charmm_params = seekr2_base.Charmm_params()
+    input_anchor.starting_charmm_params.psf_filename = psf_filename
+    input_anchor.starting_charmm_params.charmm_ff_files = charmm_ff_filenames
+    input_anchor.starting_charmm_params.pdb_coordinates_filename = pdb_filename
+    return
 
 def alpha_carbon_selection_within_cutoff(
         traj: mdtraj.Trajectory, 
@@ -70,7 +109,7 @@ def alpha_carbon_selection_within_cutoff(
     return alpha_carbon_indices
 
 def get_receptor_ligand_com_com_selections(
-        seekrflow: structures.Seekrflow,
+        workflow: protein_ligand_seekr2_structures.Protein_ligand_seekr2_workflow,
         complex_pdb_filename: str,
         alpha_carbon_ligand_threshold: float = 0.6,
         ) -> typing.Tuple[list, list]:
@@ -90,34 +129,34 @@ def get_receptor_ligand_com_com_selections(
     # This is a placeholder implementation. The actual implementation would
     # depend on the specific structure of the PDB file and how the receptor
     # and ligand are defined.
-    
-    if len(seekrflow.ligand_indices) == 0:
-        assert seekrflow.ligand_resname != "", \
-            "ligand_resname must be set in the input JSON file if ligand_indices is empty."
-        seekrflow.ligand_indices = base.get_ligand_indices(complex_pdb_filename, seekrflow.ligand_resname)
+    if len(workflow.ligand_indices) == 0:
+        assert workflow.parameterizer_information.ligand_resname != "", \
+            "ligand_resname must be set in the input JSON file if "\
+            "ligand_indices is empty."
+        workflow.ligand_indices = base.get_ligand_indices(
+            complex_pdb_filename, workflow.parameterizer_information.ligand_resname)
     traj = mdtraj.load(complex_pdb_filename)
-    if seekrflow.receptor_selection == "":
-        receptor_selection = "protein"
-    else:
-        receptor_selection = seekrflow.receptor_selection
     receptor_selection = alpha_carbon_selection_within_cutoff(
         traj, 
-        seekrflow.ligand_indices, 
+        workflow.ligand_indices, 
         alpha_carbon_ligand_threshold, 
-        ligand_resname=seekrflow.ligand_resname,
-        receptor_selection=receptor_selection
+        ligand_resname=workflow.parameterizer_information.ligand_resname,
+        receptor_selection="protein"
     )
-    return receptor_selection, seekrflow.ligand_indices
+    return receptor_selection, workflow.ligand_indices
 
 def get_bd_receptor_ligand_selections(
-        seekrflow: structures.Seekrflow,
+        receptor_pqr_filename: str,
+        ligand_pqr_filename: str,
         complex_pdb_filename: str,
         md_receptor_selection: list,
         md_ligand_selection: list,
         ) -> typing.Tuple[list, list]:
     traj = mdtraj.load(complex_pdb_filename)
-    receptor_pqr_filename = seekrflow.bd_settings.receptor_pqr_filename
-    ligand_pqr_filename = seekrflow.bd_settings.ligand_pqr_filename
+    assert os.path.exists(receptor_pqr_filename)
+    assert os.path.exists(ligand_pqr_filename)
+    #receptor_pqr_filename = bd_settings.receptor_pqr_filename
+    #ligand_pqr_filename = bd_settings.ligand_pqr_filename
     receptor_pqr_parmed = parmed.load_file(receptor_pqr_filename)
     ligand_pqr_parmed = parmed.load_file(ligand_pqr_filename)
     receptor_selection_atom_name_list = []

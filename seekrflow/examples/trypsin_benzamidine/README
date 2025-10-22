@@ -6,10 +6,10 @@ And open and modify the inputs as desired, especially the "receptor_ligand_pdb",
 
 Next, we can perform automatic parameterization:
 
-WARNING: make sure to indicate in tutorials and documentation that automatic parametrization
+WARNING: make sure to indicate in tutorials and documentation that automatic parameterization
 can get protein chains wrong - what if there's a dimer?
 
-python ~/seekrflow/seekrflow/parametrize.py protein_ligand.pdb -i seekrflow.json -L BEN
+python ~/seekrflow/seekrflow/parameterize.py protein_ligand.pdb -i seekrflow.json -L BEN
 
 Next, prepare the model:
 

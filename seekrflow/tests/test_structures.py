@@ -10,8 +10,8 @@ import pathlib
 
 import seekrflow.modules.structures as structures
 
-def test_load_save_seekrflow(tryp_ben_seekrflow_system_xml_parametrized):
-    myflow = tryp_ben_seekrflow_system_xml_parametrized
+def test_load_save_seekrflow(tryp_ben_seekrflow_system_xml_parameterized):
+    myflow = tryp_ben_seekrflow_system_xml_parameterized
     myflow.make_work_directory(myflow.work_directory)
     seekrflow_filename = os.path.join(myflow.work_directory, "seekrflow.json")
     myflow.save(seekrflow_filename)
@@ -50,9 +50,9 @@ def test_get_directory_methods():
         work_dir = flow.get_work_directory()
         assert work_dir == work_path
         
-        # Test get_parametrize_directory
-        param_dir = flow.get_parametrize_directory()
-        assert param_dir == work_path / "parametrize"
+        # Test get_parameterize_directory
+        param_dir = flow.get_parameterize_directory()
+        assert param_dir == work_path / "parameterize"
         assert os.path.exists(param_dir)  # Should be created
         
         # Test get_root_directory

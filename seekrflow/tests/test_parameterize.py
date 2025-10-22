@@ -1,5 +1,5 @@
 """
-Test the automated parametrization scripts.
+Test the automated parameterization scripts.
 """
 
 import pytest
@@ -14,26 +14,26 @@ import seekrflow.modules.structures as structures
 import seekrflow.tests.create_seekrflow as create_seekrflow
 
 @pytest.mark.needs_openff
-def test_parametrize_amber_tryp_ben(tryp_ben_seekrflow_amber_unparametrized):
-    import seekrflow.parametrize as parametrize
-    flow = tryp_ben_seekrflow_amber_unparametrized
+def test_parameterize_amber_tryp_ben(tryp_ben_seekrflow_amber_unparameterized):
+    import seekrflow.parameterize as parameterize
+    flow = tryp_ben_seekrflow_amber_unparameterized
     flow.ligand_indices = base.get_ligand_indices(flow.receptor_ligand_pdb, flow.ligand_resname)
     flow.make_work_directory(flow.work_directory)
-    system_filename, positions_filename = parametrize.parametrize(flow)
+    system_filename, positions_filename = parameterize.parameterize(flow)
 
 @pytest.mark.needs_espaloma
 @pytest.mark.needs_openff
-def test_parametrize_espaloma_tryp_ben(tryp_ben_seekrflow_espaloma_unparametrized):
-    import seekrflow.parametrize as parametrize
-    flow = tryp_ben_seekrflow_espaloma_unparametrized
+def test_parameterize_espaloma_tryp_ben(tryp_ben_seekrflow_espaloma_unparameterized):
+    import seekrflow.parameterize as parameterize
+    flow = tryp_ben_seekrflow_espaloma_unparameterized
     flow.ligand_indices = base.get_ligand_indices(flow.receptor_ligand_pdb, flow.ligand_resname)
     flow.make_work_directory(flow.work_directory)
-    system_filename, positions_filename = parametrize.parametrize(flow)
+    system_filename, positions_filename = parameterize.parameterize(flow)
 
 
-class TestParametrizeHelperFunctions:
-    """Test individual helper functions in parametrize module"""
-    
+class TestParameterizeHelperFunctions:
+    """Test individual helper functions in parameterize module"""
+
     def _create_test_pdb(self):
         """Helper to create a test PDB file with receptor and ligand"""
         pdb_content = textwrap.dedent("""
@@ -57,29 +57,29 @@ class TestParametrizeHelperFunctions:
     @pytest.mark.needs_openff
     def test_split_receptor_ligand_basic(self):
         """Test basic receptor-ligand splitting functionality"""
-        import seekrflow.parametrize as parametrize
+        import seekrflow.parameterize as parameterize
         with tempfile.TemporaryDirectory() as tmpdir:
             # Create test PDB
             pdb_file = self._create_test_pdb()
 
             # Create seekrflow object
-            flow = create_seekrflow.create_unparametrized_seekrflow(
+            flow = create_seekrflow.create_unparameterized_seekrflow(
                 pdb_file, "LIG", [0.5, 1.0]
             )
             flow.ligand_indices = [5, 6, 7, 8]  # LIG atoms (0-indexed)
             flow.make_work_directory(pathlib.Path(tmpdir))
 
-            # Change to work directory and create parametrize subdirectory
+            # Change to work directory and create parameterize subdirectory
             os.chdir(flow.work_directory)
-            os.makedirs(structures.PARAMETRIZE, exist_ok=True)
+            os.makedirs(structures.PARAMETERIZE, exist_ok=True)
 
             # Test the function
-            parametrize._split_receptor_ligand(flow)
+            parameterize._split_receptor_ligand(flow)
             print(f"DEBUG: _split_receptor_ligand completed")
             
             # Check that files were created
-            receptor_file = os.path.join(structures.PARAMETRIZE, parametrize.RECEPTOR_PDB_FILENAME)
-            ligand_file = os.path.join(structures.PARAMETRIZE, parametrize.LIGAND_PDB_FILENAME)
+            receptor_file = os.path.join(structures.PARAMETERIZE, parameterize.RECEPTOR_PDB_FILENAME)
+            ligand_file = os.path.join(structures.PARAMETERIZE, parameterize.LIGAND_PDB_FILENAME)
             print(f"DEBUG: Expected receptor file: {receptor_file}")
             print(f"DEBUG: Expected ligand file: {ligand_file}")
             
@@ -104,28 +104,28 @@ class TestParametrizeHelperFunctions:
     @pytest.mark.needs_openff
     def test_split_receptor_ligand_empty_ligand_indices(self):
         """Test split function with empty ligand indices"""
-        import seekrflow.parametrize as parametrize
+        import seekrflow.parameterize as parameterize
         with tempfile.TemporaryDirectory() as tmpdir:
             pdb_file = self._create_test_pdb()
-            
-            flow = create_seekrflow.create_unparametrized_seekrflow(
+
+            flow = create_seekrflow.create_unparameterized_seekrflow(
                 pdb_file, "LIG", [0.5, 1.0]
             )
             flow.ligand_indices = []  # Empty ligand indices
             flow.make_work_directory(pathlib.Path(tmpdir))
             
             os.chdir(flow.work_directory)
-            os.makedirs(structures.PARAMETRIZE, exist_ok=True)
+            os.makedirs(structures.PARAMETERIZE, exist_ok=True)
             
             with pytest.raises(AssertionError, match="No ligand indices"):
-                parametrize._split_receptor_ligand(flow)
+                parameterize._split_receptor_ligand(flow)
             
             os.unlink(pdb_file)
 
     @pytest.mark.needs_openff
     def test_choose_only_receptor_atoms(self):
         """Test the choose_only_receptor_atoms function"""
-        import seekrflow.parametrize as parametrize
+        import seekrflow.parameterize as parameterize
         with tempfile.TemporaryDirectory() as tmpdir:
             # Create test PDB files with different chains
             complex_pdb = os.path.join(tmpdir, "complex.pdb")
@@ -154,7 +154,7 @@ class TestParametrizeHelperFunctions:
             complex_struct.atoms[1].charge = 0.3
             
             # Test the function
-            result = parametrize.choose_only_receptor_atoms(complex_struct, receptor_struct)
+            result = parameterize.choose_only_receptor_atoms(complex_struct, receptor_struct)
             
             # Verify result contains only receptor atoms with preserved properties
             assert len(result.atoms) == 2  # Only chain A atoms
@@ -166,13 +166,13 @@ class TestParametrizeHelperFunctions:
             assert result.atoms[1].charge == 0.3   # Preserved from complex
 
 
-class TestParametrizeIntegration:
-    """Integration tests for parametrize functionality"""
+class TestParameterizeIntegration:
+    """Integration tests for parameterize functionality"""
     
     @pytest.mark.needs_openff
-    def test_parametrize_file_copying(self):
+    def test_parameterize_file_copying(self):
         """Test that input files are properly copied to work directory"""
-        import seekrflow.parametrize as parametrize
+        import seekrflow.parameterize as parameterize
         with tempfile.TemporaryDirectory() as tmpdir:
             # Use the existing test file instead of creating a minimal one
             test_data_dir = os.path.join(os.path.dirname(__file__), "data")
@@ -199,10 +199,10 @@ class TestParametrizeIntegration:
             flow.make_work_directory(pathlib.Path(work_dir))
             
             # Test file copying specifically by copying the files manually  
-            # (to avoid running the full parametrization which will fail)
+            # (to avoid running the full parameterization which will fail)
             from shutil import copyfile
             work_copy_pdb = os.path.join(work_dir, os.path.basename(test_pdb))
-            work_copy_sdf = os.path.join(work_dir, parametrize.DEFAULT_LIGAND_SDF_FILENAME)
+            work_copy_sdf = os.path.join(work_dir, parameterize.DEFAULT_LIGAND_SDF_FILENAME)
             
             copyfile(test_pdb, work_copy_pdb)
             copyfile(original_sdf, work_copy_sdf)

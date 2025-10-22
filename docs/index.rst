@@ -10,9 +10,9 @@ Seekrflow is a workflow management system for molecular simulations using seekr.
 
 **Key Features:**
 
-- Automated workflow from system parametrization to running simulations
+- Automated workflow from system parameterization to running simulations
 - Seekr stages may be run locally or on remote high-performance computing resources
-- Automatically parametrize a molecular system with a standard force field (if you dare!)
+- Automatically parameterize a molecular system with a standard force field (if you dare!)
 - API may be used for batch seekr job creation and submission
 
 .. grid:: 1 1 2 2
@@ -95,7 +95,7 @@ JSON file, and the resname of the ligand. The example can be run with the follow
 .. code-block:: bash
 
    cd ~/seekrflow/examples/trypsin_benzamidine/
-   python ~/seekrflow/seekrflow/parametrize.py protein_ligand.pdb --input_json seekrflow.json --ligand_resname BEN
+   python ~/seekrflow/seekrflow/parameterize.py protein_ligand.pdb --input_json seekrflow.json --ligand_resname BEN
    python ~/seekrflow/seekrflow/flow.py seekrflow.json prepare
    python ~/seekrflow/seekrflow/flow.py seekrflow.json run
    python ~/seekr2/seekr2/analyze.py work/root/model.xml

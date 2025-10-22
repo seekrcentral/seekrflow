@@ -17,7 +17,7 @@
     "pressure": null,
     "barostat_period": null,
     "stepsize": 0.002,
-    "parametrizer": {
+    "parameterizer": {
         "forcefield": "gaff-2.11",
         "water_model": "tip3p",
         "auxiliary_forcefield_files": ["amber/ff14SB.xml",

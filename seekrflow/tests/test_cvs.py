@@ -139,7 +139,7 @@ class TestGetReceptorLigandComComSelections:
         pdb_file = os.path.join(TEST_DIRECTORY, "data", "trypsin_benzamidine.pdb")
         
         # Create a basic seekrflow object
-        seekrflow = create_seekrflow.create_unparametrized_seekrflow(
+        seekrflow = create_seekrflow.create_unparameterized_seekrflow(
             pdb_file, "BEN", [0.5, 1.0]
         )
         seekrflow.ligand_indices = []  # Force it to use ligand_resname
@@ -162,7 +162,7 @@ class TestGetReceptorLigandComComSelections:
         # Pre-define ligand indices
         ligand_indices = list(traj.topology.select("resname BEN"))
         
-        seekrflow = create_seekrflow.create_unparametrized_seekrflow(
+        seekrflow = create_seekrflow.create_unparameterized_seekrflow(
             pdb_file, "BEN", [0.5, 1.0]
         )
         seekrflow.ligand_indices = ligand_indices
@@ -178,7 +178,7 @@ class TestGetReceptorLigandComComSelections:
         """Test COM-COM selections with different alpha carbon thresholds"""
         pdb_file = os.path.join(TEST_DIRECTORY, "data", "trypsin_benzamidine.pdb")
         
-        seekrflow = create_seekrflow.create_unparametrized_seekrflow(
+        seekrflow = create_seekrflow.create_unparameterized_seekrflow(
             pdb_file, "BEN", [0.5, 1.0]
         )
         seekrflow.ligand_indices = []
@@ -203,7 +203,7 @@ class TestGetReceptorLigandComComSelections:
         """Test assertion when ligand_resname is empty and ligand_indices is empty"""
         pdb_file = os.path.join(TEST_DIRECTORY, "data", "trypsin_benzamidine.pdb")
         
-        seekrflow = create_seekrflow.create_unparametrized_seekrflow(
+        seekrflow = create_seekrflow.create_unparameterized_seekrflow(
             pdb_file, "", [0.5, 1.0]  # Empty ligand_resname
         )
         seekrflow.ligand_indices = []  # Empty ligand_indices
@@ -215,7 +215,7 @@ class TestGetReceptorLigandComComSelections:
         """Test COM-COM selections with zero threshold"""
         pdb_file = os.path.join(TEST_DIRECTORY, "data", "trypsin_benzamidine.pdb")
         
-        seekrflow = create_seekrflow.create_unparametrized_seekrflow(
+        seekrflow = create_seekrflow.create_unparameterized_seekrflow(
             pdb_file, "BEN", [0.5, 1.0]
         )
         seekrflow.ligand_indices = []
@@ -231,7 +231,7 @@ class TestGetReceptorLigandComComSelections:
         """Test COM-COM selections with very large threshold"""
         pdb_file = os.path.join(TEST_DIRECTORY, "data", "trypsin_benzamidine.pdb")
         
-        seekrflow = create_seekrflow.create_unparametrized_seekrflow(
+        seekrflow = create_seekrflow.create_unparameterized_seekrflow(
             pdb_file, "BEN", [0.5, 1.0]
         )
         seekrflow.ligand_indices = []
@@ -266,7 +266,7 @@ class TestGetBdReceptorLigandSelections:
             pytest.skip("Required PDB/PQR files not available for BD test")
         
         # Create seekrflow object with BD settings
-        seekrflow = create_seekrflow.create_unparametrized_seekrflow(
+        seekrflow = create_seekrflow.create_unparameterized_seekrflow(
             pdb_file, "BEN", [0.5, 1.0]
         )
         seekrflow.bd_settings = structures.BD_settings()
@@ -294,7 +294,7 @@ class TestGetBdReceptorLigandSelections:
         if not (os.path.exists(pdb_file) and os.path.exists(receptor_pqr) and os.path.exists(ligand_pqr)):
             pytest.skip("Required PDB/PQR files not available for BD test")
         
-        seekrflow = create_seekrflow.create_unparametrized_seekrflow(
+        seekrflow = create_seekrflow.create_unparameterized_seekrflow(
             pdb_file, "BEN", [0.5, 1.0]
         )
         seekrflow.bd_settings = structures.BD_settings()
@@ -329,7 +329,7 @@ class TestGetBdReceptorLigandSelections:
         if not (os.path.exists(pdb_file) and os.path.exists(receptor_pqr) and os.path.exists(ligand_pqr)):
             pytest.skip("Required PDB/PQR files not available for BD test")
         
-        seekrflow = create_seekrflow.create_unparametrized_seekrflow(
+        seekrflow = create_seekrflow.create_unparameterized_seekrflow(
             pdb_file, "BEN", [0.5, 1.0]
         )
         seekrflow.bd_settings = structures.BD_settings()
@@ -355,7 +355,7 @@ class TestGetBdReceptorLigandSelections:
         if not (os.path.exists(pdb_file) and os.path.exists(receptor_pqr) and os.path.exists(ligand_pqr)):
             pytest.skip("Required PDB/PQR files not available for BD test")
         
-        seekrflow = create_seekrflow.create_unparametrized_seekrflow(
+        seekrflow = create_seekrflow.create_unparameterized_seekrflow(
             pdb_file, "BEN", [0.5, 1.0]
         )
         seekrflow.bd_settings = structures.BD_settings()
@@ -377,7 +377,7 @@ class TestGetBdReceptorLigandSelections:
         if not os.path.exists(pdb_file):
             pytest.skip("Required PDB file not available for BD test")
         
-        seekrflow = create_seekrflow.create_unparametrized_seekrflow(
+        seekrflow = create_seekrflow.create_unparameterized_seekrflow(
             pdb_file, "BEN", [0.5, 1.0]
         )
         seekrflow.bd_settings = structures.BD_settings()
@@ -403,7 +403,7 @@ class TestGetBdReceptorLigandSelections:
         if not (os.path.exists(pdb_file) and os.path.exists(receptor_pqr) and os.path.exists(ligand_pqr)):
             pytest.skip("Required PDB/PQR files not available for BD test")
         
-        seekrflow = create_seekrflow.create_unparametrized_seekrflow(
+        seekrflow = create_seekrflow.create_unparameterized_seekrflow(
             pdb_file, "BEN", [0.5, 1.0]
         )
         seekrflow.bd_settings = structures.BD_settings()
@@ -459,7 +459,7 @@ class TestCvsModuleEdgeCases:
         """Test function behavior with invalid PDB file paths"""
         invalid_pdb = "/nonexistent/path/file.pdb"
         
-        seekrflow = create_seekrflow.create_unparametrized_seekrflow(
+        seekrflow = create_seekrflow.create_unparameterized_seekrflow(
             invalid_pdb, "LIG", [0.5, 1.0]
         )
         
@@ -471,7 +471,7 @@ class TestCvsModuleEdgeCases:
         """Test that repeated calls give consistent results"""
         pdb_file = os.path.join(TEST_DIRECTORY, "data", "trypsin_benzamidine.pdb")
         
-        seekrflow = create_seekrflow.create_unparametrized_seekrflow(
+        seekrflow = create_seekrflow.create_unparameterized_seekrflow(
             pdb_file, "BEN", [0.5, 1.0]
         )
         
