@@ -14,11 +14,14 @@ import seekrflow.modules.structures as structures
 
 def prepare_model(
         seekrflow: structures.Seekrflow,
+        src_pdb_filename: str | None = None,
         force_overwrite: bool = False
         ) -> None:
     """
     Construct and prepare the model for seekr simulation.
     """
+    assert src_pdb_filename is not None, \
+        "Source PDB filename must be provided to prepare the model."
     seekrflow.work_directory = os.path.abspath(seekrflow.work_directory)
     curdir = os.getcwd()
     os.chdir(seekrflow.work_directory)
@@ -63,18 +66,11 @@ def prepare_model(
         model_dir = os.path.dirname(xml_path)
         model.anchor_rootdir = os.path.abspath(model_dir)
     seekr2_check.check_pre_simulation_all(model)
-    if seekrflow.workflow.solvated_system_for_md is None:
-        starting_pdb_basename = "complex-equil.pdb"
-        src_pdb_filename = os.path.join(structures.PARAMETERIZE, starting_pdb_basename)
-    elif seekrflow.workflow.solvated_system_for_md.solvated_pdb == "":
-        starting_pdb_basename = "complex-equil.pdb"
-        src_pdb_filename = os.path.join(structures.PARAMETERIZE, starting_pdb_basename)
-    else:
-        starting_pdb_basename = os.path.basename(
-            seekrflow.workflow.solvated_system_for_md.solvated_pdb)
-        src_pdb_filename = seekrflow.workflow.solvated_system_for_md.solvated_pdb
+    starting_pdb_basename = os.path.basename(src_pdb_filename)
     dest_pdb_relative_filename = os.path.join(structures.ROOT, starting_pdb_basename)
     dest_pdb_filename = os.path.join(seekrflow.work_directory, dest_pdb_relative_filename)
     if not os.path.exists(dest_pdb_filename):
         copyfile(src_pdb_filename, dest_pdb_filename)
     os.chdir(curdir)
+
+    # TODO: work on force-overwrite functionality...

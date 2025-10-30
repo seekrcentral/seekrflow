@@ -73,11 +73,11 @@ def transfer_files_with_rsync(
         remote_path += "/"
     
     if backwards:
-        c.rsync(source=remote_path, target=local_path, rsync_opts="-q -c", 
+        c.rsync(source=remote_path, target=local_path, rsync_opts="-q -c -u", 
                 backwards=True)
 
     else:
-        c.rsync(source=local_path, target=remote_path, rsync_opts="-q -c", 
+        c.rsync(source=local_path, target=remote_path, rsync_opts="-q -c -u", 
                 backwards=False)
 
     print("Transfer complete!")

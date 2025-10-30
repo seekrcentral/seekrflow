@@ -85,7 +85,7 @@
                 "account": "YOUR ACCOUNT NAME",
                 "constraint": "scratch",
                 "nodes_per_block": 1,
-                "cores_per_node": 32,
+                "cpus_per_task": 32,
                 "memory_per_node": 64000,
                 "time_limit": "00:30:00",
                 "scheduler_options": "--gpus-per-node=1 --gpu-bind=closest",
@@ -110,7 +110,7 @@
                 "partition": "gpu",
                 "account": "YOUR ACCOUNT NAME",
                 "nodes_per_block": 1,
-                "cores_per_node": 4,
+                "cpus_per_task": 4,
                 "memory_per_node": 64000,
                 "time_limit": "00:30:00",
                 "scheduler_options": "--gres gpu:1 --gpus-per-node=1",
@@ -135,7 +135,7 @@
                 "account": "YOUR ACCOUNT NAME",
                 "constraint": "scratch",
                 "nodes_per_block": 1,
-                "cores_per_node": 32,
+                "cpus_per_task": 32,
                 "memory_per_node": 64000,
                 "time_limit": "00:30:00",
                 "scheduler_options": "--gpus-per-node=1 --gpu-bind=closest",
@@ -152,7 +152,6 @@
         ],
         "bd_stage_resource_name": "local",
         "hidr_stage_resource_name": "anvil",
-        "seekr_stage_resource_name": "delta",
-        "allow_parsl_usage_tracking": false
+        "seekr_stage_resource_name": "delta"
     }
 }

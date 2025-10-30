@@ -28,7 +28,6 @@ dependencies = [
     "mdtraj",
     "parmed",
     "rdkit",
-    "parsl",
     "fabric",
     "networkx"
 ]

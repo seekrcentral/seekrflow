@@ -16,11 +16,15 @@ import cattrs
 from cattrs.strategies import include_subclasses
 
 import seekrflow.modules.base as base
+import seekrflow.modules.workflows.structures as workflow_structures
 import seekrflow.modules.workflows.protein_ligand_seekr2.structures \
     as protein_ligand_seekr2_structures
 import seekrflow.modules.workflows.protein_ligand_membrane_seekr2.structures \
     as protein_ligand_membrane_seekr2_structures
 import seekrflow.modules.parameterize_structures as parameterizer_structures
+import seekrflow.modules.parameters_topology_structures \
+    as parameters_topology_structures
+
 
 WORK = "work"
 PARAMETERIZE = "parameterize"
@@ -189,7 +193,7 @@ class Resource_remote_slurm(Resource_remote_base):
         default=1,
         validator=validators.instance_of(int),
         )
-    cores_per_node: int = field(
+    cpus_per_task: int = field(
         default=1,
         validator=validators.instance_of(int),
         )
@@ -244,6 +248,8 @@ class Run_settings:
         """
         Get a resource by its name.
         """
+        if resource_name == "local":
+            return None
         for resource in self.resources:
             if resource.name == resource_name:
                 return resource
@@ -288,15 +294,22 @@ class Seekrflow:
         default=Factory(base.Physical_attributes),
         validator=validators.instance_of(base.Physical_attributes),
         )
-    work_directory: str = field(
+    work_directory: str | None = field(
         default="work",
-        validator=validators.instance_of(str),
-        )
+        validator=validators.optional(validators.instance_of(str))
+    )
+    root_directory: str | None = field(
+        default=None,
+        validator=validators.optional(validators.instance_of(str))
+    )
     parameterizer: parameterizer_structures.Parameterizer | None = field(
-        default=Factory(parameterizer_structures.Parameterizer),
+        default=None,
         validator=validators.optional(validators.instance_of(parameterizer_structures.Parameterizer)),
-        )
-    run_settings: Run_settings | None = None
+    )
+    run_settings: Run_settings = field(
+        default=Factory(Run_settings),
+        validator=validators.instance_of(Run_settings),
+    )
 
     def save(
             self,
@@ -360,6 +373,153 @@ class Seekrflow:
         run_dir = pathlib.Path(self.work_directory) / RUN
         os.makedirs(run_dir, exist_ok=True)
         return run_dir
+    
+    def handle_ligand_indices(
+            self,
+            ligand_indices: str,
+            ligand_resname: str,
+            pdb_filename: str
+            ) -> None:
+        """
+        Handle the ligand indices string and set the ligand_indices attribute.
+        """
+        if self.workflow.has_small_molecule_ligand():
+            # If the ligand resname is not provided, use the one from the seekrflow input
+            if ligand_resname == "":
+                ligand_resname = self.workflow.parameterizer_information.ligand_resname
+            else:
+                self.workflow.parameterizer_information.ligand_resname = ligand_resname
+
+            # if the ligand indices are provided, use them preferentially
+            if ligand_indices != "":
+                ligand_indices = base.initialize_ref_indices(ligand_indices)
+            else:
+                if len(self.workflow.ligand_indices) > 0:
+                    ligand_indices = self.workflow.ligand_indices
+                elif ligand_resname != "":
+                    ligand_indices = base.get_ligand_indices(pdb_filename, ligand_resname)
+                else:
+                    # TODO: implement some automated way to identify the ligand molecule
+                    # in a molecular complex?
+                    ligand_indices = []
+
+            if len(ligand_indices) > 0:
+                self.workflow.ligand_indices = ligand_indices
+            else:
+                if len(self.workflow.ligand_indices) == 0:
+                    if self.workflow.parameterizer_information.ligand_resname != "":
+                        self.workflow.ligand_indices = base.get_ligand_indices(
+                            self.workflow.parameterizer_information\
+                                .receptor_ligand_pdb_filename, 
+                            self.workflow.parameterizer_information.ligand_resname)
+                    else:
+                        raise Exception("No ligand indices provided and no ligand "
+                                        "residue name specified.")
+
+        return
+    
+    def assign_seekrflow_parameter_topology_files(
+            self,
+            parameter_topology_files: list[str]
+            ) -> None:
+        """
+        Assign parameter and topology files to seekrflow structure.
+        """
+        assert parameter_topology_files is not None
+        # First, we must try to discern the types of parameter files provided
+        file_extensions = [os.path.splitext(f)[-1].lower() for f in parameter_topology_files]
+        if ".prmtop" in file_extensions or ".parm7" in file_extensions:
+            # Then assume AMBER - find the prmtop or parm7 file and assign it
+            for f in parameter_topology_files:
+                ext = os.path.splitext(f)[-1].lower()
+                if ext == ".prmtop" or ext == ".parm7":
+                    self.workflow.solvated_system_for_md.parameters_topology \
+                        = parameters_topology_structures.Amber_parameters_topology()
+                    self.workflow.solvated_system_for_md.parameters_topology\
+                        .prmtop_filename = f
+                    break
+        elif ".psf" in file_extensions:
+            # Then assume CHARMM - find the psf file and assign it
+            other_parameter_files = []
+            for f in parameter_topology_files:
+                ext = os.path.splitext(f)[-1].lower()
+                if ext == ".psf":
+                    self.workflow.solvated_system_for_md.parameters_topology \
+                        = parameters_topology_structures.Charmm_parameters_topology()
+                    self.workflow.solvated_system_for_md.parameters_topology\
+                        .psf_filename = f
+                else:
+                    other_parameter_files.append(f)
+            self.workflow.solvated_system_for_md.parameters_topology\
+                .param_filename_list = other_parameter_files
+        elif ".top" in file_extensions or ".gro" in file_extensions:
+            raise NotImplementedError(
+                "GROMACS parameter and topology files are not yet supported.")
+        elif ".xml" in file_extensions:
+            # Then assume OpenMM XML file
+            for f in parameter_topology_files:
+                ext = os.path.splitext(f)[-1].lower()
+                if ext == ".xml":
+                    self.workflow.solvated_system_for_md.parameters_topology \
+                        = parameters_topology_structures.Openmm_system()
+                    self.workflow.solvated_system_for_md.parameters_topology\
+                        .system_filename = f
+                    break
+        else:
+            raise ValueError(
+                "Could not discern parameter and topology file types from "
+                "provided files. Supported types include AMBER (.prmtop, .parm7), "
+                "CHARMM (.psf), GROMACS (.top, .itp), and OpenMM (.xml).")
+        return
+
+def try_to_load_resources_json(
+        seekrflow: "Seekrflow",
+        ) -> None:
+    """
+    Try to load a resources JSON file and add the resources to the seekrflow
+    run_settings.
+    """
+    home_seekrflow_resources_filename = os.path.expanduser(
+        "~/.seekrflow_resources.json")
+    if seekrflow.work_directory is not None:
+        work_seekrflow_resources_filename = os.path.join(
+            seekrflow.work_directory, "seekrflow_resources.json")
+    else:
+        work_seekrflow_resources_filename = None
+    if seekrflow.root_directory is not None:
+        root_seekrflow_resources_filename = os.path.join(
+            seekrflow.root_directory, "seekrflow_resources.json")
+    else:
+        root_seekrflow_resources_filename = None
+
+    json_str: dict | None = None
+    if root_seekrflow_resources_filename is not None:
+        if os.path.exists(root_seekrflow_resources_filename):
+            with open(root_seekrflow_resources_filename, "r") as file:
+                json_str = json.load(file)
+
+    if json_str is None and work_seekrflow_resources_filename is not None:
+        if os.path.exists(work_seekrflow_resources_filename):
+            with open(work_seekrflow_resources_filename, "r") as file:
+                json_str = json.load(file)
+
+    if json_str is None:
+        if os.path.exists(home_seekrflow_resources_filename):
+            with open(home_seekrflow_resources_filename, "r") as file:
+                json_str = json.load(file)
+
+    if json_str is None:
+        return
+    
+    converter: cattrs.Converter = cattrs.Converter()
+    run_settings_obj: Run_settings = converter.structure(json_str, Run_settings)
+    if seekrflow.run_settings is None:
+        seekrflow.run_settings = Run_settings()
+    for resource in run_settings_obj.resources:
+        if resource.name in [r.name for r in seekrflow.run_settings.resources]:
+            continue
+        seekrflow.run_settings.resources.append(resource)
+    return
 
 def load_seekrflow(
         filename: str
@@ -371,6 +531,7 @@ def load_seekrflow(
         json_string: str = json.load(file)
     converter: cattrs.Converter = cattrs.Converter()
     seekrflow_obj: Seekrflow = converter.structure(json_string, Seekrflow)
+    try_to_load_resources_json(seekrflow_obj)
     return seekrflow_obj
 
 def save_new_seekrflow(
@@ -398,3 +559,23 @@ def save_new_seekrflow(
     print("Saving new seekrflow.json")
     seekrflow.save(model_path)
     return
+
+def assign_default_prepare_settings(
+        seekrflow: Seekrflow
+        ) -> None:
+    """
+    Assign default prepare settings to the seekrflow structure.
+    """
+    seekrflow.workflow.parameterizer_information = \
+        protein_ligand_seekr2_structures.Parameterizer_information()
+    seekrflow.workflow.hidr_settings = protein_ligand_seekr2_structures\
+        .HIDR_settings_metaD()
+    seekrflow.workflow.mmvt_settings = protein_ligand_seekr2_structures\
+        .MMVT_seekr_settings()
+    seekrflow.workflow.mmvt_settings.anchor_radius_list \
+        = [0.15, 0.225, 0.3, 0.375, 0.45, 0.525, 0.6, 0.7, 0.8, 0.9, \
+           1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0, 2.2, \
+            2.4, 2.6, 2.8]
+    seekrflow.workflow.md_settings = workflow_structures.MD_settings()
+    seekrflow.workflow.bd_settings = workflow_structures.BD_settings()
+    seekrflow.physical_attributes = base.Physical_attributes()

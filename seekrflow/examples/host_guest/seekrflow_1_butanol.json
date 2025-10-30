@@ -51,7 +51,6 @@
         "resources": [],
         "bd_stage_resource_name": "local",
         "hidr_stage_resource_name": "local",
-        "seekr_stage_resource_name": "local",
-        "allow_parsl_usage_tracking": false
+        "seekr_stage_resource_name": "local"
     }
 }

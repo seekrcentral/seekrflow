@@ -15,6 +15,7 @@ from io import StringIO
 import seekrflow.modules.prettify as prettify
 
 def submit_remote_workflow_with_ssh(
+        name: str,
         run_workflow: typing.Any,
         cancel_workflow: typing.Any,
         status_workflow: typing.Any,

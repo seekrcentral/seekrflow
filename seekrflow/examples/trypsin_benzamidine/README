@@ -9,10 +9,10 @@ Next, we can perform automatic parameterization:
 WARNING: make sure to indicate in tutorials and documentation that automatic parameterization
 can get protein chains wrong - what if there's a dimer?
 
-python ~/seekrflow/seekrflow/parameterize.py protein_ligand.pdb -i seekrflow.json -L BEN
+python ~/seekrflow/seekrflow/parameterize.py --input_json seekrflow.json --ligand_resname BEN
 
 Next, prepare the model:
 
-python ~/seekrflow/seekrflow/flow.py seekrflow.json prepare
+python ~/seekrflow/seekrflow/flow.py prepare --input_json seekrflow.json
 
-python ~/seekrflow/seekrflow/flow.py seekrflow.json run
+python ~/seekrflow/seekrflow/flow.py run --input_json seekrflow.json

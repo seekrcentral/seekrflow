@@ -198,49 +198,16 @@ def main() -> None:
             "Nonexistent ligand SDF file: {}".format(ligand_sdf_file)
         seekrflow.workflow.parameterizer_information.ligand_sdf_file\
             = ligand_sdf_file
-    
-    if seekrflow.workflow.has_small_molecule_ligand():
-        # If the ligand resname is not provided, use the one from the seekrflow input
-        if ligand_resname == "":
-            ligand_resname = seekrflow.workflow.parameterizer_information.ligand_resname
-        else:
-            seekrflow.workflow.parameterizer_information.ligand_resname = ligand_resname
-
-        # if the ligand indices are provided, use them preferentially
-        if ligand_indices != "":
-            ligand_indices = base.initialize_ref_indices(ligand_indices)
-        else:
-            if len(seekrflow.workflow.ligand_indices) > 0:
-                ligand_indices = seekrflow.workflow.ligand_indices
-            elif ligand_resname != "":
-                ligand_indices = base.get_ligand_indices(pdb_with_system, ligand_resname)
-            else:
-                # TODO: implement some automated way to identify the ligand molecule
-                # in a molecular complex?
-                ligand_indices = []
-
     if work_dir == "":
         work_dir = seekrflow.work_directory
     seekrflow.make_work_directory(work_dir)
     if external_ff_file is not None:
         if not os.path.exists(external_ff_file):
-            raise FileNotFoundError(f"External force field file {external_ff_file} does not exist.")
-        
+            raise FileNotFoundError(f"External force field file {external_ff_file} "
+                                    "does not exist.")
         seekrflow.parameterizer.forcefield = external_ff_file
-    
-    if seekrflow.workflow.has_small_molecule_ligand():
-        if len(ligand_indices) > 0:
-            seekrflow.workflow.ligand_indices = ligand_indices
-        else:
-            if len(seekrflow.workflow.ligand_indices) == 0:
-                if seekrflow.workflow.parameterizer_information.ligand_resname != "":
-                    seekrflow.workflow.ligand_indices = base.get_ligand_indices(
-                        seekrflow.workflow.parameterizer_information\
-                            .receptor_ligand_pdb_filename, 
-                        seekrflow.workflow.parameterizer_information.ligand_resname)
-                else:
-                    raise Exception("No ligand indices provided and no ligand residue name specified.")
-
+    seekrflow.handle_ligand_indices(ligand_indices, ligand_resname, pdb_with_system)
+ 
     system_filename, positions_filename = parameterize(seekrflow)
     seekrflow.work_directory = str(work_dir)
     # TODO: not going to save a new seekrflow file - attempt to use default values.

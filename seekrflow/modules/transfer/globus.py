@@ -90,7 +90,7 @@ def transfer_files_with_globus(
         source_collection_id,
         destination_collection_id,
         label=f"{name} files transfer",
-        sync_level="checksum",
+        sync_level="mtime",
         verify_checksum=True,
         encrypt_data=True,
     )

@@ -77,11 +77,11 @@ class MMVT_seekr_settings:
     """
     type: typing.Literal["MMVT"] = "MMVT"
     md_output_interval: int = field(
-        default=10000,
+        default=2500000,
         validator=validators.instance_of(int),
         )
     md_steps_per_anchor: int = field(
-        default=1000000,
+        default=250000000,
         validator=validators.instance_of(int),
         )
     cv_type: str = field(
@@ -141,10 +141,9 @@ class Protein_ligand_seekr2_workflow:
         default=None,
         validator=validators.optional(validators.instance_of(str)),
         )
-    parameterizer_information: Parameterizer_information | None = field(
-        default=None,
-        validator=validators.optional(
-            validators.instance_of(Parameterizer_information)),
+    parameterizer_information: Parameterizer_information = field(
+        default=Factory(Parameterizer_information),
+        validator=validators.instance_of(Parameterizer_information),
         )
     # TODO: remove? Since this probably ought to be chosen automatically based on
     # alpha carbon proximity to the ligand.

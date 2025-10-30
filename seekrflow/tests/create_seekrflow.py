@@ -46,7 +46,6 @@ def create_unparameterized_seekrflow(
     seekrflow.run_settings.bd_stage_resource_name = "local"
     seekrflow.run_settings.hidr_stage_resource_name = "local"
     seekrflow.run_settings.seekr_stage_resource_name = "local"
-    seekrflow.run_settings.allow_parsl_usage_tracking = False
     return seekrflow
 
 def create_parameterized_seekrflow(

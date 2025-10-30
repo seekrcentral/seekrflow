@@ -13,6 +13,7 @@ import parmed
 
 PME_TOL = 2.5e-4
 APBS_GRID_SPACING = 0.5
+BENCHMARK_MIN_SIMULATION_LENGTH = 100000 # steps
 
 @define
 class Physical_attributes:
