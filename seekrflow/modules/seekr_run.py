@@ -24,6 +24,7 @@ import seekrflow.modules.workload_managers.remote as workload_remote
 
 KEYSTROKE_CHECK_INTERVAL = 1.0 # seconds
 MAIN_LOOP_INTERVAL = 30.0 # 600.0  # seconds
+MAX_SUBSEQUENT_NONCOMPLETED_RUNS = 3
 
 def determine_stage_manager_status(manager_status: dict | None) -> str:
     """
@@ -224,6 +225,11 @@ def run_model(
     using_bd = model.using_bd()
     if benchmark_mode:
         print("Benchmark mode enabled: only short MD runs will be performed.")
+        # Set remote submission times to small values 
+        # TODO: move to beginning of seekr stage?
+        #for resource in seekrflow.run_settings.resources:
+        #    if resource.type == "slurm_remote":
+        #        resource.time_limit = "00:30:00"
         using_bd = False
     # Run through the stages, see which are completed, started, running, queued, 
     # unstarted, and skipping.
@@ -244,6 +250,11 @@ def run_model(
     stage_processes = {"bd": None, "hidr": None, "seekr": {}}  
     stage_statuses = {}
     stage_running_locally = {}
+    stage_subsequent_noncompleted_runs = {}
+    
+    # Track consecutive empty job checks to avoid premature resubmission
+    MAX_EMPTY_CHECKS_BEFORE_RESUBMIT = 10
+    empty_jobs_check_count = {stage: MAX_EMPTY_CHECKS_BEFORE_RESUBMIT + 1 for stage in stage_names}
     
     # Override resource names if provided
     if bd_resource_name is not None:
@@ -271,6 +282,7 @@ def run_model(
             # but we can track the PID and monitor/kill it via the state file
             print(f"  Reattached to {stage_name} process (PID: {existing_state.pid})")
             # stage_processes[stage_name] remains None - we'll use the PID from state file
+        stage_subsequent_noncompleted_runs[stage_name] = 0
 
     # Handle force_rerun - kill any existing processes for those stages, then delete files
     if force_rerun is not None:
@@ -314,14 +326,13 @@ def run_model(
     k - (k)ill all running/queued jobs,
     t [STAGE] - (t)ransfer remote files back for STAGE (bd, hidr, seekr, all).
     """
-    print(instruction_str, flush=True)
     
     try:
         while keep_running:
             # TODO: check each stage based on whether they were submitted or queued in the
             #  previous step. If there's a sudden change (like a job finishing), there might
             #  be an error in configuration or something.
-            print("ITERATION:", iteration)
+            #print("ITERATION:", iteration)
             end_of_loop_time = time.time() + MAIN_LOOP_INTERVAL
             # Get stage and manager statuses
             for stage_name in stage_names:
@@ -358,6 +369,13 @@ def run_model(
                         if manager_status and manager_status.get("jobs"):
                             for job in manager_status["jobs"]:
                                 stage_job_ids[stage_name].append(job["JobID"])
+                    
+                    # Track consecutive empty job checks for remote stages
+                    if stage_locations[stage_name] != "local":
+                        jobs = manager_status.get("jobs", []) if manager_status else []
+                        empty_jobs_check_count[stage_name] = (
+                            empty_jobs_check_count[stage_name] + 1 if len(jobs) == 0 else 0
+                        )
             
                 elif stage_name == "hidr":
                     stage_locations[stage_name] = seekrflow.run_settings.hidr_stage_resource_name
@@ -385,6 +403,13 @@ def run_model(
                     if manager_status and manager_status.get("jobs"):
                         for job in manager_status["jobs"]:
                             stage_job_ids[stage_name].append(job["JobID"])
+                    
+                    # Track consecutive empty job checks for remote stages
+                    if stage_locations[stage_name] != "local":
+                        jobs = manager_status.get("jobs", []) if manager_status else []
+                        empty_jobs_check_count[stage_name] = (
+                            empty_jobs_check_count[stage_name] + 1 if len(jobs) == 0 else 0
+                        )
 
                 elif stage_name == "seekr":
                     stage_locations[stage_name] = seekrflow.run_settings.seekr_stage_resource_name
@@ -410,6 +435,13 @@ def run_model(
                     if manager_status and manager_status.get("jobs"):
                         for job in manager_status["jobs"]:
                             stage_job_ids[stage_name].append(job["JobID"])
+                    
+                    # Track consecutive empty job checks for remote stages
+                    if stage_locations[stage_name] != "local":
+                        jobs = manager_status.get("jobs", []) if manager_status else []
+                        empty_jobs_check_count[stage_name] = (
+                            empty_jobs_check_count[stage_name] + 1 if len(jobs) == 0 else 0
+                        )
 
             # Write to the status file
             with open(job_status_filename, "w") as f:
@@ -426,13 +458,22 @@ def run_model(
                     stage_should_submit_new_run[stage_name] = True
                 else:
                     stage_should_submit_new_run[stage_name] = False
+                    stage_manager_status[stage_name] = "idle"
                 # Check dependencies
                 for dependency in stage_dependencies[stage_name]:
                     if stage_progress[dependency] != "completed":
                         stage_should_submit_new_run[stage_name] = False
-                if stage_manager_status[stage_name] not in ["idle", "n/a"]:
+                        stage_manager_status[stage_name] = "waiting"
+                if stage_manager_status[stage_name] not in ["idle", "n/a", "waiting"]:
                     stage_should_submit_new_run[stage_name] = False
                     number_of_running_stages += 1
+                
+                # For remote stages with empty jobs, require multiple checks before resubmit
+                if (stage_locations[stage_name] != "local" 
+                        and stage_manager_status[stage_name] == "idle"
+                        and empty_jobs_check_count[stage_name] <= MAX_EMPTY_CHECKS_BEFORE_RESUBMIT):
+                    stage_should_submit_new_run[stage_name] = False
+                
                 if stage_should_submit_new_run[stage_name]:
                     number_of_stages_to_submit_new_run += 1
 
@@ -468,6 +509,7 @@ def run_model(
             transfer_before = None  # only transfer once at beginning
             
             if using_bd and stage_should_submit_new_run["bd"]:
+                stage_subsequent_noncompleted_runs[stage_name] += 1
                 if stage_locations["bd"] != "local":
                     resource: structures.Resource_remote_base \
                         = seekrflow.run_settings.get_resource_by_name(stage_locations["bd"])
@@ -485,8 +527,13 @@ def run_model(
                     stage_run_results["bd"] = bd_run_result
                     stage_manager_status["bd"] = "running"
                     stage_progress["bd"] = "started"
+                    empty_jobs_check_count["bd"] = 0  # Reset counter after submission
+            else:
+                if using_bd:
+                    stage_subsequent_noncompleted_runs["bd"] = 0
                 
             if stage_should_submit_new_run["hidr"]:
+                stage_subsequent_noncompleted_runs["hidr"] += 1
                 if seekrflow.run_settings.hidr_stage_resource_name != "local":
                     resource: structures.Resource_remote_base \
                         = seekrflow.run_settings.get_resource_by_name(stage_locations["hidr"])
@@ -526,16 +573,29 @@ def run_model(
                     stage_run_results["hidr"] = hidr_run_result
                     stage_manager_status["hidr"] = "running"
                     stage_progress["hidr"] = "started"
+                    empty_jobs_check_count["hidr"] = 0  # Reset counter after submission
+
+            else:
+                stage_subsequent_noncompleted_runs["hidr"] = 0
                 
             if stage_should_submit_new_run["seekr"]:
+                stage_subsequent_noncompleted_runs["seekr"] += 1
                 # TODO: what if the resources are different between hidr and seekr stages??
                 # gotta perform a transfer. Assert they are the same for now...
-                assert seekrflow.run_settings.get_resource_by_name(stage_locations["seekr"]) \
-                    == seekrflow.run_settings.get_resource_by_name(stage_locations["hidr"]), \
-                    "For now, SEEKR and HIDR stages must be placed on the same resources."
+                if stage_locations["seekr"] != stage_locations["hidr"]:
+                    seekr_resource = seekrflow.run_settings.get_resource_by_name(stage_locations["seekr"])
+                    hidr_resource = seekrflow.run_settings.get_resource_by_name(stage_locations["hidr"])
+                    transfer_base.transfer_files_to_from_remote_resource(
+                        seekrflow.name, hidr_resource,
+                        root_directory, backwards=True)
+                    transfer_base.transfer_files_to_from_remote_resource(
+                        seekrflow.name, seekr_resource, root_directory)
+
                 if seekrflow.run_settings.seekr_stage_resource_name != "local":
                     resource: structures.Resource_remote_base \
                         = seekrflow.run_settings.get_resource_by_name(stage_locations["seekr"])
+                    if benchmark_mode:
+                        resource.time_limit = "00:30:00"
                     destination_path = os.path.join(
                         resource.remote_working_directory, seekrflow.name)
                     destination_model_filename = os.path.join(destination_path, "model.xml")
@@ -554,8 +614,21 @@ def run_model(
                     stage_run_results["seekr"] = seekr_run_result
                     stage_manager_status["seekr"] = "running"
                     stage_progress["seekr"] = "started"
+                    empty_jobs_check_count["seekr"] = 0  # Reset counter after submission
+
+            else:
+                stage_subsequent_noncompleted_runs["seekr"] = 0
+
+            
+            for stage_name in stage_names:
+                if stage_subsequent_noncompleted_runs[stage_name] \
+                        >= MAX_SUBSEQUENT_NONCOMPLETED_RUNS:
+                    raise RuntimeError(
+                        f"Stage {stage_name} has been submitted "
+                        f"{stage_subsequent_noncompleted_runs[stage_name]} times without progress. "
+                        f"Please check the logs for errors.")
                 
-                # Run BD - if needed
+            # Run BD - if needed
             if using_bd:
                 if stage_running_locally["bd"] and stage_should_submit_new_run["bd"]:
                     # Start BD process
@@ -607,6 +680,8 @@ def run_model(
                 stage_progress["seekr"] = "started"
         
             # Now pause to accept user keystrokes
+            if iteration == 0:
+                print(instruction_str, flush=True)
             while True:
                 if not keep_running:
                     break
@@ -697,7 +772,7 @@ def run_model(
                                         stage_locations[stage_name])
                                     transfer_base.transfer_files_to_from_remote_resource(
                                         seekrflow.name, resource, 
-                                        seekrflow.work_directory, backwards=True)
+                                        root_directory, backwards=True)
                                 else:
                                     print(f"Stage {stage_name} is local; no transfer needed.")
                     

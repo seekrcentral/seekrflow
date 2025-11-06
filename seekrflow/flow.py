@@ -16,7 +16,7 @@ import seekrflow.modules.seekr_run as seekr_run
 
 def assign_seekrflow_defaults(
         seekrflow: structures.Seekrflow,
-        pdb_with_system: str | None = None
+        pdb_with_system: str
         ) -> None:
     """
     Assign default values to any missing seekrflow parameters.
@@ -46,7 +46,7 @@ def assign_seekrflow_defaults(
         seekrflow.workflow.solvated_system_for_md.parameters_topology\
             .system_filename = src_system_filename
     else:
-        if pdb_with_system is not None:
+        if pdb_with_system != "":
             seekrflow.workflow.solvated_system_for_md.solvated_pdb = pdb_with_system
         src_pdb_filename = seekrflow.workflow.solvated_system_for_md.solvated_pdb
     return src_pdb_filename

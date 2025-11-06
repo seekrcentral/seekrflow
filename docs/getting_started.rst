@@ -291,7 +291,7 @@ Here is an example Globus Compute Endpoint configuration file that I used for th
     engine:
     max_workers_per_node: 2
     provider:
-        worker_init: "source $HOME/.bashrc; conda activate SEEKR2; export OPENMM_CUDA_COMPILER=`which nvcc`"
+        worker_init: "source /path/to/your/.bashrc; conda activate SEEKR2; export OPENMM_CUDA_COMPILER=`which nvcc`"
         init_blocks: 1
         max_blocks: 1
         min_blocks: 0
@@ -302,6 +302,10 @@ Here is an example Globus Compute Endpoint configuration file that I used for th
     This configuration applies to the head/login node *before* SLURM/PBS job submission. 
     Notice that the **max_workers_per_node** is set to **2** for proper handling of the
     Globus compute SDK client in seekrflow.
+
+.. note::
+    It may be a better idea to define the OPENMM_CUDA_COMPILER environment variable in your
+    shell initialization file (e.g., ~/.bashrc) rather than in the worker_init command
 
 Start the endpoint.
 
