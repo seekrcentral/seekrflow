@@ -159,7 +159,7 @@ def regenerate_espaloma_system(
 def parametrize_and_check_complex(
         complex_topology: "openmm.app.Topology",
         complex_positions: np.ndarray,
-        offmol: "openff.toolkit.topology.Molecule",
+        offmol: typing.Optional["openff.toolkit.topology.Molecule"],
         param_dir: str,
         parameterizer: parameterize_structures.Parameterizer,
         physical_attributes: base.Physical_attributes,
@@ -176,7 +176,6 @@ def parametrize_and_check_complex(
     modeller = openmm_app.Modeller(complex_topology, complex_positions)
     nonsolvated_topology = modeller.getTopology()
     nonsolvated_positions = modeller.getPositions()
-
     forcefield_kwargs = {'removeCMMotion': True, 
                         'ewaldErrorTolerance': base.PME_TOL, 
                         'constraints': openmm_app.HBonds, 
@@ -190,13 +189,6 @@ def parametrize_and_check_complex(
             md_settings.barostat_period)
     else:
         barostat = None
-    
-    # TODO: these need to be set in the seekrflow object
-    #FF_FILES = [
-    #    "amber/ff14SB.xml",
-    #    "amber/tip3p_standard.xml",
-    #    "amber/tip3p_HFE_multivalent.xml"
-    #]
     
     system_generator = SystemGenerator(
         #forcefields=FF_FILES, 
@@ -215,12 +207,14 @@ def parametrize_and_check_complex(
     simulation = openmm_app.Simulation(nonsolvated_topology, nonsolvated_system, 
                                     integrator)
     simulation.context.setPositions(nonsolvated_positions)
-    simulation.minimizeEnergy(maxIterations=MAX_MINIMIZATION_ITERATIONS)
-    state = simulation.context.getState(getPositions=True, enforcePeriodicBox=True)
+    #simulation.minimizeEnergy(maxIterations=MAX_MINIMIZATION_ITERATIONS)
+    state = simulation.context.getState(getPositions=True, )
+    #                                    enforcePeriodicBox=True) # No PBC yet
     nonsolvated_positions_minimized = state.getPositions()
     output_pdb_filename_nosolv = os.path.join(param_dir, "complex_no_solvent.pdb")
     openmm_app.PDBFile.writeFile(nonsolvated_topology, nonsolvated_positions_minimized, 
                                 file=open(output_pdb_filename_nosolv, 'w'))
+    
     # TODO: set up possibility for triclinic water box
     solv_modeller = openmm_app.Modeller(nonsolvated_topology, nonsolvated_positions_minimized)
     solv_modeller.addSolvent(
@@ -254,12 +248,17 @@ def parametrize_and_check_complex(
         md_settings.friction / unit.picosecond, 
         md_settings.stepsize * unit.picoseconds)
     simulation = openmm_app.Simulation(solvated_topology, solvated_system, integrator)
+    state = simulation.context.getState(getPositions=True, enforcePeriodicBox=True)
     simulation.context.setPositions(solvated_positions)
+    output_pdb_filename_solv = os.path.join(param_dir, "complex_solvent.pdb")
+    openmm_app.PDBFile.writeFile(solvated_topology, solvated_positions, 
+                                file=open(output_pdb_filename_solv, 'w'))
     simulation.minimizeEnergy(maxIterations=MAX_MINIMIZATION_ITERATIONS)
     simulation.step(1000)
     state = simulation.context.getState(getPositions=True, enforcePeriodicBox=True)
     solvated_positions_equilibrated = state.getPositions()
     output_pdb_filename = os.path.join(param_dir, "complex-equil.pdb")
-    openmm_app.PDBFile.writeFile(solvated_topology, solvated_positions_equilibrated, file=open(output_pdb_filename, 'w'))
+    openmm_app.PDBFile.writeFile(solvated_topology, solvated_positions_equilibrated, 
+                                 file=open(output_pdb_filename, 'w'))
     
     return serialized_xml, output_pdb_filename

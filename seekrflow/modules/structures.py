@@ -21,6 +21,8 @@ import seekrflow.modules.workflows.protein_ligand_seekr2.structures \
     as protein_ligand_seekr2_structures
 import seekrflow.modules.workflows.protein_ligand_membrane_seekr2.structures \
     as protein_ligand_membrane_seekr2_structures
+import seekrflow.modules.workflows.protein_protein_seekr2.structures \
+    as protein_protein_seekr2_structures
 import seekrflow.modules.parameterize_structures as parameterizer_structures
 import seekrflow.modules.parameters_topology_structures \
     as parameters_topology_structures
@@ -255,6 +257,24 @@ class Run_settings:
                 return resource
         raise ValueError(
             f"Resource with name '{resource_name}' not found in run_settings.resources.")
+    
+    def get_stage_resource(
+            self,
+            stage_name: str
+            ) -> Resource_base | None:
+        """
+        Get the resource for a given stage.
+        """
+        if stage_name == "bd":
+            resource_name = self.bd_stage_resource_name
+        elif stage_name == "hidr":
+            resource_name = self.hidr_stage_resource_name
+        elif stage_name == "seekr":
+            resource_name = self.seekr_stage_resource_name
+        else:
+            raise ValueError(f"Unknown stage name '{stage_name}'")
+        
+        return self.get_resource_by_name(resource_name)
 
 @define
 class Seekrflow:
@@ -283,11 +303,13 @@ class Seekrflow:
                                  validator=validators.instance_of(str))
     workflow: protein_ligand_seekr2_structures.Protein_ligand_seekr2_workflow \
          | protein_ligand_membrane_seekr2_structures.Protein_ligand_membrane_seekr2_workflow \
+         | protein_protein_seekr2_structures.Protein_protein_seekr2_workflow \
         = field(
         default=Factory(protein_ligand_seekr2_structures.Protein_ligand_seekr2_workflow),
         validator=validators.instance_of(
             protein_ligand_seekr2_structures.Protein_ligand_seekr2_workflow \
-            | protein_ligand_membrane_seekr2_structures.Protein_ligand_membrane_seekr2_workflow
+            | protein_ligand_membrane_seekr2_structures.Protein_ligand_membrane_seekr2_workflow \
+            | protein_protein_seekr2_structures.Protein_protein_seekr2_workflow
             ),
         )
     physical_attributes: base.Physical_attributes = field(

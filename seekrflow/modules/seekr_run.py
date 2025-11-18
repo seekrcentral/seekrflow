@@ -201,10 +201,16 @@ def run_model(
         benchmark_mode: bool = False,
         bd_resource_name: str | None = None,
         hidr_resource_name: str | None = None,
-        seekr_resource_name: str | None = None
+        seekr_resource_name: str | None = None,
+        semaphore_dict: dict[str, str] | None = None
         ) -> None:
     """
     Run the SEEKR calculation using remote and local resources.
+    
+    Semaphore values:
+        - "go": Normal operation (default)
+        - "wait": Don't submit new jobs, but let running jobs finish
+        - "stop": Don't submit new jobs AND kill any running jobs
     """
     curdir = os.getcwd()
     if seekrflow.work_directory is not None:
@@ -255,6 +261,23 @@ def run_model(
     # Track consecutive empty job checks to avoid premature resubmission
     MAX_EMPTY_CHECKS_BEFORE_RESUBMIT = 10
     empty_jobs_check_count = {stage: MAX_EMPTY_CHECKS_BEFORE_RESUBMIT + 1 for stage in stage_names}
+    
+    # Track quick failures (jobs that start running but fail within 2 cycles)
+    previous_stage_manager_status = {stage: "idle" for stage in stage_names}
+    stage_running_start_time = {stage: None for stage in stage_names}
+    stage_quick_failure_warned = {stage: False for stage in stage_names}
+    MIN_RUNNING_TIME_BEFORE_IDLE = 2 * MAIN_LOOP_INTERVAL  # 2 check cycles (60 seconds)
+    
+    # Initialize semaphore dictionary with defaults
+    if semaphore_dict is None:
+        semaphore_dict = {"bd": "go", "hidr": "go", "seekr": "go"}
+    
+    stage_semaphore = semaphore_dict
+    
+    # Validate semaphore values
+    for stage_name, value in stage_semaphore.items():
+        if value not in ["go", "wait", "stop"]:
+            raise ValueError(f"Invalid semaphore value for {stage_name}: {value}")
     
     # Override resource names if provided
     if bd_resource_name is not None:
@@ -321,10 +344,12 @@ def run_model(
     perform_final_transfer = True
     do_process_cleanup = True
     instruction_str = f"""Options: 
-    i [STAGE] - print (i)nformation for STAGE (bd, hidr, seekr, all),
-    d - (d)etach to let jobs keep running and exit seekrflow,
-    k - (k)ill all running/queued jobs,
-    t [STAGE] - (t)ransfer remote files back for STAGE (bd, hidr, seekr, all).
+    i [STAGE] - print (i)nformation for STAGE (bd, hidr, seekr, all), default: all,
+    s [STAGE] - set semaphore to (s)top for STAGE (bd, hidr, seekr, all), kills and prevents jobs, default: all,
+    g [STAGE] - set semaphore to (g)o for STAGE (bd, hidr, seekr, all), allows job submission, default: all,
+    w [STAGE] - set semaphore to (w)ait for STAGE (bd, hidr, seekr, all), pause new submissions, default: all,
+    t [STAGE] - (t)ransfer remote files back for STAGE (bd, hidr, seekr, all),
+    q - (q)uit seekrflow, any running jobs will be detached.
     """
     
     try:
@@ -442,6 +467,94 @@ def run_model(
                         empty_jobs_check_count[stage_name] = (
                             empty_jobs_check_count[stage_name] + 1 if len(jobs) == 0 else 0
                         )
+            
+            # Detect jobs that start running but fail quickly (within 2 check cycles)
+            for stage_name in stage_names:
+                if stage_name == "bd" and not using_bd:
+                    continue
+                
+                current_status = stage_manager_status.get(stage_name, "idle")
+                previous_status = previous_stage_manager_status[stage_name]
+                
+                # Track when job enters running/queued state
+                if current_status in ["running", "queued", "running/queued"] and previous_status == "idle":
+                    stage_running_start_time[stage_name] = time.time()
+                    stage_quick_failure_warned[stage_name] = False  # Reset warning flag
+                
+                # Detect quick failure: running/queued -> idle within MIN_RUNNING_TIME_BEFORE_IDLE
+                elif current_status == "idle" \
+                    and previous_status in ["running", "queued", "running/queued"] \
+                    and stage_semaphore[stage_name] == "go":
+                    start_time = stage_running_start_time[stage_name]
+                    if start_time is not None:
+                        running_duration = time.time() - start_time
+                        if running_duration < MIN_RUNNING_TIME_BEFORE_IDLE and not stage_quick_failure_warned[stage_name]:
+                            # Warn about quick failure
+                            resource = seekrflow.run_settings.get_stage_resource(stage_name)
+                            if resource is None:
+                                work_dir = root_directory_path
+                            else:
+                                work_dir = resource.remote_working_directory
+                            log_path = os.path.join(work_dir, "logs")
+                            print(f"\n{'='*70}")
+                            print(f"WARNING: Stage '{stage_name}' ran for only {running_duration:.0f} seconds before disappearing.")
+                            print(f"This suggests the job may have failed immediately after starting.")
+                            print(f"Common causes:")
+                            print(f"  - Missing module or incorrect environment")
+                            print(f"  - Syntax error in submission script")
+                            print(f"  - Insufficient memory (killed by SLURM)")
+                            print(f"  - Bad file permissions or missing files")
+                            print(f"Check logs at: {log_path}")
+                            print(f"Setting semaphore to 'wait' to prevent resubmission.")
+                            print(f"Press 't {stage_name}' to transfer logs, fix the issue, then restart.")
+                            print(f"{'='*70}\n")
+                            
+                            # Set semaphore to "wait" to prevent automatic resubmission
+                            stage_semaphore[stage_name] = "wait"
+                            stage_quick_failure_warned[stage_name] = True
+                        stage_running_start_time[stage_name] = None
+                
+                # Reset tracking when job runs successfully for longer than threshold
+                elif current_status in ["running", "queued", "running/queued"]:
+                    start_time = stage_running_start_time[stage_name]
+                    if start_time is not None:
+                        running_duration = time.time() - start_time
+                        if running_duration >= MIN_RUNNING_TIME_BEFORE_IDLE:
+                            stage_quick_failure_warned[stage_name] = False  # Reset - this was a legitimate run
+                
+                # Update previous status
+                previous_stage_manager_status[stage_name] = current_status
+            
+            # Handle semaphore controls
+            for stage_name in stage_names:
+                if stage_name == "bd" and not using_bd:
+                    continue
+                
+                # Handle "stop" semaphore - kill running jobs immediately
+                if stage_semaphore[stage_name] == "stop":
+                    if stage_manager_status[stage_name] not in ["idle", "n/a", "waiting"]:
+                        print(f"\nSemaphore 'stop' for {stage_name} - killing running jobs...")
+                        
+                        if stage_locations[stage_name] == "local":
+                            # Kill local processes
+                            pids_to_kill = get_stage_pids(stage_name, stage_processes, root_directory_path)
+                            for pid, anchor_idx in pids_to_kill:
+                                kill_process_group(pid, stage_name, root_directory_path, anchor_idx)
+                            
+                            if stage_statuses.get(stage_name):
+                                if stage_statuses[stage_name].get("manager_status"):
+                                    stage_statuses[stage_name]["manager_status"]["error"] = "stopped by semaphore"
+                                    stage_statuses[stage_name]["manager_status"]["jobs"] = []
+                        else:
+                            # Kill remote jobs
+                            job_ids = stage_job_ids.get(stage_name, [])
+                            for job_id in job_ids:
+                                if job_id is not None:
+                                    print(f"  Canceling job {job_id}...")
+                                    workload_remote.submit_remote_cancel_workflow(
+                                        seekrflow, stage_locations[stage_name], job_id, silent=silent)
+                        
+                        stage_manager_status[stage_name] = "idle"
 
             # Write to the status file
             with open(job_status_filename, "w") as f:
@@ -453,17 +566,35 @@ def run_model(
             for stage_name in stage_names:
                 if stage_name == "bd" and not using_bd:
                     continue
+                    
                 stage_should_submit_new_run[stage_name] = False
+                
+                # Apply semaphore logic FIRST
+                if stage_semaphore[stage_name] in ["wait", "stop"]:
+                    # Don't submit new jobs if waiting or stopped
+                    stage_should_submit_new_run[stage_name] = False
+                    # Count as running if jobs are still active (for "wait" mode)
+                    if stage_manager_status[stage_name] not in ["idle", "n/a", "waiting"]:
+                        number_of_running_stages += 1
+                    continue
+                
+                # Normal "go" logic
                 if stage_progress[stage_name] in ["unstarted", "started"]:
                     stage_should_submit_new_run[stage_name] = True
                 else:
                     stage_should_submit_new_run[stage_name] = False
                     stage_manager_status[stage_name] = "idle"
+
+                number_of_incomplete_stages = 0
+                if stage_progress[stage_name] not in ["completed", "omitted"]:
+                    number_of_incomplete_stages += 1
+
                 # Check dependencies
                 for dependency in stage_dependencies[stage_name]:
                     if stage_progress[dependency] != "completed":
                         stage_should_submit_new_run[stage_name] = False
                         stage_manager_status[stage_name] = "waiting"
+                        
                 if stage_manager_status[stage_name] not in ["idle", "n/a", "waiting"]:
                     stage_should_submit_new_run[stage_name] = False
                     number_of_running_stages += 1
@@ -477,7 +608,9 @@ def run_model(
                 if stage_should_submit_new_run[stage_name]:
                     number_of_stages_to_submit_new_run += 1
 
-            if number_of_stages_to_submit_new_run == 0 and number_of_running_stages == 0:
+            # TODO: remove to force manual exit?
+            if number_of_stages_to_submit_new_run == 0 and number_of_running_stages == 0 \
+                    and number_of_incomplete_stages == 0:
                 print("No calculations remaining. Exiting seekrflow...")
                 keep_running = False
             
@@ -702,6 +835,7 @@ def run_model(
                                 print(f"  Progress: {stage_progress[stage_name]}")
                                 print(f"  Progress bar: {100.0*stage_progress_bar[stage_name]:.1f}%")
                                 print(f"  Manager status: {stage_manager_status[stage_name]}")
+                                print(f"  Semaphore: {stage_semaphore[stage_name]}")
                                 print(f"  Should perform transfer: {stage_should_perform_transfer[stage_name]}")
                                 printed_nothing = False
                     
@@ -710,8 +844,8 @@ def run_model(
 
                         print(instruction_str, flush=True)
                     
-                    elif command == "d":
-                        print(f"Detaching from job...")
+                    elif command == "q":
+                        print(f"Quitting seekrflow. Running jobs will be detached...")
                         # Allow detaching even with local processes running
                         # The processes will continue running and can be reattached later
                         keep_running = False
@@ -731,35 +865,125 @@ def run_model(
                         
                         break
 
-                    elif command == "k":
-                        for stage_name in stage_names:
-                            if stage_manager_status[stage_name] != "idle":
+                    elif command == "s":
+                        # Determine which stages to stop
+                        stages_to_stop = []
+                        if arg is None or arg == "all":
+                            # Stop all stages
+                            for stage_name in stage_names:
+                                if stage_name == "bd" and not using_bd:
+                                    continue
+                                stages_to_stop.append(stage_name)
+                        elif arg in stage_names:
+                            # Stop specific stage
+                            if arg == "bd" and not using_bd:
+                                print(f"Stage {arg} is not being used.")
+                                print(instruction_str, flush=True)
+                                continue
+                            stages_to_stop.append(arg)
+                        else:
+                            print(f"Invalid stage name: {arg}. Must be bd, hidr, seekr, or all.")
+                            print(instruction_str, flush=True)
+                            continue
+                        
+                        if not stages_to_stop:
+                            print("No stages to stop.")
+                            print(instruction_str, flush=True)
+                            continue
+                        
+                        # Set semaphores to "stop" for selected stages
+                        for stage_name in stages_to_stop:
+                            stage_semaphore[stage_name] = "stop"
+                        
+                        # Immediately execute the semaphore "stop" logic for selected stages
+                        for stage_name in stages_to_stop:
+                            if stage_manager_status[stage_name] not in ["idle", "n/a", "waiting"]:
                                 print(f"Killing stage {stage_name}...")
+                                
                                 if stage_locations[stage_name] == "local":
-                                    # Get all PIDs (handles both direct and reattached processes)
+                                    # Kill local processes
                                     pids_to_kill = get_stage_pids(stage_name, stage_processes, root_directory_path)
-                                    
-                                    # Kill all found processes
                                     for pid, anchor_idx in pids_to_kill:
                                         kill_process_group(pid, stage_name, root_directory_path, anchor_idx)
                                     
-                                    # Clear manager status
                                     if stage_statuses.get(stage_name):
-                                        stage_statuses[stage_name]["manager_status"]["error"] = "killed"
-                                        stage_statuses[stage_name]["manager_status"]["jobs"] = []
+                                        if stage_statuses[stage_name].get("manager_status"):
+                                            stage_statuses[stage_name]["manager_status"]["error"] = "stopped by user"
+                                            stage_statuses[stage_name]["manager_status"]["jobs"] = []
                                 else:
-                                    # Remote job killing
-                                    job_ids = stage_job_ids.get(stage_name)
+                                    # Kill remote jobs
+                                    job_ids = stage_job_ids.get(stage_name, [])
                                     for job_id in job_ids:
-                                        print(f"killing job_id: {job_id}")
                                         if job_id is not None:
+                                            print(f"  Canceling job {job_id}...")
                                             workload_remote.submit_remote_cancel_workflow(
-                                                seekrflow, stage_locations[stage_name], job_id, 
-                                                silent=silent)
-                        keep_running = False
-                        break_out_of_keystroke_loop = True
-                        perform_final_transfer = False
-                        break
+                                                seekrflow, stage_locations[stage_name], job_id, silent=silent)
+                                
+                                stage_manager_status[stage_name] = "idle"
+                            else:
+                                print(f"Stage {stage_name} is already {stage_manager_status[stage_name]}.")
+                        
+                        # Only exit if all stages were stopped
+                        #active_stage_count = sum(1 for s in stage_names if not (s == "bd" and not using_bd))
+                        #if len(stages_to_stop) == active_stage_count:
+                        #    keep_running = False
+                        #    break_out_of_keystroke_loop = True
+                        #    perform_final_transfer = False
+                        #    break
+                        #else:
+                        print(instruction_str, flush=True)
+
+                    elif command == "g":
+                        # Determine which stages to set to "go"
+                        stages_to_go = []
+                        if arg is None or arg == "all":
+                            for stage_name in stage_names:
+                                if stage_name == "bd" and not using_bd:
+                                    continue
+                                stages_to_go.append(stage_name)
+                        elif arg in stage_names:
+                            if arg == "bd" and not using_bd:
+                                print(f"Stage {arg} is not being used.")
+                                print(instruction_str, flush=True)
+                                continue
+                            stages_to_go.append(arg)
+                        else:
+                            print(f"Invalid stage name: {arg}. Must be bd, hidr, seekr, or all.")
+                            print(instruction_str, flush=True)
+                            continue
+                        
+                        # Set semaphores to "go" for selected stages
+                        for stage_name in stages_to_go:
+                            stage_semaphore[stage_name] = "go"
+                            print(f"Stage {stage_name} semaphore set to 'go'.")
+                        
+                        print(instruction_str, flush=True)
+
+                    elif command == "w":
+                        # Determine which stages to set to "wait"
+                        stages_to_wait = []
+                        if arg is None or arg == "all":
+                            for stage_name in stage_names:
+                                if stage_name == "bd" and not using_bd:
+                                    continue
+                                stages_to_wait.append(stage_name)
+                        elif arg in stage_names:
+                            if arg == "bd" and not using_bd:
+                                print(f"Stage {arg} is not being used.")
+                                print(instruction_str, flush=True)
+                                continue
+                            stages_to_wait.append(arg)
+                        else:
+                            print(f"Invalid stage name: {arg}. Must be bd, hidr, seekr, or all.")
+                            print(instruction_str, flush=True)
+                            continue
+                        
+                        # Set semaphores to "wait" for selected stages
+                        for stage_name in stages_to_wait:
+                            stage_semaphore[stage_name] = "wait"
+                            print(f"Stage {stage_name} semaphore set to 'wait'.")
+                        
+                        print(instruction_str, flush=True)
 
                     elif command == "t":
                         printed_nothing = True

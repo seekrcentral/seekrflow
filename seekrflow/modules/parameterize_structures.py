@@ -29,7 +29,7 @@ class PDBFixer_settings:
         validator=validators.instance_of(bool),
         )
     remove_heterogens: bool = field(
-        default=True,
+        default=False,
         validator=validators.instance_of(bool),
         )
     find_and_add_missing_atoms: bool = field(
@@ -73,7 +73,7 @@ class PDB2PQR_settings:
     Settings for PDB2PQR.
     """
     forcefield: str = field(
-        default="AMBER",
+        default="PARSE",
         validator=validators.instance_of(str),
         )
     forcefield_output_format: str = field(
@@ -99,10 +99,9 @@ class PDB2PQR_settings:
             output_pdb_string = f"--pdb-output {output_pdb_filename} "
         else:
             output_pdb_string = ""
-        cmd = f"pdb2pqr --ff AMBER --ffout AMBER {output_pdb_string}"\
-        +f"--with-ph {self.pH} --log-level CRITICAL --drop-water "\
-        +f"--nodebump --noopt "\
-        +f"{input_pdb_filename} {output_pqr_filename}"
+        cmd = f"pdb2pqr --ff {self.forcefield} --ffout {self.forcefield_output_format} "\
+        +f"{output_pdb_string} --with-ph {self.pH} --log-level CRITICAL --drop-water "\
+        +f"--nodebump --noopt {input_pdb_filename} {output_pqr_filename}"
         print("running command:", cmd)
         os.system(cmd)
         assert os.path.exists(output_pqr_filename), \

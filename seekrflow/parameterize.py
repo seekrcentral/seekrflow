@@ -65,9 +65,13 @@ def parameterize(
     parameters.
     """
     assert seekrflow.workflow.type \
-        in ["protein_ligand_seekr2", "protein_ligand_membrane_seekr2"], \
-        "Only protein-ligand and protein-ligand-membrane workflows are "\
-        "supported at this time for parameterize.py"
+        in ["protein_ligand_seekr2", "protein_ligand_membrane_seekr2",
+            "protein_protein_seekr2"], \
+        "Only the following workflows are supported at this time:"\
+        " - protein-ligand"\
+        " - protein-ligand-membrane"\
+        " - protein-protein"\
+        " supported at this time for parameterize.py"
     work_param_dir = seekrflow.get_parameterize_directory()
     param_dir = structures.PARAMETERIZE
     curdir = os.getcwd()
@@ -82,8 +86,8 @@ def parameterize(
             work_param_dir, seekrflow.workflow.get_parametrizer_default_sdf_filename())
         copyfile(ligand_sdf_filename, work_copy_ligand_sdf)
     os.chdir(seekrflow.work_directory)
+    seekrflow.workflow.split_molecules(param_dir)
     if seekrflow.workflow.has_small_molecule_ligand():
-        seekrflow.workflow.split_molecules(param_dir)
         if ligand_sdf_filename == "":
             make_ligand_sdf_file(seekrflow)
 

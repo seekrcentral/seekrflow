@@ -73,7 +73,8 @@ def flow(
         benchmark_mode: bool = False,
         bd_resource_name: str | None = None,
         hidr_resource_name: str | None = None,
-        seekr_resource_name: str | None = None
+        seekr_resource_name: str | None = None,
+        semaphore_dict: dict[str, str] | None = None
         ) -> None:
     """
     Execute the instructed seekrflow stage.
@@ -86,7 +87,8 @@ def flow(
         print("Running system...")
         seekr_run.run_model(
             seekrflow, transfer_before, transfer_from_host_only, force_rerun,
-            benchmark_mode, bd_resource_name, hidr_resource_name, seekr_resource_name)
+            benchmark_mode, bd_resource_name, hidr_resource_name, seekr_resource_name,
+            semaphore_dict)
 
         return
         
@@ -101,7 +103,8 @@ def flow(
         print("Running system...")
         seekr_run.run_model(
             seekrflow, transfer_before, transfer_from_host_only, force_rerun,
-            benchmark_mode, bd_resource_name, hidr_resource_name, seekr_resource_name)
+            benchmark_mode, bd_resource_name, hidr_resource_name, seekr_resource_name,
+            semaphore_dict)
         return
         
     else:
@@ -195,6 +198,14 @@ def main():
         "in a .seekrflow_resources.json file in the home, working, or root directory." \
         "If not provided, defaults to the values in the seekrflow JSON file or 'local'."\
         "Default: None.")
+    argparser.add_argument(
+        "--semaphore", dest="semaphore", 
+        metavar="STAGE_CONTROL", type=str, default=None,
+        help="Control stage execution. Format: 'stage:value,stage:value,...' " \
+        "where stage is bd/hidr/seekr and value is go/wait/stop. " \
+        "go: normal operation (default), wait: don't submit new jobs but let running jobs finish, " \
+        "stop: don't submit new jobs AND kill any running jobs. " \
+        "Example: --semaphore bd:stop,hidr:wait,seekr:go")
 
     args = argparser.parse_args()
     args = vars(args)
@@ -211,6 +222,28 @@ def main():
     bd_resource_name = args["bd_resource_name"]
     hidr_resource_name = args["hidr_resource_name"]
     seekr_resource_name = args["seekr_resource_name"]
+    
+    # Parse semaphore argument
+    semaphore_dict = {"bd": "go", "hidr": "go", "seekr": "go"}
+    if args["semaphore"]:
+        for item in args["semaphore"].split(","):
+            parts = item.strip().split(":")
+            if len(parts) != 2:
+                raise ValueError(f"Invalid semaphore format: {item}. Expected 'stage:value'")
+            stage, value = parts[0].strip(), parts[1].strip()
+            if stage not in ["bd", "hidr", "seekr"]:
+                raise ValueError(f"Invalid stage in semaphore: {stage}. Must be bd, hidr, or seekr")
+            if value not in ["go", "wait", "stop"]:
+                raise ValueError(f"Invalid semaphore value: {value}. Must be go, wait, or stop")
+            semaphore_dict[stage] = value
+    
+    # Check for conflicting force_rerun and semaphore="stop"
+    if force_rerun:
+        for stage in force_rerun:
+            if semaphore_dict.get(stage) == "stop":
+                raise ValueError(
+                    f"Conflicting options: --force-rerun {stage} and --semaphore {stage}:stop. "
+                    "Cannot force rerun a stopped stage.")
 
     hotshot_mode = False
     src_pdb_filename = None
@@ -224,7 +257,13 @@ def main():
                 "In hotshot mode, only 'run' instruction is allowed."
             assert os.path.exists(model_filename), \
                 f"Model file {model_filename} does not exist."
-            seekrflow.name = "hotshot"
+            # Generate a unique name based on the directory's inode and device
+            model_dirname = os.path.dirname(model_filename)
+            if model_dirname == "":
+                model_dirname = os.path.abspath(os.curdir)
+            st = os.stat(model_dirname)
+            seekrflow.name = "hotshot_" + str(st.st_dev) + "_" + str(st.st_ino)
+            print("Running in hotshot mode with seekrflow name:", seekrflow.name)
             seekrflow.work_directory = None
             seekrflow.root_directory = os.path.dirname(
                 os.path.abspath(model_filename))
@@ -256,7 +295,7 @@ def main():
         
     flow(seekrflow, instruction, src_pdb_filename, transfer_before, 
          transfer_from_host_only, force_rerun, benchmark_mode, bd_resource_name,
-         hidr_resource_name, seekr_resource_name)
+         hidr_resource_name, seekr_resource_name, semaphore_dict)
     
 if __name__ == "__main__":
     main()
