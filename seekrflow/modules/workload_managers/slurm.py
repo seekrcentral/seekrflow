@@ -847,6 +847,7 @@ def slurm_remote_run_workflow(args):
     indices = args[13]
     model_filename = args[14]
     workflow_type = args[15]
+    mps = args[16]
 
     kwargs = {
         "working_dir": working_dir,
@@ -864,6 +865,7 @@ def slurm_remote_run_workflow(args):
         "indices": indices,
         "model_filename": model_filename,
         "workflow_type": workflow_type,
+        "mps": mps
     }
 
     @dataclass
@@ -952,16 +954,25 @@ def slurm_remote_run_workflow(args):
             time_limit: str,
             account: Optional[str],
             constraint: Optional[str],
-            array_spec: str | None,
+            array_spec: list[int] | None,
             logdir: pathlib.Path,
             workdir: pathlib.Path,
             cpus_per_task: Optional[int],
             mem: Optional[str],
             cmd_template: str,
-            worker_init: str = ""
+            worker_init: str = "",
+            mps: int = 1
             ) -> str:
         ensure_dir(logdir)
-        if array_spec is None:
+        
+        # Create new condensed array spec for MPS bundling
+        if array_spec is not None and mps > 1:
+            n_bundles = (len(array_spec) + mps - 1) // mps  # ceiling division
+            condensed_array_spec = list(range(n_bundles))
+        else:
+            condensed_array_spec = array_spec
+        
+        if condensed_array_spec is None:
             args = ["sbatch",
                     "-J", name,
                     "-p", partition,
@@ -975,7 +986,7 @@ def slurm_remote_run_workflow(args):
                     "-J", name,
                     "-p", partition,
                     "-t", time_limit,
-                    "--array", collapse_indices(array_spec),
+                    "--array", collapse_indices(condensed_array_spec),
                     "-o", f"{logdir}/%x_%A_%a.out",
                     "-e", f"{logdir}/%x_%A_%a.err",
                     "-D", f"{workdir}",
@@ -986,7 +997,26 @@ def slurm_remote_run_workflow(args):
         if account: args += ["-A", account]
         if constraint: args += ["--constraint", constraint]
         
-        wrap_cmd = cmd_template.replace("{index}", "${SLURM_ARRAY_TASK_ID:-0}")
+        # Replace placeholders in cmd_template
+        wrap_cmd = cmd_template
+        
+        if array_spec is not None and mps > 1:
+            # For MPS mode: replace {index0}, {index1}, etc. and {len_array}
+            for mps_index in range(mps):
+                # Calculate the original index: SLURM_ARRAY_TASK_ID * mps + mps_index
+                original_index = f"$(( ${{SLURM_ARRAY_TASK_ID:-0}} * {mps} + {mps_index} ))"
+                wrap_cmd = wrap_cmd.replace(f"{{index{mps_index}}}", original_index)
+            
+            # Calculate len_array: how many indices this SLURM task should process
+            # Formula: min(mps, total_indices - task_id * mps)
+            # We use bash's $(( ... < ... ? ... : ... )) which is valid in bash arithmetic
+            remaining = f"{len(array_spec)} - ${{SLURM_ARRAY_TASK_ID:-0}} * {mps}"
+            len_array_formula = f"$(( ({remaining}) < {mps} ? ({remaining}) : {mps} ))"
+            wrap_cmd = wrap_cmd.replace("{len_array}", len_array_formula)
+        else:
+            # Single index mode: just replace {index} with SLURM_ARRAY_TASK_ID
+            wrap_cmd = wrap_cmd.replace("{index}", "${SLURM_ARRAY_TASK_ID:-0}")
+        
         full = shlex.quote(wrap_cmd) if not worker_init else shlex.quote(
             f"{worker_init}; {wrap_cmd}")
         args += ["--wrap", full]
@@ -1020,7 +1050,8 @@ def slurm_remote_run_workflow(args):
             cpus_per_task=args["cpus_per_task"],
             mem=args["mem"],
             cmd_template=args["command_string"],
-            worker_init=args["worker_init"]
+            worker_init=args["worker_init"],
+            mps=args["mps"]
         )
         st = RunState(
             run_id=run_id,

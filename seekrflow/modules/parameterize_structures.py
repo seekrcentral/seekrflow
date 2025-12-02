@@ -142,4 +142,8 @@ class Parameterizer:
         default=0.9,
         validator=validators.instance_of(float),
         )
+    box_shape: str = field(
+        default="octahedron",
+        validator=validators.instance_of(str),
+        )
     

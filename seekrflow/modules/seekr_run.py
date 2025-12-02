@@ -202,7 +202,8 @@ def run_model(
         bd_resource_name: str | None = None,
         hidr_resource_name: str | None = None,
         seekr_resource_name: str | None = None,
-        semaphore_dict: dict[str, str] | None = None
+        semaphore_dict: dict[str, str] | None = None,
+        mps: int = 1
         ) -> None:
     """
     Run the SEEKR calculation using remote and local resources.
@@ -216,7 +217,7 @@ def run_model(
     if seekrflow.work_directory is not None:
         seekrflow.work_directory = os.path.abspath(seekrflow.work_directory)
         os.chdir(seekrflow.work_directory)
-
+    assert mps >= 1, "MPS must be at least 1"
     bd_n_threads = 1
     if seekrflow.workflow.bd_settings is not None:
         bd_n_threads = seekrflow.workflow.bd_settings.num_threads
@@ -675,6 +676,7 @@ def run_model(
                     destination_model_filename = os.path.join(destination_path, "model.xml")
                     input_pdb_filename = os.path.basename(
                         seekrflow.workflow.solvated_system_for_md.solvated_pdb)
+                    #input_pdb_filename = seekrflow.workflow.solvated_system_for_md.solvated_pdb
                     output_filename = os.path.join(destination_path, "hidr_run.out")
                     if seekrflow.workflow.hidr_settings.type == "hidr_metaD":
                         gaussian_height = seekrflow.workflow.hidr_settings.gaussian_height
@@ -732,18 +734,32 @@ def run_model(
                     destination_path = os.path.join(
                         resource.remote_working_directory, seekrflow.name)
                     destination_model_filename = os.path.join(destination_path, "model.xml")
-                    output_filename = os.path.join(destination_path, "seekr_{index}_run.out")
                     if benchmark_mode:
                         benchmark_string = f"-t {base.BENCHMARK_MIN_SIMULATION_LENGTH} "
                     else:
                         benchmark_string = ""
-                    command_string = f"python {resource.remote_seekr2_directory}/run.py "\
-                        f"{{index}} model.xml -c 0 {benchmark_string}> {output_filename}"
+                    if mps == 1:
+                        output_filename = os.path.join(destination_path, "seekr_{index}_run.out")
+                        command_string = f"python {resource.remote_seekr2_directory}/run.py "\
+                            f"{{index}} model.xml -c 0 {benchmark_string}> {output_filename}"
+                    else:
+                        command_list = []
+                        for mps_index in range(mps):
+                            output_filename = os.path.join(destination_path, f"seekr_{{index{mps_index}}}_run.out")
+                            command_list.append(
+                                f"if [ {mps_index} -lt {{len_array}} ]; then "
+                                f"python {resource.remote_seekr2_directory}/run.py "\
+                                f"{{index{mps_index}}} model.xml -c 0 {benchmark_string}> {output_filename} & "
+                                f"fi"
+                            )
+                        command_list.append("wait")
+                        command_string = "\n".join(command_list)
+                        
                     indices = seekr_status["stage_status"]["incomplete_anchors"]
                     seekr_run_result = workload_remote.submit_remote_run_workflow(
                         seekrflow, "seekr", destination_path, resource,
                         command_string, destination_model_filename, workflow_type="seekr", 
-                        indices=indices)
+                        indices=indices, mps=mps)
                     stage_run_results["seekr"] = seekr_run_result
                     stage_manager_status["seekr"] = "running"
                     stage_progress["seekr"] = "started"
@@ -780,6 +796,7 @@ def run_model(
                 # Get the input PDB file basename
                 input_pdb_file = os.path.basename(
                     seekrflow.workflow.solvated_system_for_md.solvated_pdb)
+                #input_pdb_file = seekrflow.workflow.solvated_system_for_md.solvated_pdb
                 # Start HIDR process
                 process = multiprocessing.Process(
                     target=workload_local_mp.run_hidr_locally,
@@ -796,7 +813,8 @@ def run_model(
                 # Check which anchors need to be filled
                 seekr_status = workload_local_mp.seekr_anchors_status_local(
                     model, stage_processes, root_directory_path, benchmark_mode)
-                for unfilled_anchor_index in seekr_status["stage_status"]["incomplete_anchors"]:
+                for mps_index, unfilled_anchor_index in enumerate(
+                        seekr_status["stage_status"]["incomplete_anchors"]):
                     # Start process for this anchor
                     process = multiprocessing.Process(
                         target=workload_local_mp.run_seekr_locally,
@@ -805,7 +823,9 @@ def run_model(
                     )
                     process.start()
                     stage_processes["seekr"][unfilled_anchor_index] = process
-                    break
+                    # In an MPS process, launch an 'mps' number of concurrent jobs.
+                    if mps_index >= mps-1:
+                        break
             
                 # NOTE: this probably must be done for local job where there's just one GPU
                 # but for the cluster, we will want to spin them off all at once.

@@ -90,6 +90,7 @@ def submit_remote_run_workflow(
         model_filename: str,
         workflow_type: str,
         indices: list | None = None,
+        mps: int = 1,
         silent: bool = False
     ) -> list:
     """
@@ -114,7 +115,8 @@ def submit_remote_run_workflow(
             command_string,
             indices,
             model_filename,
-            workflow_type
+            workflow_type,
+            mps
         ]
         run_workflow = workload_slurm.slurm_remote_run_workflow
         

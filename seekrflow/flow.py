@@ -74,7 +74,8 @@ def flow(
         bd_resource_name: str | None = None,
         hidr_resource_name: str | None = None,
         seekr_resource_name: str | None = None,
-        semaphore_dict: dict[str, str] | None = None
+        semaphore_dict: dict[str, str] | None = None,
+        mps: int = 1
         ) -> None:
     """
     Execute the instructed seekrflow stage.
@@ -88,7 +89,7 @@ def flow(
         seekr_run.run_model(
             seekrflow, transfer_before, transfer_from_host_only, force_rerun,
             benchmark_mode, bd_resource_name, hidr_resource_name, seekr_resource_name,
-            semaphore_dict)
+            semaphore_dict, mps)
 
         return
         
@@ -104,7 +105,7 @@ def flow(
         seekr_run.run_model(
             seekrflow, transfer_before, transfer_from_host_only, force_rerun,
             benchmark_mode, bd_resource_name, hidr_resource_name, seekr_resource_name,
-            semaphore_dict)
+            semaphore_dict, mps)
         return
         
     else:
@@ -137,9 +138,21 @@ def main():
         "Also, if HIDR will be run, then -p must be provided to specify the "\
         "PDB file with the solvated system.")
     argparser.add_argument(
+        "-M", "--MPS", dest="MPS",
+        metavar="MPS", type=int, default=1,
+        help="The number of CUDA applications to use in MPS (Multi-Process Service)."\
+            "For a GPU that supports MPS, this can improve GPU utilization when running "\
+            "multiple simulations concurrently. Default: 1 (no MPS).")
+    argparser.add_argument(
         "-p", "--pdb_with_system", dest="pdb_with_system", 
         metavar="PDB_WITH_SYSTEM", type=str, default="",
         help="Path to the input PDB file that contains the solvated molecules.")
+    argparser.add_argument(
+        "-n", "--name", dest="name",
+        metavar="NAME", type=str, default="",
+        help="Name for the simulation or calculation. This is particularly useful "\
+            "in hotshot mode to give a more informative name to the run - otherwise, "\
+            "it will be named 'hotshot_<inode>_<device>'. Default=''")
     #argparser.add_argument(
     #    "-P", "--parameter_topology_files", dest="parameter_topology_files", 
     #    metavar="PARAMETER_TOPOLOGY_FILES", type=str, nargs="+", default=None,
@@ -212,8 +225,10 @@ def main():
     instruction = args["instruction"]
     input_json = args["input_json"]
     model_filename = args["model_filename"]
+    mps = args["MPS"]
     pdb_with_system = args["pdb_with_system"]
     #parameter_topology_files = args["parameter_topology_files"]
+    name = args["name"]
     work_dir = args["work_directory"]
     transfer_before = args["transfer_before"]
     transfer_from_host_only = args["transfer_from_host_only"]
@@ -223,6 +238,11 @@ def main():
     hidr_resource_name = args["hidr_resource_name"]
     seekr_resource_name = args["seekr_resource_name"]
     
+    if pdb_with_system != "":
+        #pdb_with_system = os.path.abspath(pdb_with_system)
+        assert os.path.exists(pdb_with_system), \
+            f"PDB file with system {pdb_with_system} does not exist."
+        
     # Parse semaphore argument
     semaphore_dict = {"bd": "go", "hidr": "go", "seekr": "go"}
     if args["semaphore"]:
@@ -262,7 +282,10 @@ def main():
             if model_dirname == "":
                 model_dirname = os.path.abspath(os.curdir)
             st = os.stat(model_dirname)
-            seekrflow.name = "hotshot_" + str(st.st_dev) + "_" + str(st.st_ino)
+            if name != "":
+                seekrflow.name = name
+            else:
+                seekrflow.name = "hotshot_" + str(st.st_dev) + "_" + str(st.st_ino)
             print("Running in hotshot mode with seekrflow name:", seekrflow.name)
             seekrflow.work_directory = None
             seekrflow.root_directory = os.path.dirname(
@@ -278,6 +301,8 @@ def main():
         assert os.path.exists(input_json), \
             f"Input JSON file {input_json} does not exist."
         seekrflow = structures.load_seekrflow(input_json)
+        if name != "":
+            seekrflow.name = name
         
     if not hotshot_mode:
         if work_dir is None:
@@ -295,7 +320,7 @@ def main():
         
     flow(seekrflow, instruction, src_pdb_filename, transfer_before, 
          transfer_from_host_only, force_rerun, benchmark_mode, bd_resource_name,
-         hidr_resource_name, seekr_resource_name, semaphore_dict)
+         hidr_resource_name, seekr_resource_name, semaphore_dict, mps)
     
 if __name__ == "__main__":
     main()

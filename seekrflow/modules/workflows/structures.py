@@ -221,11 +221,42 @@ def parametrize_and_check_complex(
         system_generator.forcefield, 
         model=parameterizer.water_model, 
         padding=parameterizer.solvent_padding * unit.nanometers, 
+        boxShape=parameterizer.box_shape,
         ionicStrength=physical_attributes.ionic_strength * unit.molar)
     solvated_topology = solv_modeller.getTopology()
     solvated_positions = solv_modeller.getPositions()
     solvated_system = system_generator.create_system(solvated_topology)
-    
+
+    # NOTE: the commented-out code below, I mass repartition the hydrogens of the
+    #  solvent to be heavier. It turns out that this is not standard practice - 
+    #  normally, the masses of hydrogen are left alone in solvent molecules with
+    #  a rigid structure.
+    """
+    # Modify hydrogens as needed
+    hydrogens_needing_mass_change = {atom.index: atom for atom in solvated_topology.atoms() 
+                                    if atom.element.symbol == "H"}
+    atom_indices_bonded_to_each_hydrogen = {}
+    #for h_atom in hydrogens_needing_mass_change:
+    #    bonded_atoms = [bonded_atom for bonded_atom in h_atom.bonds()]
+    #    assert len(bonded_atoms) == 1, \
+    #        "Hydrogen atom is bonded to multiple atoms, unexpected."
+    #    atoms_bonded_to_each_hydrogen.append(bonded_atoms[0].index)
+    for bond in solvated_topology.bonds():
+        if bond[0].index in hydrogens_needing_mass_change:
+            atom_indices_bonded_to_each_hydrogen[bond[0].index] = bond[1].index
+        elif bond[1].index in hydrogens_needing_mass_change:
+            atom_indices_bonded_to_each_hydrogen[bond[1].index] = bond[0].index
+
+    for h_index in hydrogens_needing_mass_change.keys():
+        new_H_mass = physical_attributes.hydrogen_mass * unit.amu
+        old_H_mass = solvated_system.getParticleMass(h_index)
+        mass_diff = new_H_mass - old_H_mass
+        solvated_system.setParticleMass(h_index, new_H_mass)
+        bonded_atom_index = atom_indices_bonded_to_each_hydrogen[h_index]
+        old_bonded_atom_mass = solvated_system.getParticleMass(bonded_atom_index)
+        new_bonded_atom_mass = old_bonded_atom_mass - mass_diff
+        solvated_system.setParticleMass(bonded_atom_index, new_bonded_atom_mass)
+    """
     #output_pdb_filename = f"{output_pdb_basename}.pdb"
     #openmm_app.PDBFile.writeFile(solvated_topology, solvated_positions, file=open(output_pdb_filename, 'w'))
 

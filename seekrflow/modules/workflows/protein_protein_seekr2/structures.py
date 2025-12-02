@@ -24,6 +24,10 @@ PROTEIN1_PDB_FILENAME = "protein1.pdb"
 PROTEIN2_PDB_FILENAME = "protein2.pdb"
 PROTEIN1_SPLIT_PDB_FILENAME = "protein1_split.pdb"
 PROTEIN2_SPLIT_PDB_FILENAME = "protein2_split.pdb"
+PROTEIN1_NOH_SPLIT_PDB_FILENAME = "protein1_split_noh.pdb"
+PROTEIN2_NOH_SPLIT_PDB_FILENAME = "protein2_split_noh.pdb"
+SELECTION_NOH_FOR_PROTEIN_EXCEPTING_TERMINI = "(resname ACE NME) or (not element H)"
+
 
 @define
 class HIDR_settings_base:
@@ -229,6 +233,10 @@ class Protein_protein_seekr2_workflow:
         full_structure = mdtraj.load(pdb_with_ligand)
         protein1_filename = os.path.join(param_directory, PROTEIN1_SPLIT_PDB_FILENAME)
         protein2_filename = os.path.join(param_directory, PROTEIN2_SPLIT_PDB_FILENAME)
+        protein1_noh_filename = os.path.join(
+            param_directory, PROTEIN1_NOH_SPLIT_PDB_FILENAME)
+        protein2_noh_filename = os.path.join(
+            param_directory, PROTEIN2_NOH_SPLIT_PDB_FILENAME)
         #protein1_selection_str = f"::{self.protein1_chain}"
         #protein2_selection_str = f"::{self.protein2_chain}"
         #protein1_structure = full_structure[protein1_selection_str]
@@ -247,6 +255,14 @@ class Protein_protein_seekr2_workflow:
         protein2_structure = full_structure.atom_slice(protein2_indices)
         protein1_structure.save_pdb(protein1_filename)
         protein2_structure.save_pdb(protein2_filename)
+        protein1_structure_noh_indices = protein1_structure.topology.select(
+            SELECTION_NOH_FOR_PROTEIN_EXCEPTING_TERMINI)
+        protein2_structure_noh_indices = protein2_structure.topology.select(
+            SELECTION_NOH_FOR_PROTEIN_EXCEPTING_TERMINI)
+        protein1_structure_noh = protein1_structure.atom_slice(protein1_structure_noh_indices)
+        protein2_structure_noh = protein2_structure.atom_slice(protein2_structure_noh_indices)
+        protein1_structure_noh.save_pdb(protein1_noh_filename)
+        protein2_structure_noh.save_pdb(protein2_noh_filename)
         return
 
     def write_component_pqr_files(
@@ -315,8 +331,10 @@ class Protein_protein_seekr2_workflow:
         """
         Create the complex structure.
         """
-        protein1_filename = os.path.join(param_directory, PROTEIN1_SPLIT_PDB_FILENAME)
-        protein2_filename = os.path.join(param_directory, PROTEIN2_SPLIT_PDB_FILENAME)
+        #protein1_filename = os.path.join(param_directory, PROTEIN1_SPLIT_PDB_FILENAME)
+        #protein2_filename = os.path.join(param_directory, PROTEIN2_SPLIT_PDB_FILENAME)
+        protein1_filename = os.path.join(param_directory, PROTEIN1_NOH_SPLIT_PDB_FILENAME)
+        protein2_filename = os.path.join(param_directory, PROTEIN2_NOH_SPLIT_PDB_FILENAME)
         assert os.path.exists(protein1_filename), \
             f"Protein 1 PDB file {protein1_filename} does not exist."
         assert os.path.exists(protein2_filename), \

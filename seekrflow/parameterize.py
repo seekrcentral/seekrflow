@@ -12,6 +12,7 @@ import argparse
 #import warnings
 from shutil import copyfile
 
+import mdtraj
 from openmmforcefields.generators import SystemGenerator
 
 import seekrflow.modules.base as base
@@ -79,6 +80,15 @@ def parameterize(
     work_copy_pdb_with_system = os.path.join(
         seekrflow.work_directory, os.path.basename(pdb_with_system))
     copyfile(pdb_with_system, work_copy_pdb_with_system)
+    # Create a no-hydrogens structure version of work_copy_pdb_with_system
+    work_copy = mdtraj.load(work_copy_pdb_with_system)
+    non_h_indices = work_copy.topology.select("not element H")
+    traj_noh = work_copy.atom_slice(non_h_indices)
+    base, ext = os.path.splitext(work_copy_pdb_with_system)
+    work_copy_pdb_with_system_noh = f"{base}_noh{ext}"
+    print(f"Saving noh file at: {work_copy_pdb_with_system_noh}")
+    traj_noh.save(work_copy_pdb_with_system_noh)
+    
     seekrflow.workflow.set_parametrizer_pdb_filename(os.path.basename(work_copy_pdb_with_system))
     ligand_sdf_filename = seekrflow.workflow.get_parametrizer_sdf_filename()
     if ligand_sdf_filename != "":
