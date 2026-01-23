@@ -186,12 +186,19 @@ def get_bd_receptor_ligand_selections(
             if atom.name == name:
                 bd_ligand_indices.append(i)
 
-    assert len(bd_receptor_indices) == len(md_receptor_selection), \
-        "BD receptor indices do not match MD receptor selection. " \
+    if len(bd_receptor_indices) != len(md_receptor_selection):
+        print("BD receptor indices do not match MD receptor selection. " \
         "This may indicate duplicate structure in the complex or in the "\
-        "PQR files. Be sure to check all structures."
-    assert len(bd_ligand_indices) == len(md_ligand_selection), \
-        "BD ligand indices do not match MD ligand selection. " \
+        "PQR files. Be sure to check all structures.")
+        print("bd_receptor_indices:", bd_receptor_indices)
+        print("md_receptor_selection:", md_receptor_selection)
+        raise RuntimeError("BD receptor indices do not match MD receptor selection.")
+    if len(bd_ligand_indices) != len(md_ligand_selection):
+        print("BD ligand indices do not match MD ligand selection. " \
         "This may indicate duplicate structure in the complex or in the "\
-        "PQR files. Be sure to check all structures."
+        "PQR files. Be sure to check all structures.")
+        print("bd_ligand_indices:", bd_ligand_indices)
+        print("md_ligand_selection:", md_ligand_selection)
+        raise RuntimeError("BD ligand indices do not match MD ligand selection.")
+
     return bd_receptor_indices, bd_ligand_indices

@@ -162,7 +162,7 @@ def make_ligand_openmm_and_mdtraj_top(
     list of positions.
     """
     from rdkit import Chem
-    from rdkit.Chem import rdForceFieldHelpers
+    from rdkit.Chem import rdForceFieldHelpers, AllChem
     from rdkit.Geometry import Point3D
     from rdkit.Chem import Draw
     import openmm.unit as unit
@@ -175,7 +175,10 @@ def make_ligand_openmm_and_mdtraj_top(
     mols = [x for x in suppl if x is not None]
     mol = mols[0]
     if draw_ligand:
-        img = Draw.MolToImage(mol, size=(300, 300))
+        # Generate 2D coordinates for better visualization
+        mol_2d = Chem.Mol(mol)
+        AllChem.Compute2DCoords(mol_2d)
+        img = Draw.MolToImage(mol_2d, size=(300, 300))
         img.save(os.path.join(param_directory,  "ligand.png"))
     ligand_pdb = parmed.load_file(str(ligand_pdb_filename), skip_bonds=True)
     ligand_positions_in_A_pdb = ligand_pdb.coordinates

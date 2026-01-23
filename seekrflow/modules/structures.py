@@ -411,7 +411,7 @@ class Seekrflow:
                 ligand_resname = self.workflow.parameterizer_information.ligand_resname
             else:
                 self.workflow.parameterizer_information.ligand_resname = ligand_resname
-
+            
             # if the ligand indices are provided, use them preferentially
             if ligand_indices != "":
                 ligand_indices = base.initialize_ref_indices(ligand_indices)
@@ -424,7 +424,6 @@ class Seekrflow:
                     # TODO: implement some automated way to identify the ligand molecule
                     # in a molecular complex?
                     ligand_indices = []
-
             if len(ligand_indices) > 0:
                 self.workflow.ligand_indices = ligand_indices
             else:
@@ -437,7 +436,6 @@ class Seekrflow:
                     else:
                         raise Exception("No ligand indices provided and no ligand "
                                         "residue name specified.")
-
         return
     
     def assign_seekrflow_parameter_topology_files(

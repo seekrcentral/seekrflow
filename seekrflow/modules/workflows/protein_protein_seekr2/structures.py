@@ -167,7 +167,7 @@ class Protein_protein_seekr2_workflow:
         """
         return False
 
-    def get_parametrizer_pdb_filename(self) -> str:
+    def get_parameterizer_pdb_filename(self) -> str:
         """
         Get the filename of the PDB file to be used for parameterization.
         """
@@ -179,7 +179,7 @@ class Protein_protein_seekr2_workflow:
             "is not set, cannot parameterize."
         return self.parameterizer_information.protein_protein_pdb_filename
     
-    def set_parametrizer_pdb_filename(self, filename: str) -> None:
+    def set_parameterizer_pdb_filename(self, filename: str) -> None:
         """
         Set the filename of the PDB file to be used for parameterization.
         """
@@ -188,25 +188,25 @@ class Protein_protein_seekr2_workflow:
         self.parameterizer_information\
             .protein_protein_pdb_filename = filename
     
-    def get_parametrizer_protein1_pdb_filename(self) -> str:
+    def get_parameterizer_protein1_pdb_filename(self) -> str:
         """
         Get the filename of the protein1 PDB file to be used for parameterization.
         """
         return PROTEIN1_PDB_FILENAME
 
-    def get_parametrizer_protein2_pdb_filename(self) -> str:
+    def get_parameterizer_protein2_pdb_filename(self) -> str:
         """
         Get the filename of the protein2 PDB file to be used for parameterization.
         """
         return PROTEIN2_PDB_FILENAME
         
-    def get_parametrizer_sdf_filename(self) -> str:
+    def get_parameterizer_sdf_filename(self) -> str:
         """
         Not used in this type of workflow.
         """
         return ""
     
-    #def set_parametrizer_sdf_filename(self, filename: str) -> None:
+    #def set_parameterizer_sdf_filename(self, filename: str) -> None:
     #    """
     #    Set the filename of the SDF file to be used for parameterization.
     #    """
@@ -215,7 +215,7 @@ class Protein_protein_seekr2_workflow:
     #    self.parameterizer_information.ligand_sdf_file = filename
     #    return
     
-    #def get_parametrizer_default_sdf_filename(self) -> str:
+    #def get_parameterizer_default_sdf_filename(self) -> str:
     #    """
     #    Get the default filename of the SDF file to be used for parameterization.
     #    """
@@ -228,7 +228,7 @@ class Protein_protein_seekr2_workflow:
         """
         Split the protein1-protein2 complex into separate PDB files.
         """
-        pdb_with_ligand = self.get_parametrizer_pdb_filename()
+        pdb_with_ligand = self.get_parameterizer_pdb_filename()
         #full_structure = parmed.load_file(pdb_with_ligand, skip_bonds=True)
         full_structure = mdtraj.load(pdb_with_ligand)
         protein1_filename = os.path.join(param_directory, PROTEIN1_SPLIT_PDB_FILENAME)
@@ -386,7 +386,7 @@ class Protein_protein_seekr2_workflow:
         complex_positions[n_atoms_protein1:n_atoms_protein1 + n_atoms_protein2, :] \
             = protein2_positions
         
-        serialized_xml, output_pdb_filename = workflow_structures.parametrize_and_check_complex(
+        serialized_xml, output_pdb_filename = workflow_structures.parameterize_and_check_complex(
             complex_topology,
             complex_positions,
             None,

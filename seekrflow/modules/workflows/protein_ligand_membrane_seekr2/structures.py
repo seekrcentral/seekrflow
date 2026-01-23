@@ -122,6 +122,23 @@ def separate_protein_membrane_from_complex(parmed_structure):
             membrane_atom_indices.extend(list(component))
 
     return protein_atom_indices, membrane_atom_indices
+
+def convert_hetatm_to_atom(pqr_filename: str) -> None:
+    """
+    Convert all HETATM records to ATOM records in a PQR file.
+    
+    Args:
+        pqr_filename: Path to the PQR file to modify in-place
+    """
+    with open(pqr_filename, 'r') as f:
+        lines = f.readlines()
+    
+    with open(pqr_filename, 'w') as f:
+        for line in lines:
+            if line.startswith("HETATM"):
+                line = "ATOM  " + line[6:]
+            f.write(line)
+
 from seekrflow.modules.workflows.protein_ligand_seekr2.structures import \
     MMVT_seekr_settings, HIDR_settings_metaD, HIDR_settings_SMD
 
@@ -206,7 +223,7 @@ class Protein_ligand_membrane_seekr2_workflow:
         """
         return True
 
-    def get_parametrizer_pdb_filename(self) -> str:
+    def get_parameterizer_pdb_filename(self) -> str:
         """
         Get the filename of the PDB file to be used for parameterization.
         """
@@ -218,7 +235,7 @@ class Protein_ligand_membrane_seekr2_workflow:
             "is not set, cannot parameterize."
         return self.parameterizer_information.receptor_ligand_membrane_pdb_filename
 
-    def set_parametrizer_pdb_filename(self, filename: str) -> None:
+    def set_parameterizer_pdb_filename(self, filename: str) -> None:
         """
         Set the filename of the PDB file to be used for parameterization.
         """
@@ -227,13 +244,13 @@ class Protein_ligand_membrane_seekr2_workflow:
         self.parameterizer_information\
             .receptor_ligand_membrane_pdb_filename = filename
 
-    def get_parametrizer_ligand_pdb_filename(self) -> str:
+    def get_parameterizer_ligand_pdb_filename(self) -> str:
         """
         Get the filename of the ligand PDB file to be used for parameterization.
         """
         return LIGAND_PDB_FILENAME
         
-    def get_parametrizer_sdf_filename(self) -> str:
+    def get_parameterizer_sdf_filename(self) -> str:
         """
         Get the filename of the SDF file to be used for parameterization.
         """
@@ -244,7 +261,7 @@ class Protein_ligand_membrane_seekr2_workflow:
             f"Ligand SDF file {self.parameterizer_information.ligand_sdf_file} does not exist."
         return self.parameterizer_information.ligand_sdf_file
     
-    def set_parametrizer_sdf_filename(self, filename: str) -> None:
+    def set_parameterizer_sdf_filename(self, filename: str) -> None:
         """
         Set the filename of the SDF file to be used for parameterization.
         """
@@ -253,7 +270,7 @@ class Protein_ligand_membrane_seekr2_workflow:
         self.parameterizer_information.ligand_sdf_file = filename
         return
     
-    def get_parametrizer_default_sdf_filename(self) -> str:
+    def get_parameterizer_default_sdf_filename(self) -> str:
         """
         Get the default filename of the SDF file to be used for parameterization.
         """
@@ -266,16 +283,28 @@ class Protein_ligand_membrane_seekr2_workflow:
         """
         Split the receptor-ligand complex into separate PDB files for the receptor and the ligand.
         """
-        pdb_with_ligand = self.get_parametrizer_pdb_filename()
+        pdb_with_ligand = self.get_parameterizer_pdb_filename()
         full_structure = parmed.load_file(pdb_with_ligand, skip_bonds=True)
         receptor_filename = os.path.join(param_directory, RECEPTOR_PDB_FILENAME)
         ligand_filename = os.path.join(param_directory, LIGAND_PDB_FILENAME)
         assert len(self.ligand_indices) > 0, \
             "No ligand indices in seekrflow object."
-        ligand_serial_list:  typing.List[int] = []
+        #ligand_serial_list:  typing.List[int] = []
+        ligand_index_list: typing.List[int] = []
+        resname = None
         for ligand_index in self.ligand_indices:
-            ligand_serial_list.append(full_structure.atoms[ligand_index].number)
-        ligand_selection_str = f"@{','.join(map(str, ligand_serial_list))}"
+            # Parmed uses 1-based indexing for atom selections
+            ligand_index_list.append(ligand_index+1)
+            #ligand_serial = full_structure.atoms[ligand_index].number
+            #ligand_serial_list.append(ligand_serial)
+            if resname is None:
+                resname = full_structure.atoms[ligand_index].residue.name
+            else:
+                assert resname == full_structure.atoms[ligand_index].residue.name, \
+                    "Ligand atoms belong to multiple residue names, "\
+                    "cannot proceed."
+
+        ligand_selection_str = f"@{','.join(map(str, ligand_index_list))}"
         receptor_selection_str = f"!{ligand_selection_str}"
         ligand_structure = full_structure[ligand_selection_str]
         ligand_structure.save(str(ligand_filename), overwrite=True)
@@ -364,8 +393,12 @@ class Protein_ligand_membrane_seekr2_workflow:
         receptor.box = None  # Set box vectors to None for PQR
         ligand.box = None  # Set box vectors to None for PQR
         base.assign_mbondi2_radii_to_parmed_structure(receptor)
+
         receptor.save(full_receptor_pqr_filename, overwrite=True)
         ligand.save(full_ligand_pqr_filename_one_resid, overwrite=True)
+        # For each of these files, change any HETATM lines to ATOM lines
+        convert_hetatm_to_atom(full_receptor_pqr_filename)
+        convert_hetatm_to_atom(full_ligand_pqr_filename_one_resid)
 
         full_ligand_pqr_filename = os.path.join(param_directory, "ligand.pqr")
         pqr_resid_for_each_atom.pqr_resid_for_each_atom(
@@ -407,7 +440,7 @@ class Protein_ligand_membrane_seekr2_workflow:
                                         pdb2pqr_output_pdb_filename)
             latest_pdb_filename = pdb2pqr_output_pdb_filename
 
-        # TODO: need functions to parametrize proteins vs. small molecules - call the functions to
+        # TODO: need functions to parameterize proteins vs. small molecules - call the functions to
         # enforce DRY
         # Load the receptor into openmm
         protein_topology, protein_md_topology, protein_positions = \
@@ -434,7 +467,7 @@ class Protein_ligand_membrane_seekr2_workflow:
         complex_positions[:n_atoms_protein, :] = protein_positions
         complex_positions[n_atoms_protein:n_atoms_protein + n_atoms_ligand, :] = ligand_positions
 
-        serialized_xml, output_pdb_filename = workflow_structures.parametrize_and_check_complex(
+        serialized_xml, output_pdb_filename = workflow_structures.parameterize_and_check_complex(
             complex_topology,
             complex_positions,
             offmol,
@@ -472,11 +505,12 @@ class Protein_ligand_membrane_seekr2_workflow:
             = self.mmvt_settings.md_steps_per_anchor
         model_input.temperature = physical_attributes.temperature
         if physical_attributes.pressure is None:
-            model_input.pressure = 1.0
-            model_input.ensemble = "nvt"
+            #model_input.pressure = 1.0
+            #model_input.ensemble = "nvt"
+            raise Exception("Pressure must be set for membrane simulation.")
         else:
             model_input.pressure = physical_attributes.pressure
-            model_input.ensemble = "npt"
+            model_input.ensemble = "npt_membrane"
         model_input.root_directory = root_directory
         model_input.md_program = "openmm"
         model_input.constraints = "HBonds"
@@ -590,7 +624,33 @@ class Protein_ligand_membrane_seekr2_workflow:
             model_input.sda_settings_input.hydropro_dir \
                 = self.bd_settings.hydropro_directory
             model_input.sda_settings_input.type_calculation = "sda_2proteins"
+            model_input.sda_settings_input.receptor_indices = bd_rec_indices
+            model_input.sda_settings_input.ligand_indices = bd_lig_indices
             model_input.sda_settings_input.geom_type = "box"
+            if os.path.exists(starting_pdb_full_path):
+                pdb_structure = parmed.load_file(starting_pdb_full_path, skip_bonds=True)
+                coords = pdb_structure.get_coordinates()  # shape: (n_atoms, 3)
+                xmin = np.min(coords[0, :, 0])
+                xmax = np.max(coords[0, :, 0])
+                ymin = np.min(coords[0, :, 1])
+                ymax = np.max(coords[0, :, 1])
+                zmin = np.min(coords[0, :, 2])
+                zmax = np.max(coords[0, :, 2])
+                xwidth = xmax - xmin
+                ywidth = ymax - ymin
+                zwidth = zmax - zmin
+                padding = 1.0  # A
+                model_input.sda_settings_input.xmin = -0.5*xwidth - padding
+                model_input.sda_settings_input.xmax = 0.5*xwidth + padding
+                model_input.sda_settings_input.ymin = -0.5*ywidth - padding
+                model_input.sda_settings_input.ymax = 0.5*ywidth + padding
+                model_input.sda_settings_input.zmin = -0.5*zwidth - padding
+                model_input.sda_settings_input.zmax = 0.5*zwidth + padding
+            else:
+                raise Exception(
+                    f"Starting PDB file {starting_pdb_full_path} does not exist - "
+                    "cannot set bounding box coordinates for BD.")
+                
             receptor_solute = seekr2_common_sim_sda.Solute()
             receptor_solute.type = "Protein"
             receptor_solute.apbs_grid_dime = 257

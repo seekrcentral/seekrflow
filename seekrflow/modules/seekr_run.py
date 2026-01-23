@@ -753,7 +753,7 @@ def run_model(
                                 f"fi"
                             )
                         command_list.append("wait")
-                        command_string = "\n".join(command_list)
+                        command_string = ";".join(command_list)
                         
                     indices = seekr_status["stage_status"]["incomplete_anchors"]
                     seekr_run_result = workload_remote.submit_remote_run_workflow(

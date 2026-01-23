@@ -45,6 +45,9 @@ def submit_remote_workflow(
         result = remote_globus\
             .submit_remote_workflow_with_globus_compute(
                 resource.name, workflow, endpoint, args, silent)
+        if not result["success"]:
+            print("result:", result)
+        assert result["success"], "Workflow failed on remote resource."
     elif resource.remote_interface.type == "ssh":
         hostname = resource.remote_interface.hostname
         username = resource.remote_interface.username
@@ -54,15 +57,13 @@ def submit_remote_workflow(
         #private_key_passphrase = resource.remote_interface.private_key_passphrase
         result = remote_ssh\
             .submit_remote_workflow_with_ssh(
-                resource.name, workflow, endpoint, args,  
+                resource.name, workflow, args,  
                 hostname, username, password, port)
     else:
         raise NotImplementedError(
             f"Remote interface type not implemented: "\
             f"{resource.remote_interface.type}")
-    if not result["success"]:
-        print("result:", result)
-    assert result["success"], "Workflow failed on remote resource."
+    
     return result
 
 def bd_status_remote(

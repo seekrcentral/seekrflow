@@ -34,10 +34,10 @@ def make_ligand_sdf_file(
     Make an SDF file for the ligand from the PDB file.
     """
     ligand_pdb_filename = os.path.join(
-        param_directory, seekrflow.workflow.get_parametrizer_ligand_pdb_filename())
+        param_directory, seekrflow.workflow.get_parameterizer_ligand_pdb_filename())
     ligand_sdf_filename = os.path.join(
-        param_directory, seekrflow.workflow.get_parametrizer_default_sdf_filename())
-    seekrflow.workflow.set_parametrizer_sdf_filename(ligand_sdf_filename)
+        param_directory, seekrflow.workflow.get_parameterizer_default_sdf_filename())
+    seekrflow.workflow.set_parameterizer_sdf_filename(ligand_sdf_filename)
     assert os.path.exists(ligand_pdb_filename), \
         f"Ligand PDB file {ligand_pdb_filename} does not exist."
     # Create input and output molecule streams
@@ -76,7 +76,7 @@ def parameterize(
     work_param_dir = seekrflow.get_parameterize_directory()
     param_dir = structures.PARAMETERIZE
     curdir = os.getcwd()
-    pdb_with_system = seekrflow.workflow.get_parametrizer_pdb_filename()
+    pdb_with_system = seekrflow.workflow.get_parameterizer_pdb_filename()
     work_copy_pdb_with_system = os.path.join(
         seekrflow.work_directory, os.path.basename(pdb_with_system))
     copyfile(pdb_with_system, work_copy_pdb_with_system)
@@ -88,12 +88,12 @@ def parameterize(
     work_copy_pdb_with_system_noh = f"{base}_noh{ext}"
     print(f"Saving noh file at: {work_copy_pdb_with_system_noh}")
     traj_noh.save(work_copy_pdb_with_system_noh)
-    
-    seekrflow.workflow.set_parametrizer_pdb_filename(os.path.basename(work_copy_pdb_with_system))
-    ligand_sdf_filename = seekrflow.workflow.get_parametrizer_sdf_filename()
+
+    seekrflow.workflow.set_parameterizer_pdb_filename(os.path.basename(work_copy_pdb_with_system))
+    ligand_sdf_filename = seekrflow.workflow.get_parameterizer_sdf_filename()
     if ligand_sdf_filename != "":
         work_copy_ligand_sdf = os.path.join(
-            work_param_dir, seekrflow.workflow.get_parametrizer_default_sdf_filename())
+            work_param_dir, seekrflow.workflow.get_parameterizer_default_sdf_filename())
         copyfile(ligand_sdf_filename, work_copy_ligand_sdf)
     os.chdir(seekrflow.work_directory)
     seekrflow.workflow.split_molecules(param_dir)
@@ -119,7 +119,7 @@ def parameterize(
         return None, None
     else:
         assert seekrflow.workflow.solvated_system_for_md is None,\
-            "Attempting to parametrize a system that has already be parametrized:"\
+            "Attempting to parameterize a system that has already be parameterized:"\
             "the solvated_system_for_md should be set to None for parameterize.py."
         serialized_xml, output_pdb_filename = seekrflow.workflow.create_complex(
             seekrflow.parameterizer,
@@ -137,6 +137,28 @@ def parameterize(
                 system_filename=os.path.join(structures.PARAMETERIZE, system_basename),)
         parmed_complex = seekrflow.workflow.solvated_system_for_md.parameters_topology.make_parmed(
             output_pdb_filename)
+        if seekrflow.workflow.has_small_molecule_ligand():
+            # Need to resolve the ligand indices between the old and new parmed structures
+            assert seekrflow.workflow.ligand_indices is not None, \
+                "ligand_indices is None; cannot resolve ligand indices in new structure."
+            ligand_resname = None
+            for lig_index in seekrflow.workflow.ligand_indices:
+                lig_atom_name = work_copy.topology.atom(lig_index).name
+                if ligand_resname is None:
+                    lig_resname = work_copy.topology.atom(lig_index).residue.name
+                else:
+                    assert lig_resname == work_copy.topology.atom(lig_index).residue.name, \
+                        "Multiple residue names found for ligand indices; cannot resolve "\
+                        "ligand residue name."
+            
+            new_ligand_indices = []
+            for atom in parmed_complex.atoms:
+                if atom.residue.name == lig_resname:
+                    new_ligand_indices.append(atom.idx)
+            assert len(new_ligand_indices) > 0, \
+                "No ligand indices found in new parmed structure; cannot resolve ligand indices."
+            seekrflow.workflow.ligand_indices = new_ligand_indices
+        
         if seekrflow.workflow.bd_settings is not None:
             seekrflow.workflow.write_component_pqr_files(parmed_complex, structures.PARAMETERIZE)
         os.chdir(curdir)
@@ -200,12 +222,12 @@ def main() -> None:
         seekrflow = structures.Seekrflow()
 
     if pdb_with_system == "":
-        pdb_with_system = seekrflow.workflow.get_parametrizer_pdb_filename()
+        pdb_with_system = seekrflow.workflow.get_parameterizer_pdb_filename()
     else:
-        seekrflow.workflow.set_parametrizer_pdb_filename(pdb_with_system)
+        seekrflow.workflow.set_parameterizer_pdb_filename(pdb_with_system)
 
-    assert os.path.exists(seekrflow.workflow.get_parametrizer_pdb_filename()), \
-        f"Input PDB file {seekrflow.workflow.get_parametrizer_pdb_filename()} does not exist."
+    assert os.path.exists(seekrflow.workflow.get_parameterizer_pdb_filename()), \
+        f"Input PDB file {seekrflow.workflow.get_parameterizer_pdb_filename()} does not exist."
 
     if ligand_sdf_file != "":
         assert os.path.exists(ligand_sdf_file), \
@@ -221,7 +243,6 @@ def main() -> None:
                                     "does not exist.")
         seekrflow.parameterizer.forcefield = external_ff_file
     seekrflow.handle_ligand_indices(ligand_indices, ligand_resname, pdb_with_system)
- 
     system_filename, positions_filename = parameterize(seekrflow)
     seekrflow.work_directory = str(work_dir)
     # TODO: not going to save a new seekrflow file - attempt to use default values.

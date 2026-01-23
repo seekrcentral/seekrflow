@@ -177,7 +177,7 @@ class Protein_ligand_seekr2_workflow:
         """
         return True
 
-    def get_parametrizer_pdb_filename(self) -> str:
+    def get_parameterizer_pdb_filename(self) -> str:
         """
         Get the filename of the PDB file to be used for parameterization.
         """
@@ -189,7 +189,7 @@ class Protein_ligand_seekr2_workflow:
             "is not set, cannot parameterize."
         return self.parameterizer_information.receptor_ligand_pdb_filename
     
-    def set_parametrizer_pdb_filename(self, filename: str) -> None:
+    def set_parameterizer_pdb_filename(self, filename: str) -> None:
         """
         Set the filename of the PDB file to be used for parameterization.
         """
@@ -198,13 +198,13 @@ class Protein_ligand_seekr2_workflow:
         self.parameterizer_information\
             .receptor_ligand_pdb_filename = filename
         
-    def get_parametrizer_ligand_pdb_filename(self) -> str:
+    def get_parameterizer_ligand_pdb_filename(self) -> str:
         """
         Get the filename of the ligand PDB file to be used for parameterization.
         """
         return LIGAND_PDB_FILENAME
         
-    def get_parametrizer_sdf_filename(self) -> str:
+    def get_parameterizer_sdf_filename(self) -> str:
         """
         Get the filename of the SDF file to be used for parameterization.
         """
@@ -215,7 +215,7 @@ class Protein_ligand_seekr2_workflow:
             f"Ligand SDF file {self.parameterizer_information.ligand_sdf_file} does not exist."
         return self.parameterizer_information.ligand_sdf_file
     
-    def set_parametrizer_sdf_filename(self, filename: str) -> None:
+    def set_parameterizer_sdf_filename(self, filename: str) -> None:
         """
         Set the filename of the SDF file to be used for parameterization.
         """
@@ -224,7 +224,7 @@ class Protein_ligand_seekr2_workflow:
         self.parameterizer_information.ligand_sdf_file = filename
         return
     
-    def get_parametrizer_default_sdf_filename(self) -> str:
+    def get_parameterizer_default_sdf_filename(self) -> str:
         """
         Get the default filename of the SDF file to be used for parameterization.
         """
@@ -237,16 +237,28 @@ class Protein_ligand_seekr2_workflow:
         """
         Split the receptor-ligand complex into separate PDB files for the receptor and the ligand.
         """
-        pdb_with_ligand = self.get_parametrizer_pdb_filename()
+        pdb_with_ligand = self.get_parameterizer_pdb_filename()
         full_structure = parmed.load_file(pdb_with_ligand, skip_bonds=True)
         receptor_filename = os.path.join(param_directory, RECEPTOR_PDB_FILENAME)
         ligand_filename = os.path.join(param_directory, LIGAND_PDB_FILENAME)
         assert len(self.ligand_indices) > 0, \
             "No ligand indices in seekrflow object."
-        ligand_serial_list:  typing.List[int] = []
+        #ligand_serial_list:  typing.List[int] = []
+        ligand_index_list: typing.List[int] = []
+        resname = None
         for ligand_index in self.ligand_indices:
-            ligand_serial_list.append(full_structure.atoms[ligand_index].number)
-        ligand_selection_str = f"@{','.join(map(str, ligand_serial_list))}"
+            # Parmed uses 1-based indexing for atom selections
+            ligand_index_list.append(ligand_index+1)
+            #ligand_serial = full_structure.atoms[ligand_index].number
+            #ligand_serial_list.append(ligand_serial)
+            if resname is None:
+                resname = full_structure.atoms[ligand_index].residue.name
+            else:
+                assert resname == full_structure.atoms[ligand_index].residue.name, \
+                    "Ligand atoms belong to multiple residue names, "\
+                    "cannot proceed."
+
+        ligand_selection_str = f"@{','.join(map(str, ligand_index_list))}"
         receptor_selection_str = f"!{ligand_selection_str}"
         ligand_structure = full_structure[ligand_selection_str]
         ligand_structure.save(str(ligand_filename), overwrite=True)
@@ -283,7 +295,7 @@ class Protein_ligand_seekr2_workflow:
             "Ligand must have at least one residue."
         lig_selection_string = ":"+",".join(ligand_resname_set)
         ligand_structure_all_resids = parmed_complex[lig_selection_string]
-
+        
         # This is an attempt to choose only one single instance of the ligand
         # in case there are multiple duplicates in the system.
         last_resnum = None
@@ -363,7 +375,7 @@ class Protein_ligand_seekr2_workflow:
                                         pdb2pqr_output_pdb_filename)
             latest_pdb_filename = pdb2pqr_output_pdb_filename
 
-        # TODO: need functions to parametrize proteins vs. small molecules - call the functions to
+        # TODO: need functions to parameterize proteins vs. small molecules - call the functions to
         # enforce DRY
         # Load the receptor into openmm
         protein_topology, protein_md_topology, protein_positions = \
@@ -390,7 +402,7 @@ class Protein_ligand_seekr2_workflow:
         complex_positions[:n_atoms_protein, :] = protein_positions
         complex_positions[n_atoms_protein:n_atoms_protein + n_atoms_ligand, :] = ligand_positions
 
-        serialized_xml, output_pdb_filename = workflow_structures.parametrize_and_check_complex(
+        serialized_xml, output_pdb_filename = workflow_structures.parameterize_and_check_complex(
             complex_topology,
             complex_positions,
             offmol,

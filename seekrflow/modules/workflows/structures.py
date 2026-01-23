@@ -101,14 +101,14 @@ def regenerate_espaloma_system(
         system_generator: "SystemGenerator",
         solvated_topology: "openmm.app.Topology",
         solvated_positions: "openmm.unit.Quantity",
-        parametrize_directory: str,
+        parameterize_directory: str,
         ) -> "openmm.System":
     """
     Add espaloma parameterization to the solvated system.
     """
     import openmm.app as openmm_app
     from openff.toolkit.topology import Molecule
-    output_pdb_basename = os.path.join(parametrize_directory, "complex")
+    output_pdb_basename = os.path.join(parameterize_directory, "complex")
     # Convert solvated topology to MDTraj format and identify protein chains
     mdtop = mdtraj.Topology.from_openmm(solvated_topology)
     chain_indices = [chain.index for chain in solvated_topology.chains()]
@@ -156,7 +156,7 @@ def regenerate_espaloma_system(
     new_solvated_system = system_generator.create_system(new_solvated_topology)
     return new_solvated_system
 
-def parametrize_and_check_complex(
+def parameterize_and_check_complex(
         complex_topology: "openmm.app.Topology",
         complex_positions: np.ndarray,
         offmol: typing.Optional["openff.toolkit.topology.Molecule"],
@@ -166,7 +166,7 @@ def parametrize_and_check_complex(
         md_settings: MD_settings,
         ) -> tuple[str, str]:
     """
-    Parametrize the complex structure for the given workflow, and 
+    Parameterize the complex structure for the given workflow, and 
     run minimizations and short sims to check the structure is stable.
     """
     import openmm
