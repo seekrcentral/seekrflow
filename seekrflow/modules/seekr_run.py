@@ -606,6 +606,9 @@ def run_model(
                         and empty_jobs_check_count[stage_name] <= MAX_EMPTY_CHECKS_BEFORE_RESUBMIT):
                     stage_should_submit_new_run[stage_name] = False
                 
+                if stage_should_perform_transfer[stage_name]:
+                    stage_should_submit_new_run[stage_name] = False
+                    
                 if stage_should_submit_new_run[stage_name]:
                     number_of_stages_to_submit_new_run += 1
 
@@ -731,6 +734,24 @@ def run_model(
                         = seekrflow.run_settings.get_resource_by_name(stage_locations["seekr"])
                     if benchmark_mode:
                         resource.time_limit = "00:30:00"
+
+                    # Optimize SEEKR time limit based on remaining work and benchmark data
+                    original_time_limit = resource.time_limit
+                    if not benchmark_mode:
+                        optimal_time_limit = workload_remote.calculate_optimal_time_limit(
+                            seekrflow,
+                            "seekr",
+                            resource,
+                            seekr_status["stage_status"]["incomplete_anchors"],
+                            job_status_filename
+                        )
+                        print("Optimal SEEKR time limit calculation:", optimal_time_limit)
+
+                        if optimal_time_limit != original_time_limit:
+                            print(f"  Optimized SEEKR time limit: {optimal_time_limit} "
+                                  f"(max: {original_time_limit})")
+                            resource.time_limit = optimal_time_limit
+
                     destination_path = os.path.join(
                         resource.remote_working_directory, seekrflow.name)
                     destination_model_filename = os.path.join(destination_path, "model.xml")
@@ -756,10 +777,12 @@ def run_model(
                         command_string = ";".join(command_list)
                         
                     indices = seekr_status["stage_status"]["incomplete_anchors"]
+                    anchor_times = seekr_status["stage_status"].get("anchor_times", {})
                     seekr_run_result = workload_remote.submit_remote_run_workflow(
                         seekrflow, "seekr", destination_path, resource,
-                        command_string, destination_model_filename, workflow_type="seekr", 
-                        indices=indices, mps=mps)
+                        command_string, destination_model_filename, workflow_type="seekr",
+                        indices=indices, mps=mps, anchor_times=anchor_times)
+                    resource.time_limit = original_time_limit
                     stage_run_results["seekr"] = seekr_run_result
                     stage_manager_status["seekr"] = "running"
                     stage_progress["seekr"] = "started"

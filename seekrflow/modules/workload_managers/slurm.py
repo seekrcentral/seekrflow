@@ -1,6 +1,194 @@
 """
-
+SLURM workload manager functions for remote job submission and status checking.
 """
+
+import math
+import pathlib
+from typing import Optional
+
+
+def calculate_optimal_seekr_time_limit(
+    job_status_file: str,
+    incomplete_anchors: list[int],
+    default_time_limit: str
+) -> str:
+    """
+    Calculate optimal SLURM time limit for SEEKR stage based on remaining work
+    and benchmark data from previous runs.
+
+    This function estimates how much wallclock time is needed to complete the
+    remaining simulation work for incomplete anchors by:
+    1. Reading anchor simulation times from .seekrflow_job_status.json
+    2. Calculating remaining simulation time per anchor
+    3. Estimating performance from previous job's elapsed time and progress
+    4. Computing time needed using the slowest anchor
+    5. Adding 20% safety buffer and rounding up to nearest hour
+    6. Capping at default_time_limit
+
+    Args:
+        job_status_file: Path to .seekrflow_job_status.json file
+        incomplete_anchors: List of anchor indices that need more simulation
+        default_time_limit: Fallback time limit (HH:MM:SS format) if calculation fails
+
+    Returns:
+        Time limit string in HH:MM:SS format, capped at default_time_limit
+        Returns default_time_limit if:
+        - No benchmark data available (first run)
+        - Previous run made no progress
+        - Any calculation errors occur
+        - Calculated time exceeds default_time_limit
+    """
+    import json
+    import os
+
+    # Fallback to default if file doesn't exist
+    if not os.path.exists(job_status_file):
+        print("DEBUG: Job status file not found, using default time limit.")
+        return default_time_limit
+
+    try:
+        # Load status file
+        with open(job_status_file, "r") as f:
+            status_data = json.load(f)
+
+        # Extract SEEKR stage data
+        seekr_data = status_data.get("seekr", {})
+        stage_status = seekr_data.get("stage_status", {})
+        manager_status = seekr_data.get("manager_status")
+
+        # Get anchor times and target
+        anchor_times = stage_status.get("anchor_times", {})
+        target_time = stage_status.get("anchor_time_for_completion", 0.0)
+
+        if target_time <= 0 or not anchor_times:
+            print("DEBUG: Invalid target time or empty anchor times, using default time limit.")
+            return default_time_limit
+
+        # Check if we have benchmark data from previous job
+        if manager_status is None:
+            print("DEBUG: No manager status found, using default time limit.")
+            return default_time_limit
+
+        jobs = manager_status.get("jobs", [])
+        if not jobs:
+            print("DEBUG: No jobs found in manager status, using default time limit.")
+            return default_time_limit
+
+        # Get elapsed time from most recent job (format: "HH:MM:SS" or "D-HH:MM:SS")
+        elapsed_str = jobs[0].get("Elapsed", "00:00:00")
+
+        def parse_slurm_time(time_str: str) -> float:
+            """Convert SLURM time string to seconds"""
+            days = 0
+            if "-" in time_str:
+                day_part, time_part = time_str.split("-")
+                days = int(day_part)
+                time_str = time_part
+
+            parts = time_str.split(":")
+            if len(parts) == 3:
+                hours, minutes, seconds = map(int, parts)
+                return days * 86400 + hours * 3600 + minutes * 60 + seconds
+            return 0.0
+
+        elapsed_seconds = parse_slurm_time(elapsed_str)
+        print(f"DEBUG: Previous job elapsed time: {elapsed_seconds} seconds.")
+
+        if elapsed_seconds <= 0:
+            print("DEBUG: Elapsed time is zero, using default time limit.")
+            return default_time_limit
+
+        # Try to load previous anchor times from .slurm_runner state file
+        # to calculate actual progress made in this job
+        job_status_path = pathlib.Path(job_status_file)
+        root_dir = job_status_path.parent
+        slurm_runner_dir = root_dir / ".slurm_runner"
+        seekr_latest = slurm_runner_dir / "seekr_latest.json"
+
+        anchor_times_at_submission = None
+        if seekr_latest.exists():
+            try:
+                with open(seekr_latest, "r") as f:
+                    state_data = json.load(f)
+                    anchor_times_at_submission = state_data.get("anchor_times_at_submission")
+            except Exception:
+                pass
+
+        # Calculate simulation progress made in the previous job
+        if anchor_times_at_submission is not None:
+            # We have baseline - calculate actual progress
+            total_progress = 0.0
+            for anchor_idx in incomplete_anchors:
+                anchor_str = str(anchor_idx)
+                current_time = anchor_times.get(anchor_str, 0.0)
+                previous_time = anchor_times_at_submission.get(anchor_str, 0.0)
+                progress = max(0.0, current_time - previous_time)
+                total_progress += progress
+        else:
+            # No baseline - estimate using current simulation times for incomplete anchors
+            # This assumes these are the times accumulated in the last job
+            total_progress = sum(
+                anchor_times.get(str(idx), 0.0) for idx in incomplete_anchors
+            )
+
+        # If no progress was made, fall back to default
+        print(f"DEBUG: Total progress made in previous job: {total_progress} ps.")
+        if total_progress <= 0:
+            print("DEBUG: No progress made in previous job, using default time limit.")
+            return default_time_limit
+
+        # Calculate benchmark: seconds per picosecond of simulation
+        benchmark = elapsed_seconds / total_progress
+        print(f"DEBUG: Benchmark calculated: {benchmark} seconds per unit simulation time.")
+
+        # Calculate time needed for each incomplete anchor
+        max_time_needed = 0.0
+        for anchor_idx in incomplete_anchors:
+            anchor_str = str(anchor_idx)
+            current_time = anchor_times.get(anchor_str, 0.0)
+            remaining_time = max(0.0, target_time - current_time)
+            time_needed = remaining_time * benchmark
+            max_time_needed = max(max_time_needed, time_needed)
+
+        print(f"DEBUG: Maximum time needed among incomplete anchors: {max_time_needed} seconds.")
+        # If no time needed (all anchors complete), shouldn't happen but handle it
+        if max_time_needed <= 0:
+            print("DEBUG: No time needed for remaining anchors, using default time limit.")
+            return default_time_limit
+
+        # Add 20% safety buffer
+        safe_time = max_time_needed * 1.20
+        print(f"DEBUG: Safe time with buffer: {safe_time} seconds.")
+
+        # Round up to nearest hour
+        hours_needed = math.ceil(safe_time / 3600.0)
+        print(f"DEBUG: Hours needed (rounded up): {hours_needed} hours.")
+
+        # Enforce minimum of 1 hour
+        hours_needed = max(1, hours_needed)
+        print(f"DEBUG: Hours needed after enforcing minimum: {hours_needed} hours.")
+
+        # Format as HH:MM:SS
+        calculated_time = f"{hours_needed:02d}:00:00"
+
+        # Parse default_time_limit to compare
+        default_seconds = parse_slurm_time(default_time_limit)
+        calculated_seconds = hours_needed * 3600
+
+        # Cap at default_time_limit
+        print("DEBUG: Calculated time limit:", calculated_time)
+        print("DEBUG: Default time limit:", default_time_limit)
+        print("DEBUG: Calculated seconds:", calculated_seconds)
+        if calculated_seconds > default_seconds:
+            return default_time_limit
+
+        return calculated_time
+
+    except Exception as e:
+        # If anything goes wrong, fall back to default
+        print(f"Warning: Could not calculate optimal time limit: {e}")
+        return default_time_limit
+
 
 def slurm_remote_bd_status_workflow(args):
     """
@@ -64,6 +252,7 @@ def slurm_remote_bd_status_workflow(args):
         parent_jobids: List[str]
         worker_init: Optional[str] = None
         state_file: Optional[str] = None
+        anchor_times_at_submission: Optional[Dict[str, float]] = None
 
         @staticmethod
         def load(path: pathlib.Path) -> "RunState":
@@ -313,6 +502,7 @@ def slurm_remote_hidr_status_workflow(args):
         parent_jobids: List[str]
         worker_init: Optional[str] = None
         state_file: Optional[str] = None
+        anchor_times_at_submission: Optional[Dict[str, float]] = None
 
         @staticmethod
         def load(path: pathlib.Path) -> "RunState":
@@ -578,6 +768,7 @@ def slurm_remote_seekr_status_workflow(args):
         parent_jobids: List[str]
         worker_init: Optional[str] = None
         state_file: Optional[str] = None
+        anchor_times_at_submission: Optional[Dict[str, float]] = None
 
         @staticmethod
         def load(path: pathlib.Path) -> "RunState":
@@ -848,6 +1039,7 @@ def slurm_remote_run_workflow(args):
     model_filename = args[14]
     workflow_type = args[15]
     mps = args[16]
+    anchor_times_at_submission = args[17] if len(args) > 17 else None
 
     kwargs = {
         "working_dir": working_dir,
@@ -865,7 +1057,8 @@ def slurm_remote_run_workflow(args):
         "indices": indices,
         "model_filename": model_filename,
         "workflow_type": workflow_type,
-        "mps": mps
+        "mps": mps,
+        "anchor_times_at_submission": anchor_times_at_submission
     }
 
     @dataclass
@@ -891,6 +1084,7 @@ def slurm_remote_run_workflow(args):
         #slurm_env: Dict[str, str] # extra env to export in script
         worker_init: Optional[str] = None
         state_file: Optional[str] = None
+        anchor_times_at_submission: Optional[Dict[str, float]] = None
 
         def save(
                 self,
@@ -901,7 +1095,7 @@ def slurm_remote_run_workflow(args):
             with open(path, "w") as f:
                 json.dump(asdict(self), f, indent=2)
             return
-        
+
         @staticmethod
         def load(
             path: pathlib.Path
@@ -1072,7 +1266,8 @@ def slurm_remote_run_workflow(args):
             cmd_template=args["command_string"],
             attempts={jobid: list(range(n_tasks))},  # all indices attempted
             parent_jobids=[],
-            worker_init=args["worker_init"]
+            worker_init=args["worker_init"],
+            anchor_times_at_submission=args.get("anchor_times_at_submission")
         )
         state_path = state_dir / f"{stage_name}_{run_id}.json"
         st.save(state_path)
@@ -1183,6 +1378,7 @@ def slurm_remote_force_rerun_workflow(args):
         parent_jobids: List[str]
         worker_init: Optional[str] = None
         state_file: Optional[str] = None
+        anchor_times_at_submission: Optional[Dict[str, float]] = None
 
         @staticmethod
         def load(path: pathlib.Path) -> "RunState":

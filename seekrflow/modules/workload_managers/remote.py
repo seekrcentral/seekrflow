@@ -17,6 +17,53 @@ import seekrflow.modules.workload_managers.slurm as workload_slurm
 import seekrflow.modules.remote_interfaces.globus_compute_sdk as remote_globus
 import seekrflow.modules.remote_interfaces.ssh as remote_ssh
 
+
+def calculate_optimal_time_limit(
+        seekrflow: structures.Seekrflow,
+        stage_name: str,
+        resource: structures.Resource_remote_base,
+        incomplete_anchors: list[int],
+        job_status_filename: str
+) -> str:
+    """
+    Calculate optimal time limit for a stage based on workload manager type.
+
+    This function dispatches to the appropriate workload manager's optimization
+    function based on the resource type. Currently supports SLURM with extensibility
+    for future workload managers (PBS, LSF, etc.).
+
+    Args:
+        seekrflow: Seekrflow object containing configuration
+        stage_name: Name of the stage (e.g., "seekr", "hidr", "bd")
+        resource: Remote resource configuration object
+        incomplete_anchors: List of anchor indices that need more simulation
+        job_status_filename: Path to .seekrflow_job_status.json file
+
+    Returns:
+        Optimized time limit string in HH:MM:SS format, or original time limit
+        if optimization is not available/applicable for this workload manager
+    """
+    if resource.type == "slurm_remote":
+        # SLURM-specific time limit optimization
+        if stage_name == "seekr":
+            return workload_slurm.calculate_optimal_seekr_time_limit(
+                job_status_filename,
+                incomplete_anchors,
+                resource.time_limit
+            )
+        else:
+            # Currently only SEEKR stage is optimized
+            return resource.time_limit
+    elif resource.type == "pbs_remote":
+        # Future: PBS-specific optimization
+        # import seekrflow.modules.workload_managers.pbs as workload_pbs
+        # return workload_pbs.calculate_optimal_seekr_time_limit(...)
+        return resource.time_limit
+    else:
+        # Unknown or unsupported workload manager type
+        return resource.time_limit
+
+
 def submit_remote_workflow(
         seekrflow: structures.Seekrflow,
         resource_name: str,
@@ -92,7 +139,8 @@ def submit_remote_run_workflow(
         workflow_type: str,
         indices: list | None = None,
         mps: int = 1,
-        silent: bool = False
+        silent: bool = False,
+        anchor_times: dict | None = None
     ) -> list:
     """
     Run the stage remotely. Submit a Globus Compute or SSH workflow to 
@@ -117,7 +165,8 @@ def submit_remote_run_workflow(
             indices,
             model_filename,
             workflow_type,
-            mps
+            mps,
+            anchor_times
         ]
         run_workflow = workload_slurm.slurm_remote_run_workflow
         
