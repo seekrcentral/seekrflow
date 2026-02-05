@@ -33,17 +33,19 @@ def submit_remote_workflow_with_ssh(
             args_list.append(f"[{','.join(map(str, arg))}]")
         else:
             args_list.append(f"{arg}")
-
-    arg_str = "(" + ",".join(args_list) + ")"
+    if len(args_list) == 1:
+        arg_str = "(" + args_list[0] + ",)"
+    else:
+        arg_str = "(" + ",".join(args_list) + ")"
+    
     workflow_source_code = inspect.getsource(workflow)
     # NOTE: can we always assume that the wanted function is in the first line?
     #  Answer: yes - but we have to be intentional about coding the other workflows
     #  that way.
-    func_name = run_workflow_source_code.split("\n")[0].split("def ")[1].split("(")[0]
-    call_raw_str = f"{workflow_source_code}{func_name}({arg_str})"
+    func_name = workflow_source_code.split("\n")[0].split("def ")[1].split("(")[0]
+    call_raw_str = f"{workflow_source_code}print({func_name}({arg_str}))"
     call_str = shlex.quote(call_raw_str)
     cmd = f"python3 -u -c {call_str}"
-
     # Buffers where Fabric’s I/O threads will write output in real-time
     out_buf, err_buf = StringIO(), StringIO()
     
@@ -56,24 +58,29 @@ def submit_remote_workflow_with_ssh(
         out_stream=out_buf,    # capture live stdout here
         err_stream=err_buf,    # capture live stderr here
     )
-
     # Track how much we’ve already printed from the buffers
     seen_out = seen_err = 0
 
     try:
         # Process finished — grab the final Result (exit code, full buffers, etc.)
+        result = promise.join()
         so = out_buf.getvalue()
         if len(so) > seen_out:
-            print(so[seen_out:], end="")
+            #print(so[seen_out:], end="")
             seen_out = len(so)
 
         se = err_buf.getvalue()
         if len(se) > seen_err:
-            print(se[seen_err:], end="", file=sys.stderr)
+            #print(se[seen_err:], end="", file=sys.stderr)
             seen_err = len(se)
-        result = promise.join()
+        
+        val = {}
+        try:
+            val = ast.literal_eval(so)
+        except Exception as e:
+            print(f"Error: {e}")
         c.close()
-        return 
+        return val
 
     finally:
         # Best-effort cleanup if the loop exits unexpectedly

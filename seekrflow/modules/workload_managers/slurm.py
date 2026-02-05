@@ -64,18 +64,18 @@ def calculate_optimal_seekr_time_limit(
             print("DEBUG: Invalid target time or empty anchor times, using default time limit.")
             return default_time_limit
 
-        # Check if we have benchmark data from previous job
-        if manager_status is None:
-            print("DEBUG: No manager status found, using default time limit.")
-            return default_time_limit
+        # Get elapsed time - prioritize last_known_elapsed from status result
+        elapsed_str = seekr_data.get("last_known_elapsed")
 
-        jobs = manager_status.get("jobs", [])
-        if not jobs:
-            print("DEBUG: No jobs found in manager status, using default time limit.")
-            return default_time_limit
+        # Fallback to manager_status if available
+        if not elapsed_str and manager_status:
+            jobs = manager_status.get("jobs", [])
+            if jobs:
+                elapsed_str = jobs[0].get("Elapsed")
 
-        # Get elapsed time from most recent job (format: "HH:MM:SS" or "D-HH:MM:SS")
-        elapsed_str = jobs[0].get("Elapsed", "00:00:00")
+        if not elapsed_str:
+            print("DEBUG: No elapsed time found (no previous job data), using default time limit.")
+            return default_time_limit
 
         def parse_slurm_time(time_str: str) -> float:
             """Convert SLURM time string to seconds"""
@@ -98,8 +98,7 @@ def calculate_optimal_seekr_time_limit(
             print("DEBUG: Elapsed time is zero, using default time limit.")
             return default_time_limit
 
-        # Try to load previous anchor times from .slurm_runner state file
-        # to calculate actual progress made in this job
+        # Read anchor_times_at_submission from local state file for baseline
         job_status_path = pathlib.Path(job_status_file)
         root_dir = job_status_path.parent
         slurm_runner_dir = root_dir / ".slurm_runner"
@@ -467,7 +466,6 @@ def slurm_remote_hidr_status_workflow(args):
     import xml.etree.ElementTree as ET
     from dataclasses import dataclass
     from typing import Dict, List, Optional
-
     working_dir = args[0]
     stage_name = "hidr"
 
@@ -961,14 +959,17 @@ def slurm_remote_seekr_status_workflow(args):
 
     work_dir = pathlib.Path(working_dir)
     state_path = get_state_dir(work_dir) / f"{stage_name}_latest.json"
-    
+
+    # Track elapsed time for optimization (persists after job finishes)
+    last_known_elapsed = None
+
     # Check SLURM status if state file exists
     if state_path.exists():
         try:
             st = RunState.load(state_path)
             cmd = f"squeue -j {st.jobid} -h -o '%i|%P|%j|%u|%T|%M|%l|%D|%C|%R'"
             rc, out, err = run(["bash", "-lc", cmd], check=False)
-            
+
             if rc == 0:
                 rows = []
                 for line in out.splitlines():
@@ -986,7 +987,18 @@ def slurm_remote_seekr_status_workflow(args):
                             "CPUs": parts[8],
                             "Reason": parts[9] if len(parts) > 9 else ""
                         })
-                
+
+                # Capture elapsed time before it disappears
+                if rows:
+                    last_known_elapsed = rows[0]["Elapsed"]
+                    # Also save to state file for remote-side tracking
+                    try:
+                        state_data = json.loads(state_path.read_text())
+                        state_data["last_known_elapsed"] = last_known_elapsed
+                        state_path.write_text(json.dumps(state_data, indent=2))
+                    except Exception:
+                        pass
+
                 result["manager_status"] = {
                     "tool": "squeue",
                     "timestamp": time.time(),
@@ -994,6 +1006,13 @@ def slurm_remote_seekr_status_workflow(args):
                     "jobs": rows
                 }
             else:
+                # No jobs in queue - try to get elapsed from state file
+                try:
+                    state_data = json.loads(state_path.read_text())
+                    last_known_elapsed = state_data.get("last_known_elapsed")
+                except Exception:
+                    pass
+
                 result["manager_status"] = {
                     "tool": "squeue",
                     "timestamp": time.time(),
@@ -1002,7 +1021,10 @@ def slurm_remote_seekr_status_workflow(args):
                 }
         except Exception as e:
             result["error"] = f"Failed to check SLURM status: {e}"
-    
+
+    # Include elapsed time in result so it's transferred back to local machine
+    result["last_known_elapsed"] = last_known_elapsed
+
     # Check SEEKR completion status by reading files
     model_path = work_dir / "model.xml"
     stage_status = check_seekr_completion(model_path, anchor_time_for_completion)
