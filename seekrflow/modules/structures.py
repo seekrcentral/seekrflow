@@ -221,14 +221,81 @@ class Resource_remote_slurm(Resource_remote_base):
     transfer_settings: Transfer_settings_rsync | Transfer_settings_globus = field(
         default=Factory(Transfer_settings_globus),
     )
-    
+
+@define
+class Resource_remote_pbs(Resource_remote_base):
+    """
+    PBS/Torque resource for running the protocol.
+    """
+    type: typing.Literal["pbs_remote"] = "pbs_remote"
+    name: str = field(
+        default="",
+        validator=validators.instance_of(str),
+    )
+    remote_seekr2_directory: str = field(
+        default="$HOME/seekr2/seekr2/",
+        validator=validators.instance_of(str),
+    )
+    remote_seekrtools_directory: str = field(
+        default="$HOME/seekrtools/seekrtools/",
+        validator=validators.instance_of(str),
+    )
+    remote_working_directory: str = field(
+        default="",
+        validator=validators.instance_of(str),
+    )
+    queue: str = field(  # PBS uses "queue" instead of "partition"
+        default="",
+        validator=validators.instance_of(str),
+    )
+    account: str = field(
+        default="",
+        validator=validators.instance_of(str),
+    )
+    resource_list: str | None = field(  # PBS -l options (e.g., "qos=high")
+        default=None,
+        validator=validators.optional(validators.instance_of(str)),
+    )
+    nodes_per_block: int = field(
+        default=1,
+        validator=validators.instance_of(int),
+    )
+    cpus_per_task: int = field(  # Keep same name as SLURM for consistency; convert to ppn in qsub
+        default=1,
+        validator=validators.instance_of(int),
+    )
+    memory_per_node: int = field(
+        default=4,
+        validator=validators.instance_of(int),
+    )
+    time_limit: str = field(  # Format: HH:MM:SS (walltime)
+        default="00:30:00",
+        validator=validators.instance_of(str),
+    )
+    scheduler_options: str = field(  # Additional PBS options
+        default="",
+        validator=validators.instance_of(str),
+    )
+    worker_init: str = field(
+        default="",
+        validator=validators.instance_of(str),
+    )
+    remote_interface: Remote_interface_globus_compute_sdk | Remote_interface_ssh = field(
+        default=Factory(Remote_interface_globus_compute_sdk),
+    )
+    transfer_settings: Transfer_settings_rsync | Transfer_settings_globus = field(
+        default=Factory(Transfer_settings_globus),
+    )
+
 @define
 class Run_settings:
     """
     Settings for seekrflow runs.
     resource: the machine that a protocol will run on
     """
-    resources: typing.List[Resource_remote_slurm] = field(
+    resources: typing.List[
+        Resource_remote_slurm | Resource_remote_pbs
+    ] = field(
         default=Factory(list),)
     bd_stage_resource_name: str = field(
         default="local",
@@ -530,8 +597,9 @@ def try_to_load_resources_json(
 
     if json_str is None:
         return
-    
+
     converter: cattrs.Converter = cattrs.Converter()
+    include_subclasses(Resource_base, converter)
     run_settings_obj: Run_settings = converter.structure(json_str, Run_settings)
     if seekrflow.run_settings is None:
         seekrflow.run_settings = Run_settings()
@@ -550,6 +618,9 @@ def load_seekrflow(
     with open(filename, "r") as file:
         json_string: str = json.load(file)
     converter: cattrs.Converter = cattrs.Converter()
+    include_subclasses(protein_ligand_seekr2_structures.HIDR_settings_base, converter)
+    include_subclasses(Transfer_settings_base, converter)
+    include_subclasses(Resource_base, converter)
     seekrflow_obj: Seekrflow = converter.structure(json_string, Seekrflow)
     try_to_load_resources_json(seekrflow_obj)
     return seekrflow_obj

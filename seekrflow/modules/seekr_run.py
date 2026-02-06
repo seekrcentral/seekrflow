@@ -448,6 +448,9 @@ def run_model(
                     else:
                         seekr_status = workload_remote.seekr_status_remote(
                             seekrflow, model, silent=silent, benchmark_mode=benchmark_mode)
+                        if not seekr_status["success"]:
+                            print(f"Warning: Failed to get SEEKR status: {seekr_status.get('error', 'Unknown error')}")
+                            exit()
                         if (not seekr_status["stage_status"]["model_xml_found"]) \
                                 and (not stage_progress[stage_name] in ["completed", "unknown"]):
                             stage_should_perform_transfer[stage_name] = True
@@ -608,7 +611,7 @@ def run_model(
                 
                 if stage_should_perform_transfer[stage_name]:
                     stage_should_submit_new_run[stage_name] = False
-                    
+
                 if stage_should_submit_new_run[stage_name]:
                     number_of_stages_to_submit_new_run += 1
 

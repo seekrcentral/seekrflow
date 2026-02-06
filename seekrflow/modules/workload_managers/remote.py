@@ -14,6 +14,7 @@ import seekr2.modules.common_base as seekr2_base
 import seekrflow.modules.base as base
 import seekrflow.modules.structures as structures
 import seekrflow.modules.workload_managers.slurm as workload_slurm
+import seekrflow.modules.workload_managers.pbs as workload_pbs
 import seekrflow.modules.remote_interfaces.globus_compute_sdk as remote_globus
 import seekrflow.modules.remote_interfaces.ssh as remote_ssh
 
@@ -55,10 +56,16 @@ def calculate_optimal_time_limit(
             # Currently only SEEKR stage is optimized
             return resource.time_limit
     elif resource.type == "pbs_remote":
-        # Future: PBS-specific optimization
-        # import seekrflow.modules.workload_managers.pbs as workload_pbs
-        # return workload_pbs.calculate_optimal_seekr_time_limit(...)
-        return resource.time_limit
+        # PBS-specific time limit optimization
+        if stage_name == "seekr":
+            return workload_pbs.calculate_optimal_seekr_time_limit(
+                job_status_filename,
+                incomplete_anchors,
+                resource.time_limit
+            )
+        else:
+            # Currently only SEEKR stage is optimized
+            return resource.time_limit
     else:
         # Unknown or unsupported workload manager type
         return resource.time_limit
@@ -80,6 +87,10 @@ def submit_remote_workflow(
     destination_path = os.path.join(
         resource.remote_working_directory, seekrflow.name)
     if resource.type == "slurm_remote":
+        args = [destination_path]
+        if extra_args is not None:
+            args.extend(extra_args)
+    elif resource.type == "pbs_remote":
         args = [destination_path]
         if extra_args is not None:
             args.extend(extra_args)
@@ -124,8 +135,19 @@ def bd_status_remote(
     """
     assert model.k_on_info is not None
     n_traj_for_completed = model.k_on_info.b_surface_num_trajectories
-    bd_status_workflow = workload_slurm.slurm_remote_bd_status_workflow
-    result = submit_remote_workflow(seekrflow, seekrflow.run_settings.bd_stage_resource_name, 
+
+    # Get resource to check its type
+    resource = seekrflow.run_settings.get_resource_by_name(
+        seekrflow.run_settings.bd_stage_resource_name)
+
+    if resource.type == "slurm_remote":
+        bd_status_workflow = workload_slurm.slurm_remote_bd_status_workflow
+    elif resource.type == "pbs_remote":
+        bd_status_workflow = workload_pbs.pbs_remote_bd_status_workflow
+    else:
+        raise NotImplementedError(f"Resource type {resource.type} not implemented")
+
+    result = submit_remote_workflow(seekrflow, seekrflow.run_settings.bd_stage_resource_name,
                            bd_status_workflow, extra_args=[n_traj_for_completed], silent=silent)
     return result
 
@@ -169,7 +191,27 @@ def submit_remote_run_workflow(
             anchor_times
         ]
         run_workflow = workload_slurm.slurm_remote_run_workflow
-        
+    elif resource.type == "pbs_remote":
+        args = [
+            stage_name,
+            log_directory,
+            resource.queue,              # PBS equivalent of partition
+            resource.account,
+            resource.resource_list,      # PBS equivalent of constraint
+            name,
+            resource.cpus_per_task,
+            resource.memory_per_node,
+            resource.time_limit,
+            resource.scheduler_options,
+            resource.worker_init,
+            command_string,
+            indices,
+            model_filename,
+            workflow_type,
+            mps,
+            anchor_times
+        ]
+        run_workflow = workload_pbs.pbs_remote_run_workflow
     else:
         raise NotImplementedError(
             f"Resource type {resource.type} is not implemented.")
@@ -185,12 +227,20 @@ def submit_remote_cancel_workflow(
         silent: bool = False
     ) -> None:
     """
-    Cancel the remote stage. Submit a Globus Compute or SSH workflow to 
+    Cancel the remote stage. Submit a Globus Compute or SSH workflow to
     signal the cancellation.
     """
     args = [job_id]
-    cancel_workflow = workload_slurm.slurm_remote_cancel_workflow
-    submit_remote_workflow(seekrflow, resource_name, 
+    resource = seekrflow.run_settings.get_resource_by_name(resource_name)
+
+    if resource.type == "slurm_remote":
+        cancel_workflow = workload_slurm.slurm_remote_cancel_workflow
+    elif resource.type == "pbs_remote":
+        cancel_workflow = workload_pbs.pbs_remote_cancel_workflow
+    else:
+        raise NotImplementedError(f"Resource type {resource.type} not implemented")
+
+    submit_remote_workflow(seekrflow, resource_name,
                            cancel_workflow, extra_args=args, silent=silent)
     return
 
@@ -203,7 +253,17 @@ def hidr_status_remote(
     Check if the HIDR stage has finished remotely. Submit a Globus Compute
     or SSH workflow to obtain this.
     """
-    hidr_status_workflow = workload_slurm.slurm_remote_hidr_status_workflow
+    # Get resource to check its type
+    resource = seekrflow.run_settings.get_resource_by_name(
+        seekrflow.run_settings.hidr_stage_resource_name)
+
+    if resource.type == "slurm_remote":
+        hidr_status_workflow = workload_slurm.slurm_remote_hidr_status_workflow
+    elif resource.type == "pbs_remote":
+        hidr_status_workflow = workload_pbs.pbs_remote_hidr_status_workflow
+    else:
+        raise NotImplementedError(f"Resource type {resource.type} not implemented")
+
     result = submit_remote_workflow(seekrflow, seekrflow.run_settings.hidr_stage_resource_name,
                                     hidr_status_workflow, silent=silent)
     return result
@@ -223,10 +283,21 @@ def seekr_status_remote(
     else:
         time_for_completed = model.calculation_settings.num_production_steps \
             * model.get_timestep()
-    seekr_status_workflow = workload_slurm.slurm_remote_seekr_status_workflow
+
+    # Get resource to check its type
+    resource = seekrflow.run_settings.get_resource_by_name(
+        seekrflow.run_settings.seekr_stage_resource_name)
+
+    if resource.type == "slurm_remote":
+        seekr_status_workflow = workload_slurm.slurm_remote_seekr_status_workflow
+    elif resource.type == "pbs_remote":
+        seekr_status_workflow = workload_pbs.pbs_remote_seekr_status_workflow
+    else:
+        raise NotImplementedError(f"Resource type {resource.type} not implemented")
+
     result = submit_remote_workflow(
-        seekrflow, seekrflow.run_settings.seekr_stage_resource_name, 
-        seekr_status_workflow, extra_args=[time_for_completed], 
+        seekrflow, seekrflow.run_settings.seekr_stage_resource_name,
+        seekr_status_workflow, extra_args=[time_for_completed],
         silent=silent)
     return result
 
@@ -259,17 +330,25 @@ def force_rerun_stage_remote(
     
     if resource_name == "local":
         raise ValueError(f"Stage {stage_name} is configured to run locally, not remotely")
-    
+
     print(f"Forcing re-run of remote stage: {stage_name} on resource {resource_name}")
-    
-    force_rerun_workflow = workload_slurm.slurm_remote_force_rerun_workflow
+
+    resource = seekrflow.run_settings.get_resource_by_name(resource_name)
+
+    if resource.type == "slurm_remote":
+        force_rerun_workflow = workload_slurm.slurm_remote_force_rerun_workflow
+    elif resource.type == "pbs_remote":
+        force_rerun_workflow = workload_pbs.pbs_remote_force_rerun_workflow
+    else:
+        raise NotImplementedError(f"Resource type {resource.type} not implemented")
+
     result = submit_remote_workflow(
-        seekrflow, resource_name, force_rerun_workflow, 
+        seekrflow, resource_name, force_rerun_workflow,
         extra_args=[stage_name], silent=silent)
-    
+
     if result.get("canceled_job"):
         print(f"  Canceled job: {result['canceled_job']}")
-    
+
     print(f"  Deleted files for {stage_name} stage")
-    
+
     return
