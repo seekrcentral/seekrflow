@@ -78,7 +78,7 @@ Enter the example trypsin-benzamidine directory and execute the parameterization
 
     cd seekrflow/seekrflow/examples/trypsin_benzamidine
     mamba activate SEEKRFLOW_PARAM
-    python ~/seekrflow/seekrflow/parameterize.py protein_ligand.pdb --input_json seekrflow.json
+    python ~/seekrflow/seekrflow/parameterize.py --input_json seekrflow.json
 
 Within a few minutes, a directory named "work" will be created, which will contain a directory
 "parameterize", along with some other files. Within this directory, the forcefield parameters
@@ -102,7 +102,9 @@ the system is ready for production runs.
     placed in a separate script from the main workflow). Ideally, one should
     carefully produce their own parameterized system by hand, using tools such as AMBER's LEAP,
     CharmmGUI, or OpenFF's tools step-by-step. However, if you're feeling adventurous, the
-    seekrflow automated parameterization feature is here for your convenience.
+    seekrflow automated parameterization feature is here for your convenience. The parameterization
+    feature in seekrflow is also not likely to be able to automatically handle covalent metal 
+    parameters correctly at present.
 
 An additional file has also been created inside work/ - a new copy of the ``seekrflow.json`` file
 with the parameterization settings filled in. This file is used to run the SEEKR calculation, and
@@ -117,8 +119,8 @@ and prepare and run the SEEKR calculation:
 .. code-block:: bash
 
     mamba activate SEEKR2
-    python ~/seekrflow/seekrflow/flow.py work/seekrflow.json prepare
-    python ~/seekrflow/seekrflow/flow.py work/seekrflow.json run
+    python ~/seekrflow/seekrflow/flow.py -i work/seekrflow.json prepare
+    python ~/seekrflow/seekrflow/flow.py -i work/seekrflow.json -p work/parameterize/complex-equil.pdb run
     python ~/seekr2/seekr2/analyze.py work/root/model.xml
 
 Normally, within SEEKR, one would need to define the ligand atom indices, as well as the
@@ -181,18 +183,25 @@ point to the location of the espaloma force field file, and also, specify a new 
 
     cd seekrflow/seekrflow/examples/trypsin_benzamidine
     mamba activate SEEKRFLOW_PARAM
-    python ~/seekrflow/seekrflow/parameterize.py protein_ligand.pdb --input_json seekrflow.json --external_ff_file /path/to/espaloma-0.3.2.pt --work_directory work_espaloma
+    python ~/seekrflow/seekrflow/parameterize.py --input_json seekrflow.json --external_ff_file /path/to/espaloma-0.3.2.pt --work_directory work_espaloma
 
 For more information about espaloma, see the Github repository at https://github.com/choderalab/espaloma.
 
-One may then run the rest of the workflow as before, using the new configuration file
-``work_espaloma/seekrflow.json``:
+One may then run the rest of the workflow as before, but be sure to modify the work directory to point to the new
+espaloma work directory:
+
+.. code-block:: bash
+
+    mamba activate SEEKR2
+    python ~/seekrflow/seekrflow/flow.py -i work_espaloma/seekrflow.json -w work_espaloma prepare
+    python ~/seekrflow/seekrflow/flow.py -i work_espaloma seekrflow.json -w work_espaloma -p work_espaloma/parameterize/complex-equil.pdb run
+    python ~/seekr2/seekr2/analyze.py work/root/model.xml
 
 Tutorial 3: Running on a Remote HPC System
 ------------------------------------------
 
 This tutorial walks you through setting up and running our trypsin-benzamidine example
-on a remote HPC system using Globus and Parsl
+on a remote HPC system using Globus.
 
 Prerequisites
 ~~~~~~~~~~~~~

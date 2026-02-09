@@ -166,8 +166,7 @@ def parameterize(
 
 def main() -> None:
     argparser = argparse.ArgumentParser(
-        description="Given a PDB file of a system, attempt to parameterize " \
-        "the system based on some input parameters.")
+        description="Attempt to parameterize the system based on some input parameters.")
     argparser.add_argument(
         "-i", "--input_json", dest="input_json",
         metavar="INPUT_JSON", type=str, default="",
@@ -243,11 +242,14 @@ def main() -> None:
                                     "does not exist.")
         seekrflow.parameterizer.forcefield = external_ff_file
     seekrflow.handle_ligand_indices(ligand_indices, ligand_resname, pdb_with_system)
+    seekrflow.handle_receptor_indices(pdb_with_system)
     system_filename, positions_filename = parameterize(seekrflow)
     seekrflow.work_directory = str(work_dir)
     # TODO: not going to save a new seekrflow file - attempt to use default values.
-    # structures.save_new_seekrflow(seekrflow, PARAM_SEEKRFLOW_GLOB, PARAM_SEEKRFLOW_BASE,
-    #                               directory=seekrflow.work_directory)
+    # But then how do we handle parameterize.py choosing CVs? Does it get written to some
+    # external file in the parameterize directory?
+    structures.save_new_seekrflow(seekrflow, PARAM_SEEKRFLOW_GLOB, PARAM_SEEKRFLOW_BASE,
+                                  directory=seekrflow.work_directory)
     return
 
 if __name__ == "__main__":

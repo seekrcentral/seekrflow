@@ -7,7 +7,7 @@ dynamics simulation workflows.
 What is seekrflow?
 ------------------
 
-seekrflow is a workflow management system designed for molecular dynamics simulations using the SEEKR2 
+seekrflow is a workflow management system designed for molecular dynamics simulations using the seekr 
 package. It provides:
 
 - Automated parameter generation for molecular systems
@@ -143,7 +143,7 @@ computer system.
 Browndye2 (recommended)
 +++++++++++++++++++++++
 
-SEEKR2 can use Browndye2 if Brownian dynamics (BD) simulations will be run (necessary for 
+Seekr can use Browndye2 if Brownian dynamics (BD) simulations will be run (necessary for 
 k-on calculations). Please see (https://browndye.ucsd.edu/) for Browndye2 installation 
 instructions. Some of these steps require sudo privileges (administrator access). 
 If you do not have sudo access, contact your system administrator.
@@ -239,7 +239,7 @@ Install Globus Compute SDK (optional - if not using SSH)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 To use remote execution on high-performance computing (HPC) systems with Globus Compute SDK, 
-you will need to install the package. This allows you to run SEEKR2 
+you will need to install the package. This allows you to run seekr 
 jobs on remote resources while avoiding annoying things like passwords and 2-factor 
 authentication.
 
@@ -405,7 +405,7 @@ steps.
 Important Options and Hints
 ---------------------------
 
-* In general, seekrflow, SEEKR2, and SeekrTools programs can be run with the '-h' argument to see 
+* In general, seekrflow, seekr, and SeekrTools programs can be run with the '-h' argument to see 
 all available options. Please see https://seekr2.readthedocs.io/en/latest for a detailed 
 description of programs and options.
 

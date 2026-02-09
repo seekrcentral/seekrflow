@@ -26,6 +26,7 @@ import seekrflow.modules.workflows.protein_protein_seekr2.structures \
 import seekrflow.modules.parameterize_structures as parameterizer_structures
 import seekrflow.modules.parameters_topology_structures \
     as parameters_topology_structures
+import seekrflow.modules.site_finder as site_finder
 
 
 WORK = "work"
@@ -503,6 +504,26 @@ class Seekrflow:
                     else:
                         raise Exception("No ligand indices provided and no ligand "
                                         "residue name specified.")
+        return
+    
+    def handle_receptor_indices(
+            self,
+            pdb_filename: str
+            ) -> None:
+        """
+        Handle the receptor indices string and set the receptor_indices attribute.
+        """
+        if self.workflow.has_small_molecule_ligand():
+            ligand_indices = self.workflow.ligand_indices
+            assert len(ligand_indices) > 0, \
+                "Cannot determine receptor indices without ligand " \
+                "indices."
+            receptor_indices = site_finder.site_finder_monte_carlo(
+                pdb_filename,
+                ligand_indices
+            )
+            self.workflow.receptor_indices = receptor_indices
+
         return
     
     def assign_seekrflow_parameter_topology_files(

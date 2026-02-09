@@ -9,6 +9,7 @@ import argparse
 
 from cattrs import unstructure
 
+import seekrflow.modules.base as base
 import seekrflow.modules.structures as structures
 import seekrflow.modules.workflows.structures as workflow_structures
 import seekrflow.modules.parameters_topology_structures as parameters_topology_structures
@@ -51,19 +52,19 @@ def create_example_seekrflow(ff="amber") -> structures.Seekrflow:
     workflow.md_settings = workflow_structures.MD_settings()
     workflow.bd_settings = workflow_structures.BD_settings()
     seekrflow.workflow = workflow
-    physical_attributes = structures.Physical_attributes()
+    physical_attributes = base.Physical_attributes()
     physical_attributes.temperature = 298.15
     physical_attributes.hydrogen_mass = 3.0
     seekrflow.physical_attributes = physical_attributes
     seekrflow.run_settings = structures.Run_settings()
     delta_slurm_resource = structures.Resource_remote_slurm()
     delta_slurm_resource.name = "delta"
-    delta_slurm_resource.remote_working_directory = "/scratch/kif/lvotapka/seekrflow_playground/"
+    delta_slurm_resource.remote_working_directory = "/scratch/kif/USERNAME/seekrflow_playground/"
     delta_slurm_resource.partition = "gpuA100x4,gpuA40x4"
     delta_slurm_resource.account = "kif-delta-gpu"
     delta_slurm_resource.constraint = "scratch"
     delta_slurm_resource.nodes_per_block = 1
-    delta_slurm_resource.cores_per_node = 32
+    delta_slurm_resource.cpus_per_task = 32
     delta_slurm_resource.memory_per_node = 48000
     delta_slurm_resource.time_limit = "00:30:00"
     delta_slurm_resource.scheduler_options = "#SBATCH --gpus-per-node=1 --gpu-bind=closest"
@@ -71,10 +72,10 @@ def create_example_seekrflow(ff="amber") -> structures.Seekrflow:
                             "conda activate SEEKR2; "\
                             "export OPENMM_CUDA_COMPILER=`which nvcc`"
     delta_slurm_resource.remote_interface = structures.Remote_interface_globus_compute_sdk()
-    delta_slurm_resource.remote_interface.endpoint_id = "29f14463-e6e1-4cd0-b25d-74f63aa10ca7"
+    delta_slurm_resource.remote_interface.endpoint_id = "MY_ENDPOINT_ID"
     delta_slurm_resource.transfer_settings = structures.Transfer_settings_globus()
-    delta_slurm_resource.transfer_settings.local_collection_id = "3896d182-5123-11f0-8180-0affcfc1d1e5"
-    delta_slurm_resource.transfer_settings.remote_collection_id = "7e936164-de58-4e3d-85da-21aa23c07169"
+    delta_slurm_resource.transfer_settings.local_collection_id = "MY_LOCAL_COLLECTION_ID"
+    delta_slurm_resource.transfer_settings.remote_collection_id = "MY_REMOTE_COLLECTION_ID"
     seekrflow.run_settings.resources = [delta_slurm_resource]
     #anvil_slurm_resource = structures.Slurm_resource()
     seekrflow.run_settings.bd_stage_resource_name = "local"
