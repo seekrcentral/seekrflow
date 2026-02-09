@@ -291,5 +291,10 @@ def parameterize_and_check_complex(
     output_pdb_filename = os.path.join(param_dir, "complex-equil.pdb")
     openmm_app.PDBFile.writeFile(solvated_topology, solvated_positions_equilibrated, 
                                  file=open(output_pdb_filename, 'w'))
+    traj = mdtraj.load(output_pdb_filename)
+    traj.topology = mdtraj.Topology.from_openmm(solvated_topology)
+    traj.image_molecules(inplace=True)
+    openmm_app.PDBFile.writeFile(solvated_topology, traj.xyz[0]*10.0, 
+                                 file=open(output_pdb_filename, 'w'))
     
     return serialized_xml, output_pdb_filename
