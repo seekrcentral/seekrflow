@@ -29,7 +29,8 @@ dependencies = [
     "parmed",
     "rdkit",
     "fabric",
-    "networkx"
+    "networkx",
+    "biopython"
 ]
 
 # Update the urls once the hosting is set up.

@@ -12,6 +12,7 @@ import typing
 from attrs import define, field, validators, Factory
 import parmed
 import mdtraj
+import openmm
 import openmm.unit as unit
 import numpy as np
 
@@ -386,7 +387,7 @@ class Protein_protein_seekr2_workflow:
         complex_positions[n_atoms_protein1:n_atoms_protein1 + n_atoms_protein2, :] \
             = protein2_positions
         
-        serialized_xml, output_pdb_filename = workflow_structures.parameterize_and_check_complex(
+        serialized_system_xml, output_pdb_filename = workflow_structures.parameterize_and_check_complex(
             complex_topology,
             complex_positions,
             None,
@@ -396,7 +397,7 @@ class Protein_protein_seekr2_workflow:
             md_settings,
         )
 
-        return serialized_xml, output_pdb_filename
+        return serialized_system_xml, output_pdb_filename
     
     # TODO: fill out later
     def create_mmvt_protein_protein_com_com_rmsd_model_input_seekr2(
@@ -499,7 +500,9 @@ class Protein_protein_seekr2_workflow:
             elif self.solvated_system_for_md.parameters_topology.type == "OpenMM_system":
                 system_filename = self.solvated_system_for_md\
                     .parameters_topology.system_filename
-                cvs.assign_system_params(input_anchor, system_filename, "")
+                topology_filename = self.solvated_system_for_md\
+                    .parameters_topology.topology_filename
+                cvs.assign_system_params(input_anchor, system_filename, topology_filename, "")
             else:
                 raise Exception(
                     "Type not supported for seekrflow.md_parameters_topology: "\
@@ -564,3 +567,31 @@ class Protein_protein_seekr2_workflow:
             model_input.browndye_settings_input = None
 
         return model_input
+
+    def minimize_equilibrate(
+            self, 
+            physical_attributes: base.Physical_attributes,
+            unsolvated_pdb_filename: str = "") -> None:
+        """
+        Minimize and equilibrate the solvated structure.
+        """
+        assert self.solvated_system_for_md is not None, \
+            "Solvated system for MD is not set, cannot minimize and equilibrate."
+        solvated_pdb_full_path = self.solvated_system_for_md.solvated_pdb
+        complex_system_filename = self.solvated_system_for_md.parameters_topology.system_filename
+        with open(complex_system_filename, "r") as f:
+            complex_system = openmm.XmlSerializer.deserialize(f.read())
+        if unsolvated_pdb_filename == "":
+            unsolvated_pdb_filename = self.parameterizer_information.receptor_ligand_pdb_filename
+        assert os.path.exists(unsolvated_pdb_filename), \
+            f"Unsolvated PDB file {unsolvated_pdb_filename} does not exist."
+        equilibrated_pdb_filename \
+            = workflow_structures.minimize_and_equilibrate_complex(
+                complex_system,
+                solvated_pdb_full_path,
+                unsolvated_pdb_filename,
+                self.md_settings,
+                physical_attributes,
+                is_membrane_system=False,
+            )
+        return equilibrated_pdb_filename

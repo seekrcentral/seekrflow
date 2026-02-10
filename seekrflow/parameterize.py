@@ -121,17 +121,18 @@ def parameterize(
         assert seekrflow.workflow.solvated_system_for_md is None,\
             "Attempting to parameterize a system that has already be parameterized:"\
             "the solvated_system_for_md should be set to None for parameterize.py."
-        serialized_xml, output_pdb_filename = seekrflow.workflow.create_complex(
-            seekrflow.parameterizer,
-            seekrflow.physical_attributes,
-            seekrflow.workflow.md_settings,
-            param_dir
-        )
+        serialized_system_xml, output_pdb_filename \
+            = seekrflow.workflow.create_complex(
+                seekrflow.parameterizer,
+                seekrflow.physical_attributes,
+                seekrflow.workflow.md_settings,
+                param_dir
+            )
         starting_pdb_basename = os.path.basename(output_pdb_filename)
         seekrflow.workflow.solvated_system_for_md = workflow_structures.Solvated_system_for_md()
         seekrflow.workflow.solvated_system_for_md.solvated_pdb \
             = os.path.join(param_dir, starting_pdb_basename)
-        system_basename = os.path.basename(serialized_xml)
+        system_basename = os.path.basename(serialized_system_xml)
         seekrflow.workflow.solvated_system_for_md.parameters_topology \
             = parameters_topology_structures.Openmm_system(
                 system_filename=os.path.join(structures.PARAMETERIZE, system_basename),)
@@ -162,7 +163,7 @@ def parameterize(
         if seekrflow.workflow.bd_settings is not None:
             seekrflow.workflow.write_component_pqr_files(parmed_complex, structures.PARAMETERIZE)
         os.chdir(curdir)
-        return serialized_xml, output_pdb_filename
+        return serialized_system_xml, output_pdb_filename
 
 def main() -> None:
     argparser = argparse.ArgumentParser(

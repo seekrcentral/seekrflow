@@ -119,8 +119,9 @@ and prepare and run the SEEKR calculation:
 .. code-block:: bash
 
     mamba activate SEEKR2
+    python ~/seekrflow/seekrflow/minimize_equilibrate.py -i work/seekrflow.json
     python ~/seekrflow/seekrflow/flow.py -i work/seekrflow.json prepare
-    python ~/seekrflow/seekrflow/flow.py -i work/seekrflow.json -p work/parameterize/complex-equil.pdb run
+    python ~/seekrflow/seekrflow/flow.py -i work/seekrflow.json -p work/minimization_equilibration/equilibrated_imaged.pdb run
     python ~/seekr2/seekr2/analyze.py work/root/model.xml
 
 Normally, within SEEKR, one would need to define the ligand atom indices, as well as the
@@ -193,8 +194,9 @@ espaloma work directory:
 .. code-block:: bash
 
     mamba activate SEEKR2
+    python ~/seekrflow/seekrflow/minimize_equilibrate.py -i work_espaloma/seekrflow.json -w work_espaloma
     python ~/seekrflow/seekrflow/flow.py -i work_espaloma/seekrflow.json -w work_espaloma prepare
-    python ~/seekrflow/seekrflow/flow.py -i work_espaloma seekrflow.json -w work_espaloma -p work_espaloma/parameterize/complex-equil.pdb run
+    python ~/seekrflow/seekrflow/flow.py -i work_espaloma/seekrflow.json -w work_espaloma -p work_espaloma/minimization_equilibration/equilibrated_imaged.pdb run
     python ~/seekr2/seekr2/analyze.py work/root/model.xml
 
 Tutorial 3: Running on a Remote HPC System
@@ -241,7 +243,7 @@ should be all set for running your own systems on HPC. Let us consider some of t
 one will likely need to modify in order to complete this tutorial.
 
 - "type": This should be set to either "slurm_remote" or "pbs_remote", depending on the job scheduler 
-  used by your HPC system. NOTE: at this time only "slurm_remote" is supported.
+  used by your HPC system.
 
 - "name": Choose any name for your resource, which will be referenced by the "_resource_name" fields
   lower in the configuration file.
@@ -255,10 +257,6 @@ one will likely need to modify in order to complete this tutorial.
   intensive read/write operations can be performed. Make sure that you have write permissions to this 
   directory.
 
-- "max_workers_per_node": This will probably always be set to 1. However, there might be some conceivable
-  situations where one might want more than one Parsl worker per node. Consult the Parsl documentation
-  to explore other possible settings for this parameter.
-
 - "partition": This is the partition on the remote system where the jobs will be submitted. This is often 
   something like "gpu" or "compute". Check with your HPC documentation to find the correct 
   partition name.
@@ -266,23 +264,21 @@ one will likely need to modify in order to complete this tutorial.
 - "account": This is the account name that you were assigned for job submissions on the remote system. 
   You should check with any online portal or HPC documentation to find the correct account name.
 
-- "nodes_per_block": This is the number of nodes that will be requested per Parsl "block", and will
-  probably usually be kept at 1. Consult the Parsl documentation to explore other possible settings 
-  for this parameter.
+- "nodes_per_block": This is the number of nodes that will be requested per "block", and will
+  probably usually be kept at 1.
 
-- "cores_per_node": This is the number of cores that will be requested per node. This should be set to
-  the number of cores that you would like to use for each job. Note that seekrflow is designed to 
+- "cpus_per_task": This is the number of cores that will be requested per task. This should be set to
+  the number of cores that you would like to use for each job. If you use MPS, it should be equal to 
+  the number of concurrent tasks running per GPU. Note that seekrflow is designed to 
   request shared resources, so this should not exceed the proportional number of cores that you
-  would like to use for a shared job (using a single GPU, for instance). Consult the Parsl documentation to explore other possible settings 
-  for this parameter, as well as your HPC documentation to find the correct number of cores
+  would like to use for a shared job (using a single GPU, for instance). Consult your HPC documentation to find the correct number of cores
   to request for your jobs.
 
 - "memory_per_node": This is the amount of memory that will be requested per node. This should be set to
   the amount of memory that you would like to use for each job. Note that seekrflow is designed to 
   request shared resources, so this should not exceed the proportional amount of memory that you
-  would like to use for a shared job (using a single GPU, for instance). Consult the Parsl documentation to explore other possible settings 
-  for this parameter, as well as your HPC documentation to find the correct amount of memory
-  to request for your jobs.
+  would like to use for a shared job (using a single GPU, for instance). Consult your HPC documentation 
+  to find the correct amount of memory to request for your jobs.
 
 - "time_limit": This is the maximum amount of time that the job will be allowed to run on the remote system.
   This should be set to a reasonable amount of time for your jobs, and should be set according to your HPC
@@ -295,7 +291,7 @@ one will likely need to modify in order to complete this tutorial.
   will probably be used to assign GPU settings. Consult your HPC documentation to find the correct 
   settings for your system.
 
-- "worker_init": These settings define which commands will be run upon the creation of a new Parsl "worker".
+- "worker_init": These settings define which commands will be run upon the creation of a new Globus compute "worker".
   This might include the loading of important modules, setting environment variables, or
   activating a conda/mamba environment. This will depend on which HPC resource is being used. One
   should consult the HPC documentation, and probably experiment with debug/test job submissions in order
@@ -326,9 +322,6 @@ one will likely need to modify in order to complete this tutorial.
   calculations, respectively. These should match the names defined in the "resources" section of the 
   configuration file. Note that multiple resources can be defined and used, including just a local
   computer.
-
-- "allow_parsl_usage_tracking": If set to True, Parsl will collect usage statistics and send them 
-  to the Parsl team. This is optional, but helps improve the library.
 
 .. note::
 
@@ -406,7 +399,7 @@ First, find the host-guest example directory:
 In this directory, you will find a file named ``seekrflow_1_butanol.json``. This file contains the
 configuration settings for the host-guest system, including the receptor/host (BCD) and the 
 guest/ligand (butanol). There is also a directory "params_and_structures", which contains many files,
-including a PDB starting structure for the BCD/1-butanol system, as well as the force field parameters
+including an equilibrated PDB starting structure for the BCD/1-butanol system, as well as the force field parameters
 within a AMBER-formatted ``.parm7`` file, as well as PQR files to use for BD. These are all
 defined within the ``seekrflow_1_butanol.json`` file, and one can open this file to see how they 
 are featured.

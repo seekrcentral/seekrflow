@@ -14,6 +14,7 @@ import mdtraj
 import seekrflow.modules.base as base
 import seekrflow.modules.parameters_topology_structures as parameters_topology_structures
 import seekrflow.modules.parameterize_structures as parameterize_structures
+import seekrflow.modules.minimize_equilibrate as min_equil
 
 MAX_MINIMIZATION_ITERATIONS = 0
 
@@ -260,7 +261,7 @@ def parameterize_and_check_complex(
     #output_pdb_filename = f"{output_pdb_basename}.pdb"
     #openmm_app.PDBFile.writeFile(solvated_topology, solvated_positions, file=open(output_pdb_filename, 'w'))
 
-    serialized_xml = os.path.join(param_dir, "complex.xml")
+    serialized_system_xml = os.path.join(param_dir, "complex_system.xml")
     if parameterizer.forcefield.startswith("espaloma"):
         new_system = regenerate_espaloma_system(
             system_generator,
@@ -270,10 +271,10 @@ def parameterize_and_check_complex(
     else:
         new_system = solvated_system
     
-    with open(serialized_xml, "w") as wf:
+    with open(serialized_system_xml, "w") as wf:
         xml = openmm.XmlSerializer.serialize(new_system)  # Serialize system
         wf.write(xml)
-    
+
     integrator = openmm.LangevinMiddleIntegrator(
         physical_attributes.temperature * unit.kelvin, 
         md_settings.friction / unit.picosecond, 
@@ -281,20 +282,53 @@ def parameterize_and_check_complex(
     simulation = openmm_app.Simulation(solvated_topology, solvated_system, integrator)
     state = simulation.context.getState(getPositions=True, enforcePeriodicBox=True)
     simulation.context.setPositions(solvated_positions)
-    output_pdb_filename_solv = os.path.join(param_dir, "complex_solvent.pdb")
+    output_pdb_filename = os.path.join(param_dir, "complex_solvent.pdb")
     openmm_app.PDBFile.writeFile(solvated_topology, solvated_positions, 
-                                file=open(output_pdb_filename_solv, 'w'))
-    simulation.minimizeEnergy(maxIterations=MAX_MINIMIZATION_ITERATIONS)
-    simulation.step(1000)
-    state = simulation.context.getState(getPositions=True, enforcePeriodicBox=True)
-    solvated_positions_equilibrated = state.getPositions()
-    output_pdb_filename = os.path.join(param_dir, "complex-equil.pdb")
-    openmm_app.PDBFile.writeFile(solvated_topology, solvated_positions_equilibrated, 
-                                 file=open(output_pdb_filename, 'w'))
+                                file=open(output_pdb_filename, 'w'))
+    #simulation.minimizeEnergy(maxIterations=MAX_MINIMIZATION_ITERATIONS)
+    #simulation.step(1000)
+    #state = simulation.context.getState(getPositions=True, enforcePeriodicBox=True)
+    #solvated_positions_equilibrated = state.getPositions()
+    #output_pdb_filename = os.path.join(param_dir, "complex-equil.pdb")
+    #openmm_app.PDBFile.writeFile(solvated_topology, solvated_positions_equilibrated, 
+    #                             file=open(output_pdb_filename, 'w'))
     traj = mdtraj.load(output_pdb_filename)
     traj.topology = mdtraj.Topology.from_openmm(solvated_topology)
     traj.image_molecules(inplace=True)
     openmm_app.PDBFile.writeFile(solvated_topology, traj.xyz[0]*10.0, 
                                  file=open(output_pdb_filename, 'w'))
     
-    return serialized_xml, output_pdb_filename
+    return serialized_system_xml, output_pdb_filename
+
+def minimize_and_equilibrate_complex(
+        complex_system: "openmm.System",
+        solvated_pdb_filename: str,
+        unsolvated_pdb_filename: str,
+        md_settings: MD_settings,
+        physical_attributes: base.Physical_attributes,
+        is_membrane_system: bool = False,
+        ) -> str:
+    """
+    Minimize and equilibrate the complex structure for the given workflow.
+    """
+    import openmm.unit as unit
+    temperature = physical_attributes.temperature * unit.kelvin
+    if physical_attributes.pressure is None:
+        target_pressure = 1.0 * unit.atmosphere
+    else:
+        target_pressure = physical_attributes.pressure * unit.atmosphere
+    timestep = md_settings.stepsize * unit.picoseconds
+    EQUIL_DIR = "minimization_equilibration"
+    if not os.path.exists(EQUIL_DIR):
+        os.makedirs(EQUIL_DIR)
+    equilibrated_pdb_filename = min_equil.main(
+        complex_system,
+        solvated_pdb_filename,
+        unsolvated_pdb_filename,
+        temperature,
+        target_pressure,
+        is_membrane_system=is_membrane_system,
+        working_directory=EQUIL_DIR,
+        stage_8_timestep=timestep,
+    )
+    return equilibrated_pdb_filename
