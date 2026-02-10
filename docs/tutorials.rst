@@ -260,6 +260,10 @@ one will likely need to modify in order to complete this tutorial.
 - "partition": This is the partition on the remote system where the jobs will be submitted. This is often 
   something like "gpu" or "compute". Check with your HPC documentation to find the correct 
   partition name.
+  
+.. note::
+
+    The attribute is called "partition" when using SLURM, but is renamed "queue" when using PBS.
 
 - "account": This is the account name that you were assigned for job submissions on the remote system. 
   You should check with any online portal or HPC documentation to find the correct account name.
