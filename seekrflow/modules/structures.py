@@ -591,12 +591,12 @@ def try_to_load_resources_json(
         "~/.seekrflow_resources.json")
     if seekrflow.work_directory is not None:
         work_seekrflow_resources_filename = os.path.join(
-            seekrflow.work_directory, "seekrflow_resources.json")
+            seekrflow.work_directory, ".seekrflow_resources.json")
     else:
         work_seekrflow_resources_filename = None
     if seekrflow.root_directory is not None:
         root_seekrflow_resources_filename = os.path.join(
-            seekrflow.root_directory, "seekrflow_resources.json")
+            seekrflow.root_directory, ".seekrflow_resources.json")
     else:
         root_seekrflow_resources_filename = None
 

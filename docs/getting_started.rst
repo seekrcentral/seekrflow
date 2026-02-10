@@ -402,6 +402,59 @@ steps.
     python ~/seekrflow/seekrflow/flow.py run --input_json seekrflow.json
     python ~/seekr2/seekr2/analyze.py work/root/model.xml
 
+Set up your .seekrflow_resources.json (Optional)
+------------------------------------------------
+
+One can save a lot of time preparing to submit remote jobs if one sets up their `.seekrflow_resources.json`
+file. Instead of always including one's run_settings.resources list within the seekrflow.json files,
+one may define all one's resources in the `.seekrflow_resources.json` file. The file may exist either
+in one's home directory (recommended), within one's seekrflow work/ directory, or within one's 
+seekrflow work/root/ directory. The file is structured as follows:
+
+.. code-block:: bash
+
+    {
+    "resources": [
+    {
+    "type": "slurm_remote",
+    "name": "delta",
+    "remote_seekr2_directory": "/PATH/TO/seekr2/seekr2/",
+    "remote_seekrtools_directory": "/PATH/TO/seekrtools/seekrtools/",
+    "remote_working_directory": "/PATH/TO/seekrflow_playground/",
+    "max_workers_per_node": 1,
+    "partition": "gpuA100x4,gpuA40x4",
+    "account": "YOUR ACCOUNT NAME",
+    "constraint": "scratch",
+    "nodes_per_block": 1,
+    "cpus_per_task": 32,
+    "memory_per_node": 5000,
+    "time_limit": "00:30:00",
+    "scheduler_options": "--gpus-per-node=1 --gpu-bind=closest",
+    "worker_init": "source $HOME/.bashrc; conda activate SEEKR2; export OPENMM_CUDA_COMPILER=`which nvcc`",
+    "remote_interface": {
+        "type": "globus_compute_sdk",
+        "endpoint_id": "YOUR GLOBUS COMPUTE ENDPOINT"
+    },
+    "transfer_settings": {
+        "type": "globus",
+        "local_collection_id": "YOUR LOCAL COLLECTION ID",
+        "remote_collection_id": "7e936164-de58-4e3d-85da-21aa23c07169"
+    },
+    { 
+    "type": "slurm_remote",
+    "name": "anvil",
+    "remote_seekr2_directory": "/PATH/TO/seekr2/seekr2/",
+    "remote_seekrtools_directory": "/PATH/TO/seekrtools/seekrtools/",
+    "remote_working_directory": "/PATH/TO/seekrflow_playground",
+    "max_workers_per_node": 1,
+    ...
+    }
+    ]
+    }
+    
+As one utilizes resources to run seekrflow, one may populate this file with various resources
+that one may use to run seekr remotely.
+
 Important Options and Hints
 ---------------------------
 

@@ -220,6 +220,11 @@ Prerequisites
   - Globus Compute SDK
 - Access to a remote HPC system, where you can submit jobs and manage resources.
 
+.. note::
+
+    It is assumed that you have completed tutorial 2 above for this to work properly, at least
+    the parameterization.
+
 Step 3.1: Justification
 ~~~~~~~~~~~~~~~~~~~~~~~
 Full SEEKR calculations almost always require a power GPU cluster or supercomputer, yet transferring
@@ -359,8 +364,8 @@ in the same way as before:
 .. code-block:: bash
 
     mamba activate SEEKR2
-    python ~/seekrflow/seekrflow/flow.py work/seekrflow.json prepare
-    python ~/seekrflow/seekrflow/flow.py work/seekrflow.json run
+    python ~/seekrflow/seekrflow/flow.py -i seekrflow_remote.json prepare
+    python ~/seekrflow/seekrflow/flow.py -i seekrflow_remote.json run
     python ~/seekr2/seekr2/analyze.py work/root/model.xml
 
 The job will probably take quite a long time to run, depending on the resources available

@@ -1,77 +1,88 @@
 {
     "name": "tryp_ben",
-    "structure_version": "1.0",
-    "workflow_type": "protein_ligand",
-    "receptor_ligand_pdb": "protein_ligand.pdb",
-    "ligand_sdf_file": "",
-    "ligand_resname": "BEN",
-    "ligand_indices": [],
+    "structure_version": "1.2",
+    "workflow": {
+        "type": "protein_ligand_seekr2",
+        "solvated_system_for_md": null,
+        "ligand_indices": [],
+        "receptor_indices": [],
+        "receptor_pqr_filename_for_bd": null,
+        "ligand_pqr_filename_for_bd": null,
+        "parameterizer_information": {
+            "ligand_sdf_file": "",
+            "ligand_resname": "BEN",
+            "receptor_ligand_pdb_filename": "protein_ligand.pdb"
+        },
+        "hidr_settings": {
+            "type": "hidr_metaD",
+            "gaussian_height": 1.0,
+            "gaussian_width": 0.05,
+            "bias_factor": 10.0
+        },
+        "mmvt_settings": {
+            "type": "MMVT",
+            "md_output_interval": 10000,
+            "md_steps_per_anchor": 1000000,
+            "anchor_radius_list": [
+                0.05,
+                0.15,
+                0.25,
+                0.35,
+                0.45,
+                0.7,
+                0.9,
+                1.1,
+                1.3,
+                1.5,
+                1.7,
+                1.9
+            ]
+        },
+        "md_settings": {
+            "type": "MD",
+            "engine": "openmm",
+            "integrator": "langevin",
+            "nonbonded_cutoff": 0.9,
+            "friction": 1.0,
+            "barostat_period": null,
+            "stepsize": 0.002
+        },
+        "bd_settings": {
+            "type": "BD",
+            "engine": "browndye",
+            "binary_directory": "",
+            "num_trajectories": 10000,
+            "num_threads": 1
+        }
+    },
+    "physical_attributes": {
+        "temperature": 300.0,
+        "pressure": null,
+        "ionic_strength": 0.15,
+        "hydrogen_mass": 1.008
+    },
     "work_directory": "work",
-    "basename_output": "complex",
-    "solvent_padding": 0.9,
-    "ionic_strength": 0.15,
-    "hmass": 1.008,
-    "nonbonded_cutoff": 0.9,
-    "temperature": 300.0,
-    "friction": 1.0,
-    "pressure": null,
-    "barostat_period": null,
-    "stepsize": 0.002,
     "parameterizer": {
         "forcefield": "gaff-2.11",
         "water_model": "tip3p",
         "auxiliary_forcefield_files": ["amber/ff14SB.xml",
             "amber/tip3p_standard.xml",
-            "amber/tip3p_HFE_multivalent.xml"]
+            "amber/tip3p_HFE_multivalent.xml"],
+        "pdb_fixer_settings": {
+            "remove_extra_chains": true,
+            "find_missing_residues": true,
+            "find_and_replace_nonstandard_residues": true,
+            "remove_heterogens": true,
+            "find_and_add_missing_atoms": true,
+            "add_missing_hydrogens_pH": null
+        },
+        "pdb2pqr_settings": {
+            "forcefield": "AMBER",
+            "forcefield_output_format": "AMBER",
+            "pH": 7.0
+        },
+        "solvent_padding": 0.9
     },
-    "pdb_fixer_settings": {
-        "remove_extra_chains": true,
-        "find_missing_residues": true,
-        "find_and_replace_nonstandard_residues": true,
-        "remove_heterogens": true,
-        "find_and_add_missing_atoms": true,
-        "add_missing_hydrogens_pH": null
-    },
-    "pdb2pqr_settings": {
-        "forcefield": "AMBER",
-        "forcefield_output_format": "AMBER",
-        "pH": 7.0
-    },
-    "hidr_settings": {
-        "type": "hidr_metaD",
-        "gaussian_height": 1.0,
-        "gaussian_width": 0.05,
-        "bias_factor": 10.0
-    },
-    "seekr_settings": {
-        "type": "MMVT",
-        "md_output_interval": 10000,
-        "md_steps_per_anchor": 1000000,
-        "anchor_radius_list": [
-            0.5,
-            0.6,
-            0.7,
-            0.8,
-            0.9,
-            1.0,
-            1.1,
-            1.2,
-            1.3,
-            1.4,
-            1.5,
-            1.6
-        ]
-    },
-    "bd_settings": {
-        "type": "BD",
-        "binary_directory": "",
-        "receptor_pqr_filename": null,
-        "ligand_pqr_filename": null,
-        "num_trajectories": 10000,
-        "num_threads": 1
-    },
-    "md_parameters_topology": null,
-    "starting_pdb_filename": "",
     "run_settings": {
         "resources": [
             {
@@ -86,7 +97,7 @@
                 "constraint": "scratch",
                 "nodes_per_block": 1,
                 "cpus_per_task": 32,
-                "memory_per_node": 64000,
+                "memory_per_node": 5000,
                 "time_limit": "00:30:00",
                 "scheduler_options": "--gpus-per-node=1 --gpu-bind=closest",
                 "worker_init": "source $HOME/.bashrc; conda activate SEEKR2; export OPENMM_CUDA_COMPILER=`which nvcc`",
@@ -111,7 +122,7 @@
                 "account": "YOUR ACCOUNT NAME",
                 "nodes_per_block": 1,
                 "cpus_per_task": 4,
-                "memory_per_node": 64000,
+                "memory_per_node": 5000,
                 "time_limit": "00:30:00",
                 "scheduler_options": "--gres gpu:1 --gpus-per-node=1",
                 "worker_init": "module load modtree/gpu; conda activate SEEKR2",
