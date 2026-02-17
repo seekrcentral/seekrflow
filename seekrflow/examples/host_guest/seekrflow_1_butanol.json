@@ -1,52 +1,90 @@
 {
     "name": "BCD_1-butanol",
-    "structure_version": "1.0",
-    "workflow_type": "protein_ligand",
-    "receptor_ligand_pdb": "../params_and_structures/BCD_1-butanol.pdb",
-    "ligand_sdf_file": "",
-    "ligand_resname": "APN",
-    "ligand_indices": [],
-    "receptor_selection": "resname MGO",
-    "work_directory": "work_butanol",
-    "basename_output": "complex",
-    "solvent_padding": 0.9,
-    "ionic_strength": 0.15,
-    "hmass": 1.008,
-    "nonbonded_cutoff": 0.9,
-    "temperature": 300.0,
-    "friction": 1.0,
-    "pressure": null,
-    "barostat_period": null,
-    "stepsize": 0.002,
+    "structure_version": "1.2",
+    "workflow": {
+        "type": "protein_ligand_seekr2",
+        "solvated_system_for_md": {
+            "parameters_topology": {
+                "type": "Amber",
+                "prmtop_filename": "../params_and_structures/BCD_1-butanol.parm7"
+            },
+            "solvated_pdb": "../params_and_structures/BCD_1-butanol.pdb"
+        },
+        "ligand_indices": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 
+                    17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 
+                    31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 
+                    45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 
+                    59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 
+                    73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 
+                    87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 
+                    101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 
+                    112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 
+                    123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 
+                    134, 135, 136, 137, 138, 139, 140, 141, 142, 143, 144, 
+                    145, 146],
+        "receptor_indices": [147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 
+                    158, 159, 160, 161],
+        "receptor_pqr_filename_for_bd": "../params_and_structures/BCD_receptor.pqr",
+        "ligand_pqr_filename_for_bd": "../params_and_structures/BCD_1-butanol_ligand.pqr",
+        "parameterizer_information": {
+            "ligand_sdf_file": "",
+            "ligand_resname": "APN",
+            "receptor_ligand_pdb_filename": "../params_and_structures/BCD_1-butanol.pdb"
+        },
+        "hidr_settings": {
+            "type": "hidr_metaD",
+            "gaussian_height": 0.5,
+            "gaussian_width": 0.05,
+            "bias_factor": 10.0
+        },
+        "mmvt_settings": {
+            "type": "MMVT",
+            "md_output_interval": 10000,
+            "md_steps_per_anchor": 1000000,
+            "cv_type": "com_com_distance",
+            "anchor_radius_list": [
+                0.05,
+                0.15,
+                0.25,
+                0.35,
+                0.45,
+                0.7,
+                0.9,
+                1.1,
+                1.3,
+                1.5,
+                1.7,
+                1.9
+            ]
+        },
+        "md_settings": {
+            "type": "MD",
+            "engine": "openmm",
+            "integrator": "langevin",
+            "nonbonded_cutoff": 0.9,
+            "friction": 1.0,
+            "barostat_period": null,
+            "stepsize": 0.002
+        },
+        "bd_settings": {
+            "type": "BD",
+            "engine": "browndye",
+            "binary_directory": "",
+            "auxiliary_directory": "",
+            "hydropro_directory": "",
+            "num_trajectories": 10000,
+            "num_threads": 1
+        }
+    },
+    "physical_attributes": {
+        "temperature": 300.0,
+        "pressure": null,
+        "ionic_strength": 0.15,
+        "hydrogen_mass": 1.008
+    },
+    "work_directory": "work_1_butanol",
+    "root_directory": null,
     "parameterizer": null,
-    "pdb_fixer_settings": null,
-    "pdb2pqr_settings": null,
-    "hidr_settings": {
-        "type": "hidr_metaD",
-        "gaussian_height": 0.5,
-        "gaussian_width": 0.05,
-        "bias_factor": 10.0
-    },
-    "seekr_settings": {
-        "type": "MMVT",
-        "md_output_interval": 10000,
-        "md_steps_per_anchor": 1000000,
-        "anchor_radius_list": [0.05, 0.15, 0.25, 0.35, 0.45, 0.55, 0.65, 0.75, 
-                               0.85, 0.95, 1.05, 1.15, 1.25, 1.35]
-    },
-    "bd_settings": {
-        "type": "BD",
-        "binary_directory": "",
-        "receptor_pqr_filename": "../params_and_structures/BCD_receptor.pqr",
-        "ligand_pqr_filename": "../params_and_structures/BCD_1-butanol_ligand.pqr",
-        "num_trajectories": 10000,
-        "num_threads": 1
-    },
-    "md_parameters_topology": {
-        "type": "Amber",
-        "prmtop_filename": "../params_and_structures/BCD_1-butanol.parm7"
-    },
-    "starting_pdb_filename": "../params_and_structures/BCD_1-butanol.pdb",
     "run_settings": {
         "resources": [],
         "bd_stage_resource_name": "local",

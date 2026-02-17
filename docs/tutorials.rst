@@ -417,9 +417,9 @@ Next, run the parameterization workflow:
 
 .. code-block:: bash
 
-    python ~/seekrflow/seekrflow/flow.py seekrflow_1_butanol.json prepare
-    python ~/seekrflow/seekrflow/flow.py work_butanol/seekrflow.json run
-    python ~/seekr2/seekr2/analyze.py work_butanol/root/model.xml
+    python ~/seekrflow/seekrflow/flow.py -i seekrflow_1_butanol.json prepare
+    python ~/seekrflow/seekrflow/flow.py -i seekrflow_1_butanol.json run
+    python ~/seekr2/seekr2/analyze.py work_1_butanol/root/model.xml
 
 This tutorial gave an example for how to run SEEKR with a system that has already been parameterized.
 
