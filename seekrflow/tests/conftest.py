@@ -88,8 +88,9 @@ def host_guest_seekrflow_amber_parameterized_persistent(tmpdir_factory):
     host_guest_seekrflow_amber_parameterized_persistent_obj \
         = create_seekrflow.create_parameterized_host_guest_amber_seekrflow()
     host_guest_seekrflow_amber_parameterized_persistent_obj.work_directory = str(workdir)
-    host_guest_seekrflow_amber_parameterized_persistent_obj.ligand_resname = "APN"
-    host_guest_seekrflow_amber_parameterized_persistent_obj.receptor_selection = "resname MGO"
+    host_guest_seekrflow_amber_parameterized_persistent_obj.workflow\
+        .parameterizer_information.ligand_resname = "APN"
+    #host_guest_seekrflow_amber_parameterized_persistent_obj.receptor_selection = "resname MGO"
     return host_guest_seekrflow_amber_parameterized_persistent_obj
 
 @pytest.fixture()

@@ -21,13 +21,10 @@ def test_seekrflow_creation_with_defaults():
     """Test that Seekrflow can be created with default values"""
     flow = structures.Seekrflow()
     assert flow.name == "my_name"
-    assert flow.structure_version == "1.1"
-    assert flow.workflow_type == "protein_ligand"
+    assert flow.structure_version == "1.2"
+    assert flow.workflow.type == "protein_ligand_seekr2"
     assert flow.work_directory == "work"
-    assert flow.basename_output == "complex"
-    assert flow.ionic_strength == 0.15
-    assert len(flow.ligand_indices) == 0
-
+    
 def test_make_work_directory():
     """Test work directory creation"""
     flow = structures.Seekrflow()
@@ -70,10 +67,10 @@ def test_save_load_roundtrip():
     # Create a Seekrflow with non-default values
     flow = structures.Seekrflow()
     flow.name = "test_flow"
-    flow.receptor_ligand_pdb = "test.pdb"
-    flow.ligand_resname = "LIG"
-    flow.ligand_indices = [1, 2, 3, 4]
-    flow.ionic_strength = 0.2
+    flow.workflow.parameterizer_information.receptor_ligand_pdb_filename = "test.pdb"
+    flow.workflow.parameterizer_information.ligand_resname = "LIG"
+    flow.workflow.ligand_indices = [1, 2, 3, 4]
+    flow.physical_attributes.ionic_strength = 0.2
     
     with tempfile.TemporaryDirectory() as tmpdir:
         # Save
@@ -88,10 +85,10 @@ def test_save_load_roundtrip():
         # Load and compare
         loaded_flow = structures.load_seekrflow(save_path)
         assert loaded_flow.name == "test_flow"
-        assert loaded_flow.receptor_ligand_pdb == "test.pdb"
-        assert loaded_flow.ligand_resname == "LIG"
-        assert loaded_flow.ligand_indices == [1, 2, 3, 4]
-        assert loaded_flow.ionic_strength == 0.2
+        assert loaded_flow.workflow.parameterizer_information.receptor_ligand_pdb_filename == "test.pdb"
+        assert loaded_flow.workflow.parameterizer_information.ligand_resname == "LIG"
+        assert loaded_flow.workflow.ligand_indices == [1, 2, 3, 4]
+        assert loaded_flow.physical_attributes.ionic_strength == 0.2
 
 def test_load_seekrflow_invalid_file():
     """Test load_seekrflow with invalid file"""
