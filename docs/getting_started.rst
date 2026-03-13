@@ -69,7 +69,7 @@ PDBfixer is recommended to install in case one wants to run the parameterization
     mamba install pdbfixer --yes
 
 pdb2pqr (recommended; needed for parameterization)
-+++++++++++++++++++++++++++++++++++++++++++++++++++
+++++++++++++++++++++++++++++++++++++++++++++++++++
 
 pdb2pqr is used in the parameterization workflow in order to choose protonation states, and
 to optionally produce PQR files for BD simulations
@@ -114,7 +114,7 @@ Then apply the change within the current terminal session.
     source ~/.bashrc
 
 OpenMM Forcefields (recommended; needed for parameterization)
-++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 If you wish to parameterize your molecular system with a common forcefield, such as AMBER FF14SB, GAFF2, 
 CHARMM 36, OpenFF's SMIRNOFF, or espaloma, you will need to install the OpenMM forcefields package.
@@ -124,7 +124,7 @@ CHARMM 36, OpenFF's SMIRNOFF, or espaloma, you will need to install the OpenMM f
     mamba install openmmforcefields --yes
 
 Espaloma Machine-learned Forcefield (optional)
-+++++++++++++++++++++++++++++++++++++++++++++++
+++++++++++++++++++++++++++++++++++++++++++++++
 
 If you want to parameterize your molecular system with the machine-learned forcefield espaloma, 
 you will need to install it.
@@ -149,7 +149,7 @@ instructions. Some of these steps require sudo privileges (administrator access)
 If you do not have sudo access, contact your system administrator.
 
 SEEKR2 plugin, SEEKR2, and SeekrTools (required)
-+++++++++++++++++++++++++++++++++++++++++++++++++
+++++++++++++++++++++++++++++++++++++++++++++++++
 
 This step installs OpenMM plugin for SEEKR2 package.
 
@@ -206,7 +206,7 @@ Finally, with the dependencies out of the way, we can install seekrflow.
     python -m pip install .
 
 Testing seekrflow (Optional)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 To test seekrflow, run the following command in the seekrflow/ directory:
 
