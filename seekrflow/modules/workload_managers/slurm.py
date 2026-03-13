@@ -251,6 +251,7 @@ def slurm_remote_bd_status_workflow(args):
         worker_init: Optional[str] = None
         state_file: Optional[str] = None
         anchor_times_at_submission: Optional[Dict[str, float]] = None
+        last_known_elapsed: Optional[str] = None
 
         @staticmethod
         def load(path: pathlib.Path) -> "RunState":
@@ -500,6 +501,7 @@ def slurm_remote_hidr_status_workflow(args):
         worker_init: Optional[str] = None
         state_file: Optional[str] = None
         anchor_times_at_submission: Optional[Dict[str, float]] = None
+        last_known_elapsed: Optional[str] = None  # Added to store last known elapsed time
 
         @staticmethod
         def load(path: pathlib.Path) -> "RunState":
@@ -766,6 +768,7 @@ def slurm_remote_seekr_status_workflow(args):
         worker_init: Optional[str] = None
         state_file: Optional[str] = None
         anchor_times_at_submission: Optional[Dict[str, float]] = None
+        last_known_elapsed: Optional[str] = None  # Added to store last known elapsed time
 
         @staticmethod
         def load(path: pathlib.Path) -> "RunState":
@@ -1106,6 +1109,7 @@ def slurm_remote_run_workflow(args):
         worker_init: Optional[str] = None
         state_file: Optional[str] = None
         anchor_times_at_submission: Optional[Dict[str, float]] = None
+        last_known_elapsed: Optional[str] = None  # Added to store last known elapsed time
 
         def save(
                 self,
@@ -1400,6 +1404,7 @@ def slurm_remote_force_rerun_workflow(args):
         worker_init: Optional[str] = None
         state_file: Optional[str] = None
         anchor_times_at_submission: Optional[Dict[str, float]] = None
+        last_known_elapsed: Optional[str] = None  # Added to store last known elapsed time
 
         @staticmethod
         def load(path: pathlib.Path) -> "RunState":
