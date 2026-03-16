@@ -307,7 +307,7 @@ def run_model(
             print(f"  Reattached to {stage_name} process (PID: {existing_state.pid})")
             # stage_processes[stage_name] remains None - we'll use the PID from state file
         stage_subsequent_noncompleted_runs[stage_name] = 0
-
+        
     # Handle force_rerun - kill any existing processes for those stages, then delete files
     if force_rerun is not None:
         for stage_name in force_rerun:
@@ -598,7 +598,7 @@ def run_model(
                     if stage_progress[dependency] != "completed":
                         stage_should_submit_new_run[stage_name] = False
                         stage_manager_status[stage_name] = "waiting"
-                        
+                
                 if stage_manager_status[stage_name] not in ["idle", "n/a", "waiting"]:
                     stage_should_submit_new_run[stage_name] = False
                     number_of_running_stages += 1
@@ -649,7 +649,7 @@ def run_model(
             transfer_before = None  # only transfer once at beginning
             
             if using_bd and stage_should_submit_new_run["bd"]:
-                stage_subsequent_noncompleted_runs[stage_name] += 1
+                stage_subsequent_noncompleted_runs["bd"] += 1
                 if stage_locations["bd"] != "local":
                     resource: structures.Resource_remote_base \
                         = seekrflow.run_settings.get_resource_by_name(stage_locations["bd"])

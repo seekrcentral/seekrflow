@@ -888,7 +888,7 @@ def run_seekr_locally(
     pid = os.getpid()
     # Include anchor index in state filename for per-anchor tracking
     state_dir = get_local_state_dir(root_dir)
-    state_file = state_dir / f"seekr_{pid}.json"
+    state_file = state_dir / f"seekr_anchor_{anchor_index}_state_{pid}.json"
     output_file = root_dir / f"seekr_{anchor_index}_run.out"
     
     # Create initial state BEFORE redirecting output

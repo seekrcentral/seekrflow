@@ -375,6 +375,11 @@ In this configuration, HIDR will be run on the remote system first, and then the
 anchor calculations will be run synchronously with each other. All file transfers should
 be automatically handled to and from the remote resource.
 
+.. note::
+
+    By using the '-H' and '-S' arguments to the flow.py 'run' stage, one can specify
+    the name of which remote resource to use for the HIDR and SEEKR stages, respectively.
+    Examples: `-H delta`, `-S anvil`.
 
 Tutorial 4: Host-Guest System: Existing Force Field Parameters  
 --------------------------------------------------------------
@@ -385,7 +390,7 @@ exist for a molecular system - in this case, a host-guest system.
 This host-guest system (where the host is beta-cyclodextrin (BCD) and the guest is one of a
 collection of small molecules like 1-butanol), has been parameterized much more optimally than with a
 generic small-molecular force field like AMBER GAFF. We want to use these existing
-parameters, not anything we would make with parameterize.py in seekrflow.
+parameters.
 
 Prerequisites
 ~~~~~~~~~~~~~

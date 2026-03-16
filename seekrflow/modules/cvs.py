@@ -162,8 +162,9 @@ def get_bd_receptor_ligand_selections(
     receptor_selection_atom_name_list = []
     receptor_selection_resid_list = []
     for md_receptor_index in md_receptor_selection:
-        rec_atom_name = traj.topology.atom(md_receptor_index).name
-        rec_atom_resid = traj.topology.atom(md_receptor_index).residue.index
+        my_atom = traj.topology.atom(md_receptor_index)
+        rec_atom_name = my_atom.name
+        rec_atom_resid = my_atom.residue.index
         receptor_selection_atom_name_list.append(rec_atom_name)
         receptor_selection_resid_list.append(str(rec_atom_resid))
 
@@ -171,9 +172,14 @@ def get_bd_receptor_ligand_selections(
 
     for name, resid in zip(
             receptor_selection_atom_name_list, receptor_selection_resid_list):
+        match_found = False
         for i, atom in enumerate(receptor_pqr_parmed.atoms):
             if atom.name == name and str(atom.residue.number-1) == resid:
                 bd_receptor_indices.append(i)
+                match_found = True
+                break
+        assert match_found, \
+            f"No match found for receptor atom with name {name} and resid {resid} in the PQR file. "
         
     ligand_selection_atom_name_list = []
     for md_ligand_index in md_ligand_selection:
@@ -182,10 +188,15 @@ def get_bd_receptor_ligand_selections(
 
     bd_ligand_indices = []
     for name in ligand_selection_atom_name_list:
+        match_found = False
         for i, atom in enumerate(ligand_pqr_parmed.atoms):
             if atom.name == name:
                 bd_ligand_indices.append(i)
+                match_found = True
 
+        assert match_found, \
+            f"No match found for ligand atom with name {name} in the PQR file. "
+        
     if len(bd_receptor_indices) != len(md_receptor_selection):
         print("BD receptor indices do not match MD receptor selection. " \
         "This may indicate duplicate structure in the complex or in the "\
