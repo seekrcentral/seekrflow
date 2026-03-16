@@ -1,0 +1,95 @@
+{
+    "name": "example_seekrflow",
+    "structure_version": "1.2",
+    "workflow": {
+        "type": "protein_ligand_seekr2",
+        "solvated_system_for_md": {
+            "parameters_topology": {
+                "type": "Amber",
+                "prmtop_filename": ""
+            },
+            "solvated_pdb": ""
+        },
+        "ligand_indices": [],
+        "receptor_indices": [],
+        "receptor_pqr_filename_for_bd": "",
+        "ligand_pqr_filename_for_bd": "",
+        "parameterizer_information": {
+            "ligand_sdf_file": "",
+            "ligand_resname": "",
+            "receptor_ligand_pdb_filename": ""
+        },
+        "hidr_settings": {
+            "type": "hidr_metaD",
+            "gaussian_height": 1.0,
+            "gaussian_width": 0.05,
+            "bias_factor": 10.0
+        },
+        "mmvt_settings": {
+            "type": "MMVT",
+            "md_output_interval": 2500000,
+            "md_steps_per_anchor": 250000000,
+            "cv_type": "com_com_distance",
+            "anchor_radius_list": []
+        },
+        "md_settings": {
+            "type": "MD",
+            "engine": "openmm",
+            "integrator": "langevin",
+            "nonbonded_cutoff": 0.9,
+            "friction": 1.0,
+            "barostat_period": null,
+            "stepsize": 0.002
+        },
+        "bd_settings": {
+            "type": "BD",
+            "engine": "browndye",
+            "binary_directory": "",
+            "auxiliary_directory": "",
+            "hydropro_directory": "",
+            "num_trajectories": 10000,
+            "num_threads": 1
+        }
+    },
+    "physical_attributes": {
+        "temperature": 298.15,
+        "pressure": null,
+        "ionic_strength": 0.15,
+        "hydrogen_mass": 3.0
+    },
+    "work_directory": "work",
+    "root_directory": null,
+    "parameterizer": null,
+    "run_settings": {
+        "resources": [
+            {
+                "type": "slurm_remote",
+                "name": "delta",
+                "remote_seekr2_directory": "$HOME/seekr2/seekr2/",
+                "remote_seekrtools_directory": "$HOME/seekrtools/seekrtools/",
+                "remote_working_directory": "/scratch/kif/USERNAME/seekrflow_playground/",
+                "partition": "gpuA100x4,gpuA40x4",
+                "account": "kif-delta-gpu",
+                "constraint": "scratch",
+                "nodes_per_block": 1,
+                "cpus_per_task": 32,
+                "memory_per_node": 48000,
+                "time_limit": "00:30:00",
+                "scheduler_options": "#SBATCH --gpus-per-node=1 --gpu-bind=closest",
+                "worker_init": "source $HOME/.bashrc; conda activate SEEKR2; export OPENMM_CUDA_COMPILER=`which nvcc`",
+                "remote_interface": {
+                    "type": "globus_compute_sdk",
+                    "endpoint_id": "MY_ENDPOINT_ID"
+                },
+                "transfer_settings": {
+                    "type": "globus",
+                    "local_collection_id": "MY_LOCAL_COLLECTION_ID",
+                    "remote_collection_id": "MY_REMOTE_COLLECTION_ID"
+                }
+            }
+        ],
+        "bd_stage_resource_name": "local",
+        "hidr_stage_resource_name": "delta",
+        "seekr_stage_resource_name": "delta"
+    }
+}
