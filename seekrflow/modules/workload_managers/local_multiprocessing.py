@@ -110,12 +110,13 @@ def find_latest_state_file(
     Returns None if no state files exist for this stage.
     """
     state_dir = get_local_state_dir(root_dir)
-    state_files = list(state_dir.glob(f"{stage}_state_*.json"))
-    
+    if stage == "seekr":
+        pattern = "seekr_anchor_*_state_*.json"
+    else:
+        pattern = f"{stage}_state_*.json"
+    state_files = list(state_dir.glob(pattern))
     if not state_files:
         return None
-    
-    # Sort by modification time, return the most recent
     state_files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
     return state_files[0]
 
@@ -128,7 +129,11 @@ def cleanup_old_state_files(
     Clean up old state files for a stage, optionally keeping the latest one.
     """
     state_dir = get_local_state_dir(root_dir)
-    state_files = list(state_dir.glob(f"{stage}_state_*.json"))
+    if stage == "seekr":
+        pattern = "seekr_anchor_*_state_*.json"
+    else:
+        pattern = f"{stage}_state_*.json"
+    state_files = list(state_dir.glob(pattern))
     
     if not state_files:
         return
@@ -1060,6 +1065,8 @@ def force_rerun_stage(
     Supported stages: "bd", "hidr", "seekr"
     """
     # First, kill any running process for this stage
+    # TODO: for seekr, find_latest_state_file only returns one anchor's state file; remaining
+    #  anchor processes are not killed. Fix by iterating all seekr_anchor_*_state_*.json files.
     state_file = find_latest_state_file(root_directory_path, stage_name)
     if state_file and state_file.exists():
         try:

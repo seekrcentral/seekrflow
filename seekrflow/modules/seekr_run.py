@@ -258,6 +258,7 @@ def run_model(
     stage_statuses = {}
     stage_running_locally = {}
     stage_subsequent_noncompleted_runs = {}
+    stage_last_progress_bar = {stage: None for stage in stage_names}
     
     # Track consecutive empty job checks to avoid premature resubmission
     MAX_EMPTY_CHECKS_BEFORE_RESUBMIT = 10
@@ -329,7 +330,7 @@ def run_model(
                 raise ValueError(f"Stage name {stage_name} not recognized.")
     
     # Setup signal handler for graceful shutdown
-    def signal_handler_local(sig, frame, curdir):
+    def signal_handler_local(sig, frame):
         print("\n\n=== Received interrupt signal ===")
         workload_local_mp.cleanup_local_processes(stage_processes, root_directory_path)
         print("Exiting seekrflow.")
@@ -796,12 +797,15 @@ def run_model(
 
             
             for stage_name in stage_names:
-                if stage_subsequent_noncompleted_runs[stage_name] \
-                        >= MAX_SUBSEQUENT_NONCOMPLETED_RUNS:
+                if (stage_subsequent_noncompleted_runs[stage_name] \
+                        >= MAX_SUBSEQUENT_NONCOMPLETED_RUNS) \
+                            and stage_last_progress_bar[stage_name] \
+                                == stage_progress_bar[stage_name] :
                     raise RuntimeError(
                         f"Stage {stage_name} has been submitted "
                         f"{stage_subsequent_noncompleted_runs[stage_name]} times without progress. "
                         f"Please check the logs for errors.")
+                stage_last_progress_bar[stage_name] = stage_progress_bar[stage_name]
                 
             # Run BD - if needed
             if using_bd:

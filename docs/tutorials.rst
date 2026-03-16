@@ -473,7 +473,7 @@ using the seekrflow API:
     ["ligand_3", "BCD_1-propanol.parm7", "BCD_1-propanol.pdb", 
         "BCD_1-propanol_ligand.pqr"]]
 
-    input_json = "seekrflow.json"
+    input_json = "seekrflow_1_butanol.json"
 
     for name, parm7, pdb, pqr in job_list:
         seekrflow = seekrflow_structures.load_seekrflow(input_json)

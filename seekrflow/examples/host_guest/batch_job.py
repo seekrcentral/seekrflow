@@ -17,24 +17,31 @@ job_list = [
 ["ligand_3", "BCD_1-propanol.parm7", "BCD_1-propanol.pdb", 
     "BCD_1-propanol_ligand.pqr"]]
 
-input_json = "seekrflow.json"
+input_json = "seekrflow_1_butanol.json"
 
 for name, parm7, pdb, pqr in job_list:
     seekrflow = seekrflow_structures.load_seekrflow(input_json)
     seekrflow.name = name
-    seekrflow.receptor_ligand_pdb = os.path.join(
+    seekrflow.workflow.solvated_system_for_md.solvated_pdb = os.path.join(
         "../params_and_structures", pdb)
+    seekrflow.workflow.solvated_system_for_md.parameters_topology.prmtop_filename\
+          = os.path.join(
+            "../params_and_structures", parm7)
     seekrflow.work_directory = f"work_{name}"
-    seekrflow.bd_settings.ligand_pqr_filename = os.path.join(
+    seekrflow.workflow.ligand_pqr_filename_for_bd = os.path.join(
         "../params_and_structures", pqr)
-    seekrflow.md_parameters_topology.prmtop_filename = os.path.join(
-        "../params_and_structures", parm7)
-    seekrflow.starting_pdb_filename = os.path.join(
-        "../params_and_structures", pdb)
-        
+    seekrflow.workflow.parameterizer_information.receptor_ligand_pdb_filename\
+        = os.path.join(
+            "../params_and_structures", pdb)    
     seekrflow.make_work_directory()
-    seekrflow.ligand_indices = seekrflow_base.get_ligand_indices(
-        os.path.join("params_and_structures", pdb), seekrflow.ligand_resname)
-    seekrflow_flow.flow(seekrflow, "prepare")
+    curdir = os.getcwd()
+    os.chdir(seekrflow.work_directory)
+    src_pdb_filename = seekrflow_flow.assign_seekrflow_defaults(
+        seekrflow, "")
+    os.chdir(curdir)
+    seekrflow.workflow.ligand_indices = seekrflow_base.get_ligand_indices(
+        os.path.join("params_and_structures", pdb), 
+        seekrflow.workflow.parameterizer_information.ligand_resname)
+    seekrflow_flow.flow(seekrflow, "prepare", src_pdb_filename)
     seekrflow_flow.flow(seekrflow, "run")
     
