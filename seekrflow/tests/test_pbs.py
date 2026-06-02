@@ -238,9 +238,7 @@ def test_pbs_workflow_functions_available():
     # Check that all required functions exist
     assert hasattr(pbs, "calculate_optimal_seekr_time_limit")
     assert hasattr(pbs, "pbs_remote_run_workflow")
-    assert hasattr(pbs, "pbs_remote_bd_status_workflow")
-    assert hasattr(pbs, "pbs_remote_hidr_status_workflow")
-    assert hasattr(pbs, "pbs_remote_seekr_status_workflow")
+    assert hasattr(pbs, "pbs_remote_status_workflow")
     assert hasattr(pbs, "pbs_remote_cancel_workflow")
     assert hasattr(pbs, "pbs_remote_force_rerun_workflow")
 

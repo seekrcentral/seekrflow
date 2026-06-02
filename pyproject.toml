@@ -28,9 +28,13 @@ dependencies = [
     "mdtraj",
     "parmed",
     "rdkit",
+    "rich",
     "fabric",
     "networkx",
-    "biopython"
+    "biopython",
+    # NOTE: these are better installed from source at the moment
+    #"radical.asyncflow",
+    #"rhapsody"
 ]
 
 # Update the urls once the hosting is set up.

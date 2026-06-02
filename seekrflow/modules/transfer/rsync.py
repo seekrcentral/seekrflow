@@ -8,6 +8,7 @@ factor authentication is always required.
 
 import six
 import fabric
+import shlex
 
 class Connection(fabric.Connection):
     def rsync(self, source, target, exclude=(),  rsync_opts="", ssh_opts="",
@@ -71,6 +72,8 @@ def transfer_files_with_rsync(
         local_path += "/"
     if not remote_path.endswith("/"):
         remote_path += "/"
+    # Ensure the remote destination directory exists before rsync upload.
+    c.run(f"mkdir -p {shlex.quote(remote_path)}", hide=True)
     
     if backwards:
         c.rsync(source=remote_path, target=local_path, rsync_opts="-q -c -u", 

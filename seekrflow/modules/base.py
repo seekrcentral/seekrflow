@@ -14,6 +14,10 @@ import parmed
 PME_TOL = 2.5e-4
 APBS_GRID_SPACING = 0.5
 BENCHMARK_MIN_SIMULATION_LENGTH = 100000 # steps
+# Walltime requested for remote benchmark-mode jobs (SLURM/PBS).  Benchmark
+# runs are intentionally short (BENCHMARK_MIN_SIMULATION_LENGTH steps), so a
+# generous-but-modest fixed cap is plenty and avoids hogging queue priority.
+BENCHMARK_REMOTE_TIME_LIMIT = "00:10:00"
 
 @define
 class Physical_attributes:

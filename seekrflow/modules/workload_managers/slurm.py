@@ -189,44 +189,48 @@ def calculate_optimal_seekr_time_limit(
         return default_time_limit
 
 
-def slurm_remote_bd_status_workflow(args):
+def slurm_remote_status_workflow(args):
     """
-    Check BD simulation status remotely by examining SLURM queue and 
-    output files directly.
-    
-    Returns consistent dict structure:
-    {
-        "success": bool,
-        "error": str or None,
-        "manager_status": {...},  # if SLURM job found
-        "stage_status": {          # if success
-            "bd_finished": bool,
-            "milestones_remaining": int,
-            "results_files_found": int,
-            "details": {...}
-        }
-    }
+    Generic SLURM status workflow.
+
+    Args format:
+        [working_dir, stage_name, benchmark_mode=False, anchor="any",
+         swarm_id=None, worker_init=""]
+
+    worker_init is a bash snippet that activates the env which has the
+    `seekr` package installed (e.g. "source ~/.bashrc; conda activate SEEKR2").
+    The seekr progress check is executed via subprocess under this snippet
+    rather than imported in-process, because the Globus Compute endpoint
+    worker typically runs in its own isolated Python that does not have
+    seekr available.
     """
     import json
     import time
+    import shlex
     import pathlib
     import subprocess
-    import xml.etree.ElementTree as ET
     from dataclasses import dataclass
     from typing import Dict, List, Optional
 
-    working_dir = args[0]
-    stage_name = "bd"
-    n_trajectories_for_completion = args[1]  # target number of trajectories
+    if len(args) < 2:
+        return {
+            "success": False,
+            "error": "Expected args: [working_dir, stage_name, ...]",
+            "manager_status": None,
+            "stage_status": {
+                "finished": False,
+                "state": "failed",
+                "progress": 0.0,
+                "notes": "invalid status workflow arguments",
+            },
+        }
 
-    def run(cmd: List[str], check: bool = True) -> tuple:
-        """Run command, return (rc, stdout, stderr)"""
-        out = subprocess.run(cmd, stdout=subprocess.PIPE, 
-                           stderr=subprocess.PIPE, text=True)
-        if check and out.returncode != 0:
-            raise RuntimeError(f"Command failed: ({out.returncode}): "
-                             f"{' '.join(cmd)}\nSTDERR:\n{out.stderr}")
-        return out.returncode, out.stdout.strip(), out.stderr.strip()
+    working_dir = args[0]
+    stage_name = args[1]
+    benchmark_mode = bool(args[2]) if len(args) > 2 else False
+    anchor = args[3] if len(args) > 3 else "any"
+    swarm_id = args[4] if len(args) > 4 else None
+    worker_init = args[5] if len(args) > 5 else ""
 
     @dataclass
     class RunState:
@@ -258,715 +262,51 @@ def slurm_remote_bd_status_workflow(args):
             with open(path, "r") as f:
                 data = json.load(f)
             return RunState(**data)
-        
+
     def get_state_dir(workdir: pathlib.Path) -> pathlib.Path:
         return workdir / ".slurm_runner"
-    
-    def check_bd_completion(
-            model_path: pathlib.Path,
-            n_traj_target: int
-            ) -> Dict:
-        """
-        Check BD completion by reading model.xml and BD results files directly.
-        """
-        try:
-            # Get the directory of the model_path
-            unstarted_dict = {
-                "finished": False,
-                "progress": "unstarted",
-                "n_trajectories": 0,
-                "n_trajectories_for_completion": n_traj_target,
-                "progress_bar": 0.0,
-                "model_xml_found": False,
-                "notes": ""
-            }
-            model_dir = model_path.parent
-            if not model_path.exists():
-                unstarted_dict["notes"] = f"Model file not found: {model_path}"
-                return unstarted_dict
-            b_surface_dir = model_dir / "b_surface"
-            if not b_surface_dir.exists():
-                unstarted_dict["notes"] = f"b_surface directory not found: {b_surface_dir}"
-                unstarted_dict["model_xml_found"] = True
-                return unstarted_dict
-            results_files = list(b_surface_dir.glob("results*.xml"))
-            if not results_files:
-                unstarted_dict["notes"] = f"No results files found in: {b_surface_dir}"
-                unstarted_dict["model_xml_found"] = True
-                return unstarted_dict
 
-            # Sort by the number in the filename and get the largest
-            def extract_number(filepath):
-                """Extract number from results*.xml filename"""
-                stem = filepath.stem  # e.g., "results1" or "results"
-                if stem == "results":
-                    return 0
-                try:
-                    return int(stem.replace("results", ""))
-                except ValueError:
-                    return 0
-            
-            results_files.sort(key=extract_number)
-            #latest_results = results_files[-1]
-            n_trajectories = 0
-            for results_file in reversed(results_files):
-                
-                # Parse the latest results file
-                tree = ET.parse(results_file)
-                root = tree.getroot()
-            
-                # Find the <n_trajectories> tag
-                n_traj_elem = root.find(".//n_trajectories")
-
-                if n_traj_elem is None:
-                    return {
-                        "finished": False,
-                        "progress": "started",
-                        "n_trajectories": 0,
-                        "n_trajectories_for_completion": n_traj_target,
-                        "progress_bar": 0.0,
-                        "model_xml_found": True,
-                        "notes": "n_trajectories tag not found in results file",
-                        }
-                
-                n_trajectories += int(n_traj_elem.text.strip())
-            
-            # Determine BD stage
-            if n_trajectories < n_traj_target:
-                progress = "started"
-                finished = False
-            else:
-                progress = "completed"
-                finished = True
-            
-            return {
-                "finished": finished,
-                "progress": progress,
-                "n_trajectories": n_trajectories,
-                "n_trajectories_for_completion": n_traj_target,
-                "progress_bar": n_trajectories / n_traj_target if n_traj_target > 0 else 0.0,
-                "model_xml_found": True,
-                "notes": ""
-                }
-            
-        except Exception as e:
-            return {
-                "notes": f"Unexpected error checking BD completion: {e}",
-                "finished": False,
-                "progress": "unknown",
-                "n_trajectories": 0,
-                "n_trajectories_for_completion": n_traj_target,
-                "progress_bar": 0.0,
-                "model_xml_found": False,
-            }
-        
-    # Initialize result structure
-    result = {
-        "success": False,
-        "error": None,
-        "manager_status": None,
-        "stage_status": None
-    }
-
-    work_dir = pathlib.Path(working_dir)
-    state_path = get_state_dir(work_dir) / f"{stage_name}_latest.json"
-    
-    # Check SLURM status if state file exists
-    if state_path.exists():
-        try:
-            st = RunState.load(state_path)
-            cmd = f"squeue -j {st.jobid} -h -o '%i|%P|%j|%u|%T|%M|%l|%D|%C|%R'"
-            rc, out, err = run(["bash", "-lc", cmd], check=False)
-            
-            if rc == 0:
-                rows = []
-                for line in out.splitlines():
-                    parts = line.split("|")
-                    if len(parts) >= 9:
-                        rows.append({
-                            "JobID": parts[0],
-                            "Partition": parts[1],
-                            "Name": parts[2],
-                            "User": parts[3],
-                            "State": parts[4],
-                            "Elapsed": parts[5],
-                            "TimeLimit": parts[6],
-                            "Nodes": parts[7],
-                            "CPUs": parts[8],
-                            "Reason": parts[9] if len(parts) > 9 else ""
-                        })
-                
-                result["manager_status"] = {
-                    "tool": "squeue",
-                    "timestamp": time.time(),
-                    "error": "",
-                    "jobs": rows
-                }
-            else:
-                result["manager_status"] = {
-                    "tool": "squeue",
-                    "timestamp": time.time(),
-                    "error": err,
-                    "jobs": []
-                }
-        except Exception as e:
-            result["error"] = f"Failed to check SLURM status: {e}"
-    
-    # Check BD completion status by reading files
-    model_path = work_dir / "model.xml"
-    stage_status = check_bd_completion(model_path, n_trajectories_for_completion)
-    result["stage_status"] = stage_status
-    result["success"] = True
-    
-    return result
-
-
-def slurm_remote_hidr_status_workflow(args):
-    """
-    Check the status of HIDR simulation on SLURM by examining SLURM queue 
-    and checking which anchors have structures assigned in model.xml.
-    
-    This function is executed remotely via Globus Compute. It checks:
-    1. SLURM job queue status for running/pending HIDR jobs
-    2. model.xml file to determine which anchors have been filled with structures
-    
-    Parameters
-    ----------
-    args : list
-        List containing:
-        - work_dir : str
-            Path to the working directory containing model.xml
-    
-    Returns
-    -------
-    dict
-        Status information containing:
-        - success : bool
-            Whether the status check completed successfully
-        - error : str or None
-            Error message if any
-        - manager_status : dict or None
-            SLURM job information if state file exists
-        - hidr_status : dict
-            Dictionary with:
-            - filled_anchors : list of int
-                Indices of anchors that have structures assigned
-            - unfilled_anchors : list of int
-                Indices of anchors that don't have structures yet
-            - total_anchors : int
-                Total number of HIDR anchors
-            - hidr_stage : str
-                One of "unstarted", "started", or "completed"
-    """
-    import os
-    import json
-    import time
-    import pathlib
-    import subprocess
-    import xml.etree.ElementTree as ET
-    from dataclasses import dataclass
-    from typing import Dict, List, Optional
-    working_dir = args[0]
-    stage_name = "hidr"
+    def find_latest_state_file(workdir: pathlib.Path, stage: str) -> Optional[pathlib.Path]:
+        state_dir = get_state_dir(workdir)
+        if not state_dir.exists():
+            return None
+        latest = state_dir / f"{stage}_latest.json"
+        if latest.exists():
+            return latest
+        files = sorted(
+            state_dir.glob(f"{stage}_*.json"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        if files:
+            return files[0]
+        return None
 
     def run(cmd: List[str], check: bool = True) -> tuple:
-        """Run command, return (rc, stdout, stderr)"""
-        out = subprocess.run(cmd, stdout=subprocess.PIPE, 
-                           stderr=subprocess.PIPE, text=True)
+        out = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
         if check and out.returncode != 0:
-            raise RuntimeError(f"Command failed: ({out.returncode}): "
-                             f"{' '.join(cmd)}\nSTDERR:\n{out.stderr}")
+            raise RuntimeError(
+                f"Command failed: ({out.returncode}): {' '.join(cmd)}\n"
+                f"STDERR:\n{out.stderr}"
+            )
         return out.returncode, out.stdout.strip(), out.stderr.strip()
 
-    @dataclass
-    class RunState:
-        run_id: str
-        workdir: str
-        logdir: str
-        name: str
-        partition: str
-        scheduler_options: Optional[str]
-        time_limit: str
-        account: str
-        constraint: Optional[str]
-        cpus_per_task: Optional[int]
-        mem: Optional[str]
-        array_spec: Optional[list[int]]
-        jobid: str
-        submitted_at: float
-        n_tasks: int
-        cmd_template: str
-        attempts: Dict[str, List[int]]
-        parent_jobids: List[str]
-        worker_init: Optional[str] = None
-        state_file: Optional[str] = None
-        anchor_times_at_submission: Optional[Dict[str, float]] = None
-        last_known_elapsed: Optional[str] = None  # Added to store last known elapsed time
-
-        @staticmethod
-        def load(path: pathlib.Path) -> "RunState":
-            with open(path, "r") as f:
-                data = json.load(f)
-            return RunState(**data)
-        
-    def get_state_dir(workdir: pathlib.Path) -> pathlib.Path:
-        return workdir / ".slurm_runner"
-    
-    def check_hidr_completion(model_path: pathlib.Path) -> Dict:
-        """
-        Check HIDR completion by reading model.xml to see which anchors
-        have been filled with structures.
-        """
-        try:
-            model_dir = model_path.parent
-            if not model_path.exists():
-                return {
-                    "filled_anchors": [],
-                    "unfilled_anchors": [],
-                    "total_anchors": 0,
-                    "progress": "unstarted",
-                    "progress_bar": 0.0,
-                    "model_xml_found": False,
-                    "notes": f"Model file not found: {model_path}"
-                }
-            
-            tree = ET.parse(str(model_path))
-            root = tree.getroot()
-            
-            # Find all HIDR anchors
-            filled_anchors = []
-            unfilled_anchors = []
-            
-            # Find the <anchors> list element
-            anchors_list = root.find(".//anchors")
-            if anchors_list is None:
-                return {
-                    "filled_anchors": [],
-                    "unfilled_anchors": [],
-                    "total_anchors": 0,
-                    "progress": "unstarted",
-                    "progress_bar": 0.0,
-                    "model_xml_found": True,
-                    "notes": "No anchors list found in model.xml"
-                }
-            
-            # Iterate through all child elements of <anchors>
-            # They will be named like anchors_e0, anchors_e1, etc.
-            for anchor_elem in anchors_list:
-                # Check if this element has an <index> child
-                index_elem = anchor_elem.find("index")
-                bulk_elem = anchor_elem.find("bulkstate")
-                if index_elem is not None and index_elem.text:
-                    anchor_idx = int(index_elem.text.strip())
-                    bulk_anchor = True if bulk_elem.text.strip() == "True" else False
-                    if bulk_anchor:
-                        continue
-                    # Check all parameter types for pdb_coordinates_filename
-                    has_structure = False
-                    for params_type in ["amber_params", "charmm_params", 
-                                       "forcefield_params"]:
-                        params = anchor_elem.find(params_type)
-                        if params is not None:
-                            pdb_file = params.find("pdb_coordinates_filename")
-                            if pdb_file is not None and pdb_file.text:
-                                pdb_text = pdb_file.text.strip()
-                                if pdb_text:  # Not empty string
-                                    # Check if the file actually exists
-                                    anchor_dir_elem = anchor_elem.find("directory")
-                                    anchor_build_elem = anchor_elem.find("building_directory")
-                                    if anchor_dir_elem is not None and anchor_dir_elem.text:
-                                        anchor_dir = model_dir / anchor_dir_elem.text.strip() \
-                                            / anchor_build_elem.text.strip()
-                                        pdb_path = anchor_dir / pdb_text
-                                    else:
-                                        pdb_path = model_dir / pdb_text
-                                    
-                                    if pdb_path.exists():
-                                        has_structure = True
-                                        break
-                    
-                    if has_structure:
-                        filled_anchors.append(anchor_idx)
-                    else:
-                        unfilled_anchors.append(anchor_idx)
-            
-            # Determine HIDR stage
-            if len(filled_anchors) == 0:
-                progress = "unstarted"
-            elif len(unfilled_anchors) == 0:
-                progress = "completed"
-            else:
-                progress = "started"
-            
-            return {
-                "filled_anchors": sorted(filled_anchors),
-                "unfilled_anchors": sorted(unfilled_anchors),
-                "total_anchors": len(filled_anchors) + len(unfilled_anchors),
-                "progress": progress,
-                "progress_bar": len(filled_anchors) / (len(filled_anchors) \
-                    + len(unfilled_anchors)) if (len(filled_anchors) \
-                    + len(unfilled_anchors)) > 0 else 0.0,
-                "model_xml_found": True,
-                "notes": ""
-            }
-            
-        except Exception as e:
-            return {
-                "filled_anchors": [],
-                "unfilled_anchors": [],
-                "total_anchors": 0,
-                "progress": "unknown",
-                "progress_bar": 0.0,
-                "model_xml_found": False,
-                "notes": f"Unexpected error checking HIDR completion: {e}"
-            }
-        
-    # Initialize result structure
-    result = {
-        "success": False,
-        "error": None,
-        "manager_status": None,
-        "stage_status": None
-    }
-
     work_dir = pathlib.Path(working_dir)
-    state_path = get_state_dir(work_dir) / f"{stage_name}_latest.json"
-    
-    # Check SLURM status if state file exists
-    if state_path.exists():
-        try:
-            st = RunState.load(state_path)
-            cmd = f"squeue -j {st.jobid} -h -o '%i|%P|%j|%u|%T|%M|%l|%D|%C|%R'"
-            rc, out, err = run(["bash", "-lc", cmd], check=False)
-            
-            if rc == 0:
-                rows = []
-                for line in out.splitlines():
-                    parts = line.split("|")
-                    if len(parts) >= 9:
-                        rows.append({
-                            "JobID": parts[0],
-                            "Partition": parts[1],
-                            "Name": parts[2],
-                            "User": parts[3],
-                            "State": parts[4],
-                            "Elapsed": parts[5],
-                            "TimeLimit": parts[6],
-                            "Nodes": parts[7],
-                            "CPUs": parts[8],
-                            "Reason": parts[9] if len(parts) > 9 else ""
-                        })
-                
-                result["manager_status"] = {
-                    "tool": "squeue",
-                    "timestamp": time.time(),
-                    "error": "",
-                    "jobs": rows
-                }
-            else:
-                result["manager_status"] = {
-                    "tool": "squeue",
-                    "timestamp": time.time(),
-                    "error": err,
-                    "jobs": []
-                }
-        except Exception as e:
-            result["error"] = f"Failed to check SLURM status: {e}"
-    
-    # Check HIDR completion status by reading files
-    model_path = work_dir / "model.xml"
-    stage_status = check_hidr_completion(model_path)
-    result["stage_status"] = stage_status
-    result["success"] = True
-    
-    return result
-
-
-def slurm_remote_seekr_status_workflow(args):
-    """
-    Check the status of SEEKR simulation on SLURM by examining SLURM queue
-    and checking which anchors have MD simulations completed in model.xml.
-    
-    This function is executed remotely via Globus Compute. It checks:
-    1. SLURM job queue status for running/pending SEEKR jobs
-    2. model.xml and output directories to determine simulation progress
-    
-    Parameters
-    ----------
-    args : list
-        List containing:
-        - work_dir : str
-            Path to the working directory containing model.xml
-        - anchor_time_for_completion : float
-            The simulation time (in ps or ns) required for an anchor to be 
-            considered complete
-    
-    Returns
-    -------
-    dict
-        Status information containing:
-        - success : bool
-            Whether the status check completed successfully
-        - error : str or None
-            Error message if any
-        - manager_status : dict or None
-            SLURM job information if state file exists
-        - seekr_status : dict
-            Dictionary with:
-            - completed_anchors : list of int
-                Indices of anchors with completed simulations
-            - incomplete_anchors : list of int
-                Indices of anchors needing more simulation
-            - total_anchors : int
-                Total number of SEEKR anchors
-            - seekr_stage : str
-                One of "unstarted", "started", or "completed"
-    """
-    import os
-    import json
-    import time
-    import pathlib
-    import subprocess
-    import xml.etree.ElementTree as ET
-    from dataclasses import dataclass
-    from typing import Dict, List, Optional
-    import re
-
-    working_dir = args[0]
-    stage_name = "seekr"
-    anchor_time_for_completion = args[1]
-
-    def run(cmd: List[str], check: bool = True) -> tuple:
-        """Run command, return (rc, stdout, stderr)"""
-        out = subprocess.run(cmd, stdout=subprocess.PIPE, 
-                           stderr=subprocess.PIPE, text=True)
-        if check and out.returncode != 0:
-            raise RuntimeError(f"Command failed: ({out.returncode}): "
-                             f"{' '.join(cmd)}\nSTDERR:\n{out.stderr}")
-        return out.returncode, out.stdout.strip(), out.stderr.strip()
-
-    @dataclass
-    class RunState:
-        run_id: str
-        workdir: str
-        logdir: str
-        name: str
-        partition: str
-        scheduler_options: Optional[str]
-        time_limit: str
-        account: str
-        constraint: Optional[str]
-        cpus_per_task: Optional[int]
-        mem: Optional[str]
-        array_spec: Optional[list[int]]
-        jobid: str
-        submitted_at: float
-        n_tasks: int
-        cmd_template: str
-        attempts: Dict[str, List[int]]
-        parent_jobids: List[str]
-        worker_init: Optional[str] = None
-        state_file: Optional[str] = None
-        anchor_times_at_submission: Optional[Dict[str, float]] = None
-        last_known_elapsed: Optional[str] = None  # Added to store last known elapsed time
-
-        @staticmethod
-        def load(path: pathlib.Path) -> "RunState":
-            with open(path, "r") as f:
-                data = json.load(f)
-            return RunState(**data)
-        
-    def get_state_dir(workdir: pathlib.Path) -> pathlib.Path:
-        return workdir / ".slurm_runner"
-    
-    def get_anchor_simulation_time(anchor_dir: pathlib.Path) -> float:
-        """
-        Get the current simulation time for an anchor by reading the 
-        mmvt.restart#.dcd files.
-        
-        Returns the simulation time in the same units as stored in the file,
-        or 0.0 if no restart files are found or can't be parsed.
-        """
-        prod_dir = anchor_dir / "prod"
-        if not prod_dir.exists():
-            return 0.0
-        
-        # Find all mmvt.restart*.dcd files
-        restart_files = list(prod_dir.glob("mmvt.restart*.out"))
-        if not restart_files:
-            return 0.0
-        
-        # Extract the numbers from filenames and find the highest
-        def extract_restart_number(filepath):
-            """Extract number from mmvt.restart#.out filename"""
-            match = re.search(r'mmvt\.restart(\d+)\.out', filepath.name)
-            if match:
-                return int(match.group(1))
-            return -1
-        
-        restart_files.sort(key=extract_restart_number)
-        latest_restart = restart_files[-1]
-        
-        try:
-            # Read the last line of the file
-            with open(latest_restart, 'r') as f:
-                # Read all lines and get the last one
-                lines = f.readlines()
-                if not lines:
-                    return 0.0
-                
-                last_line = lines[-1].strip()
-                if last_line.startswith("#"):
-                    return 0.0
-                # Parse the last line
-                # Format: "1,1493,550.786" or "CHECKPOINT,20.000"
-                parts = last_line.split(',')
-                if len(parts) >= 2:
-                    # The last part is the simulation time
-                    time_str = parts[-1].strip()
-                    return float(time_str)
-                
-        except Exception:
-            # If we can't read or parse the file, return 0.0
-            return 0.0
-        
-        return 0.0
-    
-    def check_seekr_completion(
-            model_path: pathlib.Path,
-            time_for_completion: float
-            ) -> Dict:
-        """
-        Check SEEKR completion by reading model.xml and checking for
-        simulation time in mmvt.restart#.dcd files.
-        """
-        try:
-            model_dir = model_path.parent
-            if not model_path.exists():
-                return {
-                    "completed_anchors": [],
-                    "incomplete_anchors": [],
-                    "anchor_times": {},
-                    "anchor_time_for_completion": 0.0,
-                    "total_anchors": 0,
-                    "progress": "unstarted",
-                    "progress_bar": 0.0,
-                    "model_xml_found": False,
-                    "notes": f"Model file not found: {model_path}"
-                }
-            
-            tree = ET.parse(str(model_path))
-            root = tree.getroot()
-            
-            # Find all SEEKR anchors (milestones with MD attribute)
-            completed_anchors = []
-            incomplete_anchors = []
-            
-            anchors_list = root.find(".//anchors")
-            if anchors_list is None:
-                return {
-                    "filled_anchors": [],
-                    "unfilled_anchors": [],
-                    "anchor_times": {},
-                    "anchor_time_for_completion": 0.0,
-                    "total_anchors": 0,
-                    "progress": "unstarted",
-                    "progress_bar": 0.0,
-                    "model_xml_found": True,
-                    "notes": "No anchors list found in model.xml"
-                }
-            
-            # Iterate through all child elements of <anchors>
-            # They will be named like anchors_e0, anchors_e1, etc.
-            total_sim_time = 0.0
-            total_time_for_completion = 0.0
-            anchor_times = {}
-            for anchor_elem in anchors_list:
-                # Check if this element has an <index> child
-                index_elem = anchor_elem.find("index")
-                bulk_elem = anchor_elem.find("bulkstate")
-                if index_elem is not None and index_elem.text:
-                    anchor_idx = int(index_elem.text.strip())
-                    bulk_anchor = bulk_elem is not None and bulk_elem.text.strip() == "True"
-                    if bulk_anchor:
-                        continue
-                    
-                    # Check if this anchor needs MD simulations
-                    # The <md> tag is a direct child of the anchor element
-                    needs_md = False
-                    md_elem = anchor_elem.find("md")
-                    if md_elem is not None and md_elem.text:
-                        md_attr = md_elem.text.strip()
-                        if md_attr.lower() == "true":
-                            needs_md = True
-                    
-                    if not needs_md:
-                        # This anchor doesn't need MD, skip it
-                        continue
-                    
-                    # Check simulation time in anchor directory
-                    anchor_dir = model_dir / f"anchor_{anchor_idx}"
-                    sim_time = get_anchor_simulation_time(anchor_dir)
-                    anchor_times[anchor_idx] = sim_time
-                    total_sim_time += sim_time
-                    total_time_for_completion += time_for_completion
-                    
-                    if sim_time >= time_for_completion:
-                        completed_anchors.append(anchor_idx)
-                    elif sim_time > 0.0:
-                        # Has some simulation time but not complete
-                        incomplete_anchors.append(anchor_idx)
-                    else:
-                        # No simulation time found - unstarted
-                        incomplete_anchors.append(anchor_idx)
-            
-            # Determine SEEKR stage
-            if len(incomplete_anchors) == 0 and len(completed_anchors) > 0:
-                progress = "completed"
-            elif total_sim_time > 0.0:
-                progress = "started"
-            else:
-                progress = "unstarted"
-            
-            return {
-                "completed_anchors": sorted(completed_anchors),
-                "incomplete_anchors": sorted(incomplete_anchors),
-                "anchor_times": anchor_times,
-                "anchor_time_for_completion": time_for_completion,
-                "total_anchors": len(completed_anchors) + len(incomplete_anchors),
-                "progress": progress,
-                "progress_bar": total_sim_time / total_time_for_completion if total_time_for_completion > 0 else 0.0,
-                "model_xml_found": True,
-                "notes": ""
-            }
-            
-        except Exception as e:
-            return {
-                "completed_anchors": [],
-                "incomplete_anchors": [],
-                "total_anchors": 0,
-                "progress": "unknown",
-                "progress_bar": 0.0,
-                "model_xml_found": False,
-                "notes": f"Unexpected error checking SEEKR completion: {e}"
-            }
-        
-    # Initialize result structure
-    result = {
-        "success": False,
-        "error": None,
-        "manager_status": None,
-        "stage_status": None
+    manager_status = {
+        "tool": "squeue",
+        "timestamp": time.time(),
+        "error": "",
+        "jobs": [],
     }
-
-    work_dir = pathlib.Path(working_dir)
-    state_path = get_state_dir(work_dir) / f"{stage_name}_latest.json"
-
-    # Track elapsed time for optimization (persists after job finishes)
     last_known_elapsed = None
 
-    # Check SLURM status if state file exists
-    if state_path.exists():
+    state_path = find_latest_state_file(work_dir, stage_name)
+    if state_path is not None and state_path.exists():
         try:
             st = RunState.load(state_path)
             cmd = f"squeue -j {st.jobid} -h -o '%i|%P|%j|%u|%T|%M|%l|%D|%C|%R'"
@@ -977,23 +317,23 @@ def slurm_remote_seekr_status_workflow(args):
                 for line in out.splitlines():
                     parts = line.split("|")
                     if len(parts) >= 9:
-                        rows.append({
-                            "JobID": parts[0],
-                            "Partition": parts[1],
-                            "Name": parts[2],
-                            "User": parts[3],
-                            "State": parts[4],
-                            "Elapsed": parts[5],
-                            "TimeLimit": parts[6],
-                            "Nodes": parts[7],
-                            "CPUs": parts[8],
-                            "Reason": parts[9] if len(parts) > 9 else ""
-                        })
+                        rows.append(
+                            {
+                                "JobID": parts[0],
+                                "Partition": parts[1],
+                                "Name": parts[2],
+                                "User": parts[3],
+                                "State": parts[4],
+                                "Elapsed": parts[5],
+                                "TimeLimit": parts[6],
+                                "Nodes": parts[7],
+                                "CPUs": parts[8],
+                                "Reason": parts[9] if len(parts) > 9 else "",
+                            }
+                        )
 
-                # Capture elapsed time before it disappears
                 if rows:
-                    last_known_elapsed = rows[0]["Elapsed"]
-                    # Also save to state file for remote-side tracking
+                    last_known_elapsed = rows[0].get("Elapsed")
                     try:
                         state_data = json.loads(state_path.read_text())
                         state_data["last_known_elapsed"] = last_known_elapsed
@@ -1001,39 +341,246 @@ def slurm_remote_seekr_status_workflow(args):
                     except Exception:
                         pass
 
-                result["manager_status"] = {
-                    "tool": "squeue",
-                    "timestamp": time.time(),
-                    "error": "",
-                    "jobs": rows
-                }
+                manager_status["jobs"] = rows
             else:
-                # No jobs in queue - try to get elapsed from state file
+                manager_status["error"] = err
                 try:
                     state_data = json.loads(state_path.read_text())
                     last_known_elapsed = state_data.get("last_known_elapsed")
                 except Exception:
                     pass
-
-                result["manager_status"] = {
-                    "tool": "squeue",
-                    "timestamp": time.time(),
-                    "error": err,
-                    "jobs": []
-                }
         except Exception as e:
-            result["error"] = f"Failed to check SLURM status: {e}"
+            manager_status["error"] = f"Failed to check SLURM status: {e}"
 
-    # Include elapsed time in result so it's transferred back to local machine
-    result["last_known_elapsed"] = last_known_elapsed
+    def _progress_from_stage_progress(stage_progress: dict, partitioned_anchor) -> float:
+        progress_map = stage_progress.get("progress", {})
+        if partitioned_anchor == "any":
+            values = []
+            if isinstance(progress_map, dict):
+                for _, per_partition in progress_map.items():
+                    if isinstance(per_partition, dict):
+                        value = per_partition.get("progress")
+                        if isinstance(value, (int, float)):
+                            values.append(float(value))
+            if values:
+                return sum(values) / len(values)
+            return 0.0
 
-    # Check SEEKR completion status by reading files
-    model_path = work_dir / "model.xml"
-    stage_status = check_seekr_completion(model_path, anchor_time_for_completion)
-    result["stage_status"] = stage_status
-    result["success"] = True
-    
-    return result
+        partitioned_status = {}
+        if isinstance(progress_map, dict):
+            partitioned_status = progress_map.get(partitioned_anchor, {})
+        if isinstance(partitioned_status, dict):
+            value = partitioned_status.get("progress", 0.0)
+            if isinstance(value, (int, float)):
+                return float(value)
+        return 0.0
+
+    stage_status = {
+        "finished": False,
+        "state": "unknown",
+        "progress": 0.0,
+        "notes": "",
+    }
+
+    model_filename = work_dir / "model.json"
+    if not model_filename.exists():
+        stage_status.update(
+            {
+                "state": "unstarted",
+                "notes": f"Model file not found: {model_filename}",
+                "model_xml_found": False,
+            }
+        )
+        return {
+            "success": True,
+            "error": None,
+            "manager_status": manager_status,
+            "stage_status": stage_status,
+            "last_known_elapsed": last_known_elapsed,
+        }
+
+    # Run the seekr progress check via subprocess under worker_init.  The
+    # endpoint worker's own Python may not have seekr installed (e.g. when
+    # globus-compute-endpoint is in a pipx-isolated venv).  worker_init is
+    # the same bash snippet used to activate the env for SLURM jobs.
+    snippet_lines = [
+        "import json, sys",
+        "try:",
+        "    import seekr.modules.structures as S",
+        "    import seekr.status as st",
+        f"    model = S.load_model({str(model_filename)!r})",
+        "    stage_names = [s.name for s in model.stages]",
+        f"    stage_name = {stage_name!r}",
+        "    if stage_name not in stage_names:",
+        "        print('__SEEKR_STATUS__' + json.dumps({",
+        "            'ok': False, 'unknown_stage': True,",
+        "            'stage_names': stage_names}))",
+        "        sys.exit(0)",
+        "    idx = stage_names.index(stage_name)",
+        f"    msg = st.status(model, 'progress', stage_arg=stage_name, anchor_arg={anchor!r}, swarm_id={swarm_id!r}, print_json=True)",
+        "    prog = msg.get('progress', {})",
+        "    sp = {}",
+        "    # seekr keys progress by stage.index (an int), which may differ",
+        "    # from this stage's position in model.stages.  Match by name to be",
+        "    # robust against either an int or stringified-int key.",
+        "    for _k, _v in prog.items():",
+        "        if isinstance(_v, dict) and _v.get('stage_name') == stage_name:",
+        "            sp = _v",
+        "            break",
+        "    # Per-anchor time data in picoseconds for the time-limit optimizer.",
+        "    try: _ts = float(model.get_timestep())",
+        "    except Exception: _ts = 0.0",
+        "    _per_anchor = sp.get('progress') if isinstance(sp.get('progress'), dict) else {}",
+        "    _anchor_times = {}",
+        "    _anchor_targets = []",
+        "    _incomplete = []",
+        "    for _ak, _av in _per_anchor.items():",
+        "        if not isinstance(_av, dict): continue",
+        "        _cur = _av.get('current_step')",
+        "        _tot = _av.get('total_steps') or _av.get('maximum_steps')",
+        "        if _cur is not None and _ts > 0.0:",
+        "            _anchor_times[str(_ak)] = float(_cur) * _ts",
+        "        if _tot is not None and _ts > 0.0:",
+        "            _anchor_targets.append(float(_tot) * _ts)",
+        "        if not _av.get('attained', False):",
+        "            try: _incomplete.append(int(_ak))",
+        "            except Exception: pass",
+        "    sp['anchor_times'] = _anchor_times",
+        "    sp['anchor_time_for_completion'] = max(_anchor_targets) if _anchor_targets else 0.0",
+        "    sp['incomplete_anchors'] = sorted(_incomplete)",
+        "    print('__SEEKR_STATUS__' + json.dumps({",
+        "        'ok': True, 'stage_progress': sp}))",
+        "except Exception as e:",
+        "    import traceback",
+        "    print('__SEEKR_STATUS__' + json.dumps({",
+        "        'ok': False, 'error': str(e), 'traceback': traceback.format_exc()}))",
+    ]
+    snippet = "\n".join(snippet_lines)
+    init = (worker_init or "").strip()
+    if init:
+        cmd = f"{init}; python -c {shlex.quote(snippet)}"
+    else:
+        cmd = f"python -c {shlex.quote(snippet)}"
+
+    try:
+        proc = subprocess.run(
+            ["bash", "-lc", cmd],
+            cwd=str(work_dir),
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        marker = "__SEEKR_STATUS__"
+        payload = None
+        for line in proc.stdout.splitlines():
+            line = line.strip()
+            if line.startswith(marker):
+                try:
+                    payload = json.loads(line[len(marker):])
+                except Exception:
+                    payload = None
+        if payload is None:
+            raise RuntimeError(
+                f"could not parse seekr status output (rc={proc.returncode}); "
+                f"stdout_tail={proc.stdout[-400:]!r}; "
+                f"stderr_tail={proc.stderr[-400:]!r}"
+            )
+        if not payload.get("ok"):
+            if payload.get("unknown_stage"):
+                stage_status.update(
+                    {
+                        "state": "failed",
+                        "notes": (
+                            f"Unknown stage name in model: {stage_name}; "
+                            f"available={payload.get('stage_names')}"
+                        ),
+                    }
+                )
+                return {
+                    "success": False,
+                    "error": stage_status["notes"],
+                    "manager_status": manager_status,
+                    "stage_status": stage_status,
+                    "last_known_elapsed": last_known_elapsed,
+                }
+            raise RuntimeError(
+                f"seekr status call failed: {payload.get('error')}\n"
+                f"{payload.get('traceback', '')}"
+            )
+        stage_progress = payload.get("stage_progress") or {}
+
+        # Carry per-anchor data through to stage_status so the time-limit
+        # optimizer (which reads .seekrflow_job_status.json) can use it.
+        for _k in ("anchor_times", "anchor_time_for_completion", "incomplete_anchors"):
+            if _k in stage_progress:
+                stage_status[_k] = stage_progress[_k]
+
+        jobs = manager_status.get("jobs", [])
+        running_now = len(jobs) > 0
+
+        if benchmark_mode:
+            if running_now:
+                stage_status["finished"] = False
+                stage_status["state"] = "started"
+                stage_status["progress"] = 0.0
+            elif stage_progress.get("finished", False):
+                stage_status["finished"] = True
+                stage_status["state"] = "completed"
+                stage_status["progress"] = 1.0
+            else:
+                inferred_progress = _progress_from_stage_progress(stage_progress, anchor)
+                if inferred_progress > 0.0:
+                    stage_status["finished"] = True
+                    stage_status["state"] = "completed"
+                    stage_status["progress"] = 1.0
+                    stage_status["notes"] = (
+                        "benchmark mode inferred completion from recorded progress"
+                    )
+                else:
+                    stage_status["finished"] = False
+                    stage_status["state"] = "unstarted"
+                    stage_status["progress"] = 0.0
+        else:
+            if stage_progress.get("finished", False):
+                stage_status["finished"] = True
+                stage_status["state"] = "completed"
+                stage_status["progress"] = 1.0
+            else:
+                progress = _progress_from_stage_progress(stage_progress, anchor)
+                stage_status["finished"] = False
+                stage_status["progress"] = progress
+                if running_now:
+                    stage_status["state"] = "started"
+                elif progress > 0.0:
+                    stage_status["state"] = "started"
+                else:
+                    stage_status["state"] = "unstarted"
+
+    except Exception as e:
+        stage_status.update(
+            {
+                "finished": False,
+                "state": "failed",
+                "progress": 0.0,
+                "notes": f"Unexpected error checking stage status: {e}",
+            }
+        )
+        return {
+            "success": False,
+            "error": str(e),
+            "manager_status": manager_status,
+            "stage_status": stage_status,
+            "last_known_elapsed": last_known_elapsed,
+        }
+
+    return {
+        "success": True,
+        "error": None,
+        "manager_status": manager_status,
+        "stage_status": stage_status,
+        "last_known_elapsed": last_known_elapsed,
+    }
+
 
 def slurm_remote_run_workflow(args):
     import os
@@ -1414,6 +961,17 @@ def slurm_remote_force_rerun_workflow(args):
     
     def get_state_dir(workdir: pathlib.Path) -> pathlib.Path:
         return workdir / ".slurm_runner"
+
+    def cleanup_stage_state_files(workdir: pathlib.Path, stage: str) -> None:
+        state_dir = get_state_dir(workdir)
+        if not state_dir.exists():
+            return
+        for pattern in (f"{stage}_latest.json", f"{stage}_*.json"):
+            for filepath in state_dir.glob(pattern):
+                try:
+                    filepath.unlink()
+                except Exception:
+                    pass
     
     def force_bd_rerun_remote(model_dir: pathlib.Path) -> None:
         """Delete BD result files."""
@@ -1515,7 +1073,7 @@ def slurm_remote_force_rerun_workflow(args):
     state_path = get_state_dir(work_dir) / f"{stage_name}_latest.json"
     
     # Step 1: Cancel any running job for this stage
-    if state_path.exists():
+    if state_path is not None and state_path.exists():
         try:
             st = RunState.load(state_path)
             print(f"Canceling job {st.jobid} for stage {stage_name}...")
@@ -1538,8 +1096,12 @@ def slurm_remote_force_rerun_workflow(args):
         elif stage_name == "seekr":
             force_seekr_rerun_remote(work_dir)
         else:
-            result["error"] = f"Unknown stage name: {stage_name}"
-            return result
+            print(
+                f"No stage-specific cleanup rule for stage {stage_name}; "
+                "only cancel/state cleanup performed."
+            )
+
+        cleanup_stage_state_files(work_dir, stage_name)
         
         print(f"Deleted files for {stage_name} stage")
         result["success"] = True

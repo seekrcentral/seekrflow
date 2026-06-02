@@ -216,6 +216,10 @@ class Resource_remote_slurm(Resource_remote_base):
         default="",
         validator=validators.instance_of(str),
         )
+    mps: int = field(
+        default=1,
+        validator=validators.instance_of(int),
+    )
     remote_interface: Remote_interface_globus_compute_sdk | Remote_interface_ssh = field(
         default=Factory(Remote_interface_globus_compute_sdk),
     )
@@ -281,6 +285,11 @@ class Resource_remote_pbs(Resource_remote_base):
         default="",
         validator=validators.instance_of(str),
     )
+    mps: int = field(
+        default=1,
+        validator=[validators.instance_of(int),
+                            validators.ge(1)],
+    )
     remote_interface: Remote_interface_globus_compute_sdk | Remote_interface_ssh = field(
         default=Factory(Remote_interface_globus_compute_sdk),
     )
@@ -298,18 +307,11 @@ class Run_settings:
         Resource_remote_slurm | Resource_remote_pbs
     ] = field(
         default=Factory(list),)
-    bd_stage_resource_name: str = field(
-        default="local",
-        validator=validators.instance_of(str),
+    stage_resource_name: dict[str, str] = field(
+        default=Factory(dict),
+        validator=validators.instance_of(dict),
         )
-    hidr_stage_resource_name: str = field(
-        default="local",
-        validator=validators.instance_of(str),
-        )
-    seekr_stage_resource_name: str = field(
-        default="local",
-        validator=validators.instance_of(str),
-        )
+    
     
     def get_resource_by_name(
             self,
@@ -333,16 +335,24 @@ class Run_settings:
         """
         Get the resource for a given stage.
         """
-        if stage_name == "bd":
-            resource_name = self.bd_stage_resource_name
-        elif stage_name == "hidr":
-            resource_name = self.hidr_stage_resource_name
-        elif stage_name == "seekr":
-            resource_name = self.seekr_stage_resource_name
-        else:
+        if stage_name not in self.stage_resource_name:
             raise ValueError(f"Unknown stage name '{stage_name}'")
-        
+        resource_name = self.stage_resource_name[stage_name]
         return self.get_resource_by_name(resource_name)
+
+    def set_stage_resource(
+            self,
+            stage_name: str,
+            resource_name: str,
+            ) -> None:
+        """
+        Assign a resource name to a stage after validating that the resource
+        exists (or is local).
+        """
+        # Validate resource name early for clearer CLI/runtime errors.
+        self.get_resource_by_name(resource_name)
+        self.stage_resource_name[stage_name] = resource_name
+        return
 
 @define
 class Seekrflow:
@@ -367,8 +377,14 @@ class Seekrflow:
     #  attributes within the parameterize attribute. Backwards compatibility to
     #  structure version 1.1 was not implemented because seekrflow was not yet 
     #  released. Removed parsl-related attributes.
-    structure_version: str = field(default="1.2",
+    # NOTE: structure version 1.3 implemented changes for the migration to seekr3,
+    #  which included general stage names in the  Run_settings object, inclusion of
+    #  mps in some resources. Backwards compatibility to structure version 1.2 
+    #  should not need to be implemented because the software will be forked, and
+    #  support for seekr2 will be maintained in seekrflow 2.x versions.
+    structure_version: str = field(default="1.3",
                                  validator=validators.instance_of(str))
+    # TODO: new workflows for seekr3.
     workflow: protein_ligand_seekr2_structures.Protein_ligand_seekr2_workflow \
          | protein_ligand_membrane_seekr2_structures.Protein_ligand_membrane_seekr2_workflow \
          | protein_protein_seekr2_structures.Protein_protein_seekr2_workflow \

@@ -342,7 +342,7 @@ class TestGetBdReceptorLigandSelections:
         # Use indices that exist but atom names unlikely to be in PQR file
         md_ligand_selection = [0, 1]  # Use first two atoms which are likely not ligand
         
-        with pytest.raises(RuntimeError, match="BD ligand indices do not match"):
+        with pytest.raises(AssertionError, match="No match found for ligand atom with name N in the PQR file."):
             cvs.get_bd_receptor_ligand_selections(
                 seekrflow.workflow.receptor_pqr_filename_for_bd,
                 seekrflow.workflow.ligand_pqr_filename_for_bd,

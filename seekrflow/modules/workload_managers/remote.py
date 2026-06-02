@@ -11,12 +11,79 @@ import typing
 
 import seekr2.modules.common_base as seekr2_base
 
-import seekrflow.modules.base as base
 import seekrflow.modules.structures as structures
 import seekrflow.modules.workload_managers.slurm as workload_slurm
 import seekrflow.modules.workload_managers.pbs as workload_pbs
 import seekrflow.modules.remote_interfaces.globus_compute_sdk as remote_globus
 import seekrflow.modules.remote_interfaces.ssh as remote_ssh
+
+
+def _get_stage_resource_name(
+        seekrflow: structures.Seekrflow,
+        stage_name: str,
+        ) -> str:
+    """
+    Resolve the configured resource name for a stage using the canonical
+    run_settings.stage_resource_name mapping.
+    """
+    if stage_name not in seekrflow.run_settings.stage_resource_name:
+        raise ValueError(
+            f"Unknown stage name {stage_name!r} in run_settings.stage_resource_name"
+        )
+    return seekrflow.run_settings.stage_resource_name[stage_name]
+
+
+def _normalize_stage_status(
+        status_result: dict,
+        ) -> dict:
+    """
+    Normalize stage status payload to align with local status contract:
+    finished(bool), state(str), progress(float), notes(str).
+    """
+    stage_status = dict(status_result.get("stage_status") or {})
+    if len(stage_status) == 0:
+        stage_status = {
+            "finished": False,
+            "state": "unknown",
+            "progress": 0.0,
+            "notes": "",
+        }
+
+    finished = bool(stage_status.get("finished", False))
+    notes = str(stage_status.get("notes", ""))
+
+    progress_raw = stage_status.get("progress", 0.0)
+    progress: float
+    if isinstance(progress_raw, (int, float)):
+        progress = float(progress_raw)
+    elif isinstance(progress_raw, str):
+        lowered = progress_raw.strip().lower()
+        if lowered in {"completed", "complete", "finished"}:
+            progress = 1.0
+        elif lowered in {"started", "running", "queued"}:
+            progress = 0.0
+        else:
+            progress = 0.0
+    else:
+        progress = 0.0
+
+    state = stage_status.get("state")
+    if state is None:
+        if finished:
+            state = "completed"
+        else:
+            manager_status = status_result.get("manager_status") or {}
+            jobs = manager_status.get("jobs") or []
+            if len(jobs) > 0:
+                state = "started"
+            else:
+                state = "unstarted"
+
+    stage_status["finished"] = finished
+    stage_status["state"] = state
+    stage_status["progress"] = progress
+    stage_status["notes"] = notes
+    return stage_status
 
 
 def calculate_optimal_time_limit(
@@ -103,20 +170,18 @@ def submit_remote_workflow(
         result = remote_globus\
             .submit_remote_workflow_with_globus_compute(
                 resource.name, workflow, endpoint, args, silent)
-        if not result["success"]:
-            print("result:", result)
-        assert result["success"], "Workflow failed on remote resource."
     elif resource.remote_interface.type == "ssh":
         hostname = resource.remote_interface.hostname
         username = resource.remote_interface.username
         password = resource.remote_interface.password
         port = resource.remote_interface.port
-        #private_key_filename = resource.remote_interface.private_key_filename
-        #private_key_passphrase = resource.remote_interface.private_key_passphrase
+        private_key_filename = resource.remote_interface.private_key_filename
+        private_key_passphrase = resource.remote_interface.private_key_passphrase
         result = remote_ssh\
             .submit_remote_workflow_with_ssh(
                 resource.name, workflow, args,  
-                hostname, username, password, port)
+                hostname, username, password, port,
+                private_key_filename, private_key_passphrase)
     else:
         raise NotImplementedError(
             f"Remote interface type not implemented: "\
@@ -124,31 +189,58 @@ def submit_remote_workflow(
     
     return result
 
-def bd_status_remote(
+def status_remote(
         seekrflow: structures.Seekrflow,
+        stage_name: str,
         model: seekr2_base.Model,
-        silent: bool = False
-        ) -> str:
+        silent: bool = False,
+        benchmark_mode: bool = False,
+        ) -> dict:
     """
-    Check if the BD stage has finished remotely. Submit a Globus Compute
-    or SSH workflow to obtain this.
+    Generalized remote stage status query for any stage configured in
+    run_settings.stage_resource_name.
     """
-    assert model.k_on_info is not None
-    n_traj_for_completed = model.k_on_info.b_surface_num_trajectories
+    resource_name = _get_stage_resource_name(seekrflow, stage_name)
+    if resource_name == "local":
+        raise ValueError(
+            f"Stage {stage_name!r} is configured for local execution; "
+            f"status_remote is for remote stages only."
+        )
 
-    # Get resource to check its type
-    resource = seekrflow.run_settings.get_resource_by_name(
-        seekrflow.run_settings.bd_stage_resource_name)
+    resource = seekrflow.run_settings.get_resource_by_name(resource_name)
+
+    # Note: positional args slot — the SLURM status workflow expects
+    # args[0]=working_dir, [1]=stage_name, [2]=benchmark_mode, [3]=anchor,
+    # [4]=swarm_id, [5]=worker_init.  worker_init is shelled into a bash -lc
+    # invocation inside the workflow so it can activate the env that has seekr.
+    extra_args: list[typing.Any] = [
+        stage_name,
+        benchmark_mode,
+        "any",
+        None,
+        getattr(resource, "worker_init", "") or "",
+    ]
 
     if resource.type == "slurm_remote":
-        bd_status_workflow = workload_slurm.slurm_remote_bd_status_workflow
+        status_workflow = workload_slurm.slurm_remote_status_workflow
     elif resource.type == "pbs_remote":
-        bd_status_workflow = workload_pbs.pbs_remote_bd_status_workflow
+        status_workflow = workload_pbs.pbs_remote_status_workflow
     else:
-        raise NotImplementedError(f"Resource type {resource.type} not implemented")
+        raise NotImplementedError(
+            f"Resource type {resource.type} not implemented"
+        )
 
-    result = submit_remote_workflow(seekrflow, seekrflow.run_settings.bd_stage_resource_name,
-                           bd_status_workflow, extra_args=[n_traj_for_completed], silent=silent)
+    result = submit_remote_workflow(
+        seekrflow,
+        resource_name,
+        status_workflow,
+        extra_args=extra_args,
+        silent=silent,
+    )
+    # Normalize stage_status regardless of success so callers always have
+    # manager_status / job list available (e.g. for display while seekr module
+    # is unavailable in the status-check environment).
+    result["stage_status"] = _normalize_stage_status(result)
     return result
 
 def submit_remote_run_workflow(
@@ -160,16 +252,25 @@ def submit_remote_run_workflow(
         model_filename: str,
         workflow_type: str,
         indices: list | None = None,
-        mps: int = 1,
         silent: bool = False,
-        anchor_times: dict | None = None
+        anchor_times: dict | None = None,
+        time_limit_override: str | None = None,
     ) -> list:
     """
     Run the stage remotely. Submit a Globus Compute or SSH workflow to 
     do this.
+
+    Parameters
+    ----------
+    time_limit_override : str or None
+        If provided, this walltime (HH:MM:SS) is submitted to the workload
+        manager in place of ``resource.time_limit``.  Used for benchmark-mode
+        runs and for dynamic time-limit optimization on subsequent SEEKR
+        submissions.  ``resource.time_limit`` is never mutated.
     """
     log_directory = os.path.join(destination_path, "logs")
     name = seekrflow.name + "_" + stage_name
+    effective_time_limit = time_limit_override or resource.time_limit
     if resource.type == "slurm_remote":
         args = [
             stage_name,
@@ -180,14 +281,14 @@ def submit_remote_run_workflow(
             name,
             resource.cpus_per_task,
             resource.memory_per_node,
-            resource.time_limit,
+            effective_time_limit,
             resource.scheduler_options,
             resource.worker_init,
             command_string,
             indices,
             model_filename,
             workflow_type,
-            mps,
+            getattr(resource, "mps", 1),
             anchor_times
         ]
         run_workflow = workload_slurm.slurm_remote_run_workflow
@@ -201,14 +302,14 @@ def submit_remote_run_workflow(
             name,
             resource.cpus_per_task,
             resource.memory_per_node,
-            resource.time_limit,
+            effective_time_limit,
             resource.scheduler_options,
             resource.worker_init,
             command_string,
             indices,
             model_filename,
             workflow_type,
-            mps,
+            getattr(resource, "mps", 1),
             anchor_times
         ]
         run_workflow = workload_pbs.pbs_remote_run_workflow
@@ -244,63 +345,6 @@ def submit_remote_cancel_workflow(
                            cancel_workflow, extra_args=args, silent=silent)
     return
 
-def hidr_status_remote(
-        seekrflow: structures.Seekrflow,
-        model: seekr2_base.Model,
-        silent: bool = False
-        ) -> str:
-    """
-    Check if the HIDR stage has finished remotely. Submit a Globus Compute
-    or SSH workflow to obtain this.
-    """
-    # Get resource to check its type
-    resource = seekrflow.run_settings.get_resource_by_name(
-        seekrflow.run_settings.hidr_stage_resource_name)
-
-    if resource.type == "slurm_remote":
-        hidr_status_workflow = workload_slurm.slurm_remote_hidr_status_workflow
-    elif resource.type == "pbs_remote":
-        hidr_status_workflow = workload_pbs.pbs_remote_hidr_status_workflow
-    else:
-        raise NotImplementedError(f"Resource type {resource.type} not implemented")
-
-    result = submit_remote_workflow(seekrflow, seekrflow.run_settings.hidr_stage_resource_name,
-                                    hidr_status_workflow, silent=silent)
-    return result
-
-def seekr_status_remote(
-        seekrflow: structures.Seekrflow,
-        model: seekr2_base.Model,
-        silent: bool = False,
-        benchmark_mode: bool = False
-        ) -> str:
-    """
-    Check if the HIDR stage has finished remotely. Submit a Globus Compute
-    or SSH workflow to obtain this.
-    """
-    if benchmark_mode:
-        time_for_completed = base.BENCHMARK_MIN_SIMULATION_LENGTH * model.get_timestep()
-    else:
-        time_for_completed = model.calculation_settings.num_production_steps \
-            * model.get_timestep()
-
-    # Get resource to check its type
-    resource = seekrflow.run_settings.get_resource_by_name(
-        seekrflow.run_settings.seekr_stage_resource_name)
-
-    if resource.type == "slurm_remote":
-        seekr_status_workflow = workload_slurm.slurm_remote_seekr_status_workflow
-    elif resource.type == "pbs_remote":
-        seekr_status_workflow = workload_pbs.pbs_remote_seekr_status_workflow
-    else:
-        raise NotImplementedError(f"Resource type {resource.type} not implemented")
-
-    result = submit_remote_workflow(
-        seekrflow, seekrflow.run_settings.seekr_stage_resource_name,
-        seekr_status_workflow, extra_args=[time_for_completed],
-        silent=silent)
-    return result
-
 def force_rerun_stage_remote(
         seekrflow: structures.Seekrflow,
         stage_name: str,
@@ -318,15 +362,7 @@ def force_rerun_stage_remote(
     silent : bool
         Whether to suppress output
     """
-    # Determine which resource this stage runs on
-    if stage_name == "bd":
-        resource_name = seekrflow.run_settings.bd_stage_resource_name
-    elif stage_name == "hidr":
-        resource_name = seekrflow.run_settings.hidr_stage_resource_name
-    elif stage_name == "seekr":
-        resource_name = seekrflow.run_settings.seekr_stage_resource_name
-    else:
-        raise ValueError(f"Unknown stage name: {stage_name}")
+    resource_name = _get_stage_resource_name(seekrflow, stage_name)
     
     if resource_name == "local":
         raise ValueError(f"Stage {stage_name} is configured to run locally, not remotely")

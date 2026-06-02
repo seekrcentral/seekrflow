@@ -250,7 +250,7 @@ On the local machine:
 
 .. code-block:: bash
 
-    pip install globus-compute-sdk --yes
+    pip install globus-compute-sdk
 
 On the remote HPC system, you will need to follow the steps above to create the Mamba
 environment (on the head or login node; the environment is assumed to be named "SEEKR2").

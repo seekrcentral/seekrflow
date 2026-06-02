@@ -68,14 +68,12 @@ def flow(
         instruction: str,
         src_pdb_filename: str | None = None,
         transfer_before: str | None = None,
-        transfer_from_host_only: str | None = None,
+        transfer_from_remote_only: str | None = None,
         force_rerun: list[str] | None = None,
-        benchmark_mode: bool = False,
-        bd_resource_name: str | None = None,
-        hidr_resource_name: str | None = None,
-        seekr_resource_name: str | None = None,
+        benchmark_stage: str | None = None,
         semaphore_dict: dict[str, str] | None = None,
-        mps: int = 1
+        resource_dict: dict[str, str] | None = None,
+        keystrokes_enabled: bool = True,
         ) -> None:
     """
     Execute the instructed seekrflow stage.
@@ -87,10 +85,10 @@ def flow(
         # Run
         print("Running system...")
         seekr_run.run_model(
-            seekrflow, transfer_before, transfer_from_host_only, force_rerun,
-            benchmark_mode, bd_resource_name, hidr_resource_name, seekr_resource_name,
-            semaphore_dict, mps)
-
+            seekrflow, transfer_before, transfer_from_remote_only, force_rerun,
+            benchmark_stage=benchmark_stage, stage_resource_dict=resource_dict, 
+            semaphore_dict=semaphore_dict,
+            keystrokes_enabled=keystrokes_enabled)
         return
         
     elif instruction == "prepare":
@@ -103,9 +101,10 @@ def flow(
         # Run the system
         print("Running system...")
         seekr_run.run_model(
-            seekrflow, transfer_before, transfer_from_host_only, force_rerun,
-            benchmark_mode, bd_resource_name, hidr_resource_name, seekr_resource_name,
-            semaphore_dict, mps)
+            seekrflow, transfer_before, transfer_from_remote_only, force_rerun,
+            benchmark_stage=benchmark_stage, stage_resource_dict=resource_dict, 
+            semaphore_dict=semaphore_dict,
+            keystrokes_enabled=keystrokes_enabled)
         return
         
     else:
@@ -134,15 +133,7 @@ def main():
         help="Path to the model file to use for the simulation. This activates the "\
         "so-called 'hotshot mode', where an existing model.xml file can be run "\
         "easily without needing to prepare a full seekrflow structure. Note that "\
-        "if this is provided, the seekrflow JSON file must not be provided. "\
-        "Also, if HIDR will be run, then -p must be provided to specify the "\
-        "PDB file with the solvated system.")
-    argparser.add_argument(
-        "-M", "--MPS", dest="MPS",
-        metavar="MPS", type=int, default=1,
-        help="The number of CUDA applications to use in MPS (Multi-Process Service)."\
-            "For a GPU that supports MPS, this can improve GPU utilization when running "\
-            "multiple simulations concurrently. Default: 1 (no MPS).")
+        "if this is provided, the seekrflow JSON file must not be provided.")
     argparser.add_argument(
         "-p", "--pdb_with_system", dest="pdb_with_system", 
         metavar="PDB_WITH_SYSTEM", type=str, default="",
@@ -152,11 +143,7 @@ def main():
         metavar="NAME", type=str, default="",
         help="Name for the simulation or calculation. This is particularly useful "\
             "in hotshot mode to give a more informative name to the run - otherwise, "\
-            "it will be named 'hotshot_<inode>_<device>'. Default=''")
-    #argparser.add_argument(
-    #    "-P", "--parameter_topology_files", dest="parameter_topology_files", 
-    #    metavar="PARAMETER_TOPOLOGY_FILES", type=str, nargs="+", default=None,
-    #    help="List of parameter and topology files to use for the prepare stage.")
+            "it will be named 'hotshot_<inode>_<device>'.")
     argparser.add_argument(
         "-w", "--work_directory", dest="work_directory",
         metavar="WORK_DIRECTORY", type=str, default=None,
@@ -168,102 +155,120 @@ def main():
         "This is done automatically if the model.xml file does not already "\
         "exist on the remote host. However, if you have already transferred "\
         "files and want to re-transfer them, use this flag. Default: None, "\
-        "which will not transfer files. Other values might be: 'bd', 'hidr', " \
-        "'seekr', 'all'.")
+        "which will not transfer files.")
     argparser.add_argument(
-        "-T", "--transfer_from_host_only", dest="transfer_from_host_only", 
+        "-T", "--transfer_from_remote_only", dest="transfer_from_remote_only", 
         metavar="STAGE", type=str, default=None,
         help="If set, transfer files from the remote host for a particular stage "\
         "without doing any preparation or running. Default: None, "\
-        "which will not transfer files. Other values might be: 'bd', 'hidr', " \
-        "'seekr', 'all'.")
+        "which will not transfer files.")
     argparser.add_argument(
-        "-f", "--force_rerun", dest="force_rerun", metavar="STAGE_LIST",
-        type=str, nargs="+", default=None,
-        help="If set, activate force rerun for particular stages, listed "\
-        "as a space-separated list.")
+        "-f", "--force_rerun", dest="force_rerun", metavar="STAGE",
+        type=str, nargs="*", default=None,
+        help="If set, force re-run of stages. Provide a space-separated list "
+        "of stage names (e.g. -f bd mmvt) to force-rerun only those stages, "
+        "or pass -f with no arguments to force-rerun all stages. Any running "
+        "processes for the affected stages will be killed and the stages "
+        "restarted with force_overwrite=True.")
     argparser.add_argument(
-        "-b", "--benchmark_mode", dest="benchmark_mode", 
-        help="If set, run in benchmark mode - quick seekr run on resource "\
-        "to get approximate timings in ns/day. Default: False.", action="store_true",
-        default=False)
+        "-b", "--benchmark", dest="benchmark",
+        metavar="STAGE", type=str, default=None,
+        help="If set, run the named stage in benchmark mode - a quick run on "\
+        "the resource to get approximate timings. At most, a single "\
+        "stage can be benchmarked per invocation, since dependent stages "\
+        "would not produce the outputs needed downstream. Default: None.")
     argparser.add_argument(
-        "-B", "--Brownian_dynamics_resource_name", dest="bd_resource_name", 
-        metavar="BD_RESOURCE_NAME", type=str, default=None,
-        help="Name of the resource to run Brownian dynamics on. The configuration" \
-        "for the resource must be provided in the seekrflow resources JSON file or" \
-        "in a .seekrflow_resources.json file in the home, working, or root directory." \
-        "If not provided, defaults to the values in the seekrflow JSON file or 'local'."\
-        "Default: None.")
-    argparser.add_argument(
-        "-H", "--HIDR_resource_name", dest="hidr_resource_name", 
-        metavar="HIDR_RESOURCE_NAME", type=str, default=None,
-        help="Name of the resource to run HIDR on. The configuration" \
-        "for the resource must be provided in the seekrflow resources JSON file or" \
-        "in a .seekrflow_resources.json file in the home, working, or root directory." \
-        "If not provided, defaults to the values in the seekrflow JSON file or 'local'."\
-        "Default: None.")
-    argparser.add_argument(
-        "-S", "--SEEKR_resource_name", dest="seekr_resource_name", 
-        metavar="SEEKR_RESOURCE_NAME", type=str, default=None,
-        help="Name of the resource to run SEEKR on. The configuration" \
-        "for the resource must be provided in the seekrflow resources JSON file or" \
-        "in a .seekrflow_resources.json file in the home, working, or root directory." \
-        "If not provided, defaults to the values in the seekrflow JSON file or 'local'."\
-        "Default: None.")
+        "--no-keystrokes", dest="no_keystrokes", action="store_true",
+        default=False,
+        help="Disable the interactive keystroke command watcher. Useful for "\
+        "non-interactive runs, GUI integration, or when stdin is not a TTY. "\
+        "Default: keystrokes enabled when stdin is a TTY.")
     argparser.add_argument(
         "--semaphore", dest="semaphore", 
         metavar="STAGE_CONTROL", type=str, default=None,
         help="Control stage execution. Format: 'stage:value,stage:value,...' " \
-        "where stage is bd/hidr/seekr and value is go/wait/stop. " \
-        "go: normal operation (default), wait: don't submit new jobs but let running jobs finish, " \
-        "stop: don't submit new jobs AND kill any running jobs. " \
-        "Example: --semaphore bd:stop,hidr:wait,seekr:go")
-
+        "where stage is any configured stage name and value is go/wait/stop. " \
+        "go: normal operation (default), wait: don't submit new jobs but let "\
+        "running jobs finish, stop: don't submit new jobs AND kill any running "\
+        "jobs. Example: --semaphore stage1:stop,stage2:wait. --force_overwrite "\
+        "and --benchmark not allowed for 'stop' semaphore in a given stage, "\
+        "if one desires to launch a stage with --force_overwrite or --benchmark "\
+        "at a later time, set semaphore to 'wait' for that stage.")
+    argparser.add_argument(
+        "-r", "--resources", dest="resources", 
+        metavar="STAGE_CONTROL", type=str, default=None,
+        help="Control stage resource assignments. Format: 'stage:value,"\
+        "stage:value,...' where stage is any configured stage name and value "\
+        "is the name of the resource as defined in the seekrflow input JSON file "\
+        "or in the user's .seekrflow_resources.json file. Example: --resources "\
+        "stage1:local,stage2:supercomputerName.")
+    
     args = argparser.parse_args()
     args = vars(args)
     instruction = args["instruction"]
     input_json = args["input_json"]
     model_filename = args["model_filename"]
-    mps = args["MPS"]
     pdb_with_system = args["pdb_with_system"]
-    #parameter_topology_files = args["parameter_topology_files"]
     name = args["name"]
     work_dir = args["work_directory"]
     transfer_before = args["transfer_before"]
-    transfer_from_host_only = args["transfer_from_host_only"]
+    transfer_from_remote_only = args["transfer_from_remote_only"]
     force_rerun = args["force_rerun"]
-    benchmark_mode = args["benchmark_mode"]
-    bd_resource_name = args["bd_resource_name"]
-    hidr_resource_name = args["hidr_resource_name"]
-    seekr_resource_name = args["seekr_resource_name"]
-    
+    benchmark = args["benchmark"]
+    keystrokes_enabled = not args["no_keystrokes"]
+
+
     if pdb_with_system != "":
         #pdb_with_system = os.path.abspath(pdb_with_system)
         assert os.path.exists(pdb_with_system), \
             f"PDB file with system {pdb_with_system} does not exist."
         
-    # Parse semaphore argument
-    semaphore_dict = {"bd": "go", "hidr": "go", "seekr": "go"}
+    # Parse semaphore argument using generic stage names.
+    semaphore_dict = {}
     if args["semaphore"]:
         for item in args["semaphore"].split(","):
             parts = item.strip().split(":")
             if len(parts) != 2:
-                raise ValueError(f"Invalid semaphore format: {item}. Expected 'stage:value'")
+                raise ValueError(
+                    f"Invalid semaphore format: {item}. Expected 'stage:value'")
             stage, value = parts[0].strip(), parts[1].strip()
-            if stage not in ["bd", "hidr", "seekr"]:
-                raise ValueError(f"Invalid stage in semaphore: {stage}. Must be bd, hidr, or seekr")
             if value not in ["go", "wait", "stop"]:
-                raise ValueError(f"Invalid semaphore value: {value}. Must be go, wait, or stop")
+                raise ValueError(
+                    f"Invalid semaphore value: {value}. Must be go, wait, or stop")
             semaphore_dict[stage] = value
     
     # Check for conflicting force_rerun and semaphore="stop"
-    if force_rerun:
-        for stage in force_rerun:
+    if force_rerun is not None:
+        stages_to_check = force_rerun if force_rerun \
+            else list(semaphore_dict.keys())
+        for stage in stages_to_check:
             if semaphore_dict.get(stage) == "stop":
                 raise ValueError(
-                    f"Conflicting options: --force-rerun {stage} and --semaphore {stage}:stop. "
+                    f"Conflicting options: --force-rerun {stage} and "
+                    f"--semaphore {stage}:stop. "
                     "Cannot force rerun a stopped stage.")
+    
+    # Check for conflicting benchmark and semaphore="stop"
+    if benchmark is not None:
+        stages_to_check = benchmark if benchmark \
+            else list(semaphore_dict.keys())
+        for stage in stages_to_check:
+            if semaphore_dict.get(stage) == "stop":
+                raise ValueError(
+                    f"Conflicting options: --benchmark {stage} and "
+                    f"--semaphore {stage}:stop. "
+                    "Cannot benchmark a stopped stage.")
+            
+    # Parse resource assignment argument using generic stage names.
+    resource_dict = {}
+    if args["resources"]:
+        for item in args["resources"].split(","):
+            parts = item.strip().split(":")
+            if len(parts) != 2:
+                raise ValueError(
+                    f"Invalid resources format: {item}. Expected 'stage:value'")
+            stage, value = parts[0].strip(), parts[1].strip()
+            resource_dict[stage] = value
 
     hotshot_mode = False
     src_pdb_filename = None
@@ -319,8 +324,10 @@ def main():
             seekrflow, pdb_with_system)
         
     flow(seekrflow, instruction, src_pdb_filename, transfer_before, 
-         transfer_from_host_only, force_rerun, benchmark_mode, bd_resource_name,
-         hidr_resource_name, seekr_resource_name, semaphore_dict, mps)
+         transfer_from_remote_only, force_rerun, benchmark, 
+         semaphore_dict=semaphore_dict,
+         resource_dict=resource_dict,
+         keystrokes_enabled=keystrokes_enabled)
     
 if __name__ == "__main__":
     main()

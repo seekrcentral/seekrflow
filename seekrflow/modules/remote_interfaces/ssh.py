@@ -22,17 +22,27 @@ def submit_remote_workflow_with_ssh(
         username: str = "",
         password: str = "",
         port: int = 22,
+        private_key_filename: str | None = None,
+        private_key_passphrase: str | None = None,
         ) -> bool:
-    c = fabric.Connection(host=hostname, user=username, port=port,
-                          connect_kwargs={"password": password})
+    connect_kwargs = {}
+    if password:
+        connect_kwargs["password"] = password
+    if private_key_filename:
+        connect_kwargs["key_filename"] = private_key_filename
+    if private_key_passphrase:
+        connect_kwargs["passphrase"] = private_key_passphrase
+    c = fabric.Connection(
+        host=hostname,
+        user=username,
+        port=port,
+        connect_kwargs=connect_kwargs,
+    )
     args_list = []
     for arg in args:
-        if isinstance(arg, str):
-            args_list.append(f"\"{arg}\"")
-        elif isinstance(arg, list):
-            args_list.append(f"[{','.join(map(str, arg))}]")
-        else:
-            args_list.append(f"{arg}")
+        # Use Python literal representation so strings with quotes, dicts,
+        # None, and booleans round-trip safely through python -c.
+        args_list.append(repr(arg))
     if len(args_list) == 1:
         arg_str = "(" + args_list[0] + ",)"
     else:
@@ -75,10 +85,22 @@ def submit_remote_workflow_with_ssh(
             seen_err = len(se)
         
         val = {}
+        # Workflows may print diagnostics before the return payload.
+        # Parse the last non-empty line as the structured return value.
+        lines = [line.strip() for line in so.splitlines() if line.strip()]
         try:
-            val = ast.literal_eval(so)
+            if lines:
+                val = ast.literal_eval(lines[-1])
+            else:
+                val = ast.literal_eval(so)
         except Exception as e:
-            print(f"Error: {e}")
+            stderr_tail = "\n".join(se.splitlines()[-10:])
+            stdout_tail = "\n".join(so.splitlines()[-10:])
+            raise RuntimeError(
+                "Failed to parse remote workflow result via SSH. "
+                f"parse_error={e}. stdout_tail={stdout_tail!r}. "
+                f"stderr_tail={stderr_tail!r}"
+            )
         c.close()
         return val
 
