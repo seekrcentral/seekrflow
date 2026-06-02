@@ -100,7 +100,6 @@ def check_pid_exists(pid: int) -> bool:
     except OSError:
         return False
 
-# TODO: send to local_mp
 def find_latest_state_file(
         root_dir: pathlib.Path, 
         stage: str
@@ -120,7 +119,6 @@ def find_latest_state_file(
     state_files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
     return state_files[0]
 
-# TODO: send to local_mp
 def cleanup_old_state_files(
         root_dir: pathlib.Path, 
         stage: str, 
@@ -1067,8 +1065,10 @@ def force_rerun_stage(
     # First, kill any running process for this stage
     # TODO: for seekr, find_latest_state_file only returns one anchor's state file; remaining
     #  anchor processes are not killed. Fix by iterating all seekr_anchor_*_state_*.json files.
-    state_file = find_latest_state_file(root_directory_path, stage_name)
-    if state_file and state_file.exists():
+    state_dir = get_local_state_dir(root_directory_path)
+    pattern = "seekr_anchor_*_state_*.json" if stage_name == "seekr" else f"{stage_name}_state_*.json"
+    state_files = list(state_dir.glob(pattern))
+    for state_file in state_files:
         try:
             state = LocalProcessState.load(state_file)
             if state.status == "running" and check_pid_exists(state.pid):
