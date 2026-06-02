@@ -280,23 +280,31 @@ Configure the endpoint:
 
     globus-compute-endpoint configure my_seekr_endpoint
 
-At this point, one should modify the file at ~/.globus-compute/my_seekr_endpoint/config.yaml 
+At this point, one should modify the file at ~/.globus-compute/my_seekr_endpoint/user_config_template.yaml.j2 
 in order to properly make full use of the HPC resource's full capabilities.
 
 Here is an example Globus Compute Endpoint configuration file that I used for the NCSA Delta supercomputer:
 
 .. code-block::
+    
+    # Comments here...
 
-    display_name: null
+    endpoint_setup: ''
+
     engine:
-    max_workers_per_node: 2
-    provider:
-        worker_init: "source /path/to/your/.bashrc; conda activate SEEKR2; export OPENMM_CUDA_COMPILER=`which nvcc`"
-        init_blocks: 1
-        max_blocks: 1
-        min_blocks: 0
-        type: LocalProvider
-    type: GlobusComputeEngine
+        type: GlobusComputeEngine
+        max_workers_per_node: 2
+
+        provider:
+            type: LocalProvider
+
+            min_blocks: 0
+            max_blocks: 1
+            init_blocks: 1
+
+            worker_init: 'source /path/to/your/miniforge3/etc/profile.d/conda.sh && mamba activate SEEKR2'
+
+
 
 .. note::
     This configuration applies to the head/login node *before* SLURM/PBS job submission. 
@@ -304,8 +312,8 @@ Here is an example Globus Compute Endpoint configuration file that I used for th
     Globus compute SDK client in seekrflow.
 
 .. note::
-    It may be a better idea to define the OPENMM_CUDA_COMPILER environment variable in your
-    shell initialization file (e.g., ~/.bashrc) rather than in the worker_init command
+    Make sure you have defined the OPENMM_CUDA_COMPILER environment variable in your
+    shell initialization file (e.g., ~/.bashrc) on the remote machine.
 
 Start the endpoint.
 
