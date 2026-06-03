@@ -249,6 +249,9 @@ class StageWorkflow:
         @self.workflow_engine.function_task
         async def run_stage(*args):
             if self.resource_name == "local":
+                # Capture the force-overwrite request before clearing it; it is
+                # a one-shot flag but must still be propagated to run_locally().
+                force_overwrite_now = self.force_overwrite
                 if self.force_overwrite:
                     workload_local_mp.kill_existing_local_stage_processes(
                         self.stage.name, self.model.directory)
@@ -257,7 +260,7 @@ class StageWorkflow:
                 existing_state = workload_local_mp\
                     .check_for_existing_local_processes(
                         self.model.directory, self.stage.name)
-                if existing_state:
+                if existing_state and not force_overwrite_now:
                     # Note: We can't truly "reattach" to a multiprocessing.Process object,
                     # but we can track the PID and monitor/kill it via the state file
                     print(f"  Reattached to {self.stage.name} process (PID: {existing_state.pid})")
@@ -268,7 +271,7 @@ class StageWorkflow:
                         target=workload_local_mp.run_locally,
                         args=(self.model.directory, self.stage.name,),
                         kwargs={
-                            "force_overwrite": self.force_overwrite,
+                            "force_overwrite": force_overwrite_now,
                             "benchmark_mode": self.benchmark_mode,
                         },
                     )
@@ -416,16 +419,48 @@ class StageWorkflow:
                     break
                 if self.resource_name == "local":
                     # TODO: handle anchor and swarm_id args here
-                    status = workload_local_mp.status_local(
-                        self.model.directory, self.stage.index, 
-                        self.stage.name, self.process)
-                    self.last_raw_status = status
-                    # Check if process failed
-                    workload_local_mp\
-                        .check_and_raise_if_process_failed(
-                            self.stage.name, self.process, 
-                            self.model.directory)
+                    process_alive = (
+                        self.process is not None and self.process.is_alive())
+                    try:
+                        status = workload_local_mp.status_local(
+                            self.model.directory, self.stage.index, 
+                            self.stage.name, self.process)
+                    except Exception as e:
+                        # The status check itself failed (e.g. seekr.status
+                        # tried to read a checkpoint that is missing or being
+                        # rewritten by a freshly relaunched force_overwrite
+                        # run). If the run process is still alive this is a
+                        # transient condition: log it and retry next cycle
+                        # rather than letting the exception freeze the monitor.
+                        # If the process is not alive, fall through so the
+                        # failure check below can surface the real error.
+                        if process_alive:
+                            print(f"[local-status] stage {self.stage.name}: "
+                                  f"status check raised (process still alive, "
+                                  f"will retry): {e}")
+                            await asyncio.sleep(POLLING_INTERVAL)
+                            continue
+                        print(f"[local-status] stage {self.stage.name}: status "
+                              f"check raised and process not alive: {e}")
+                        status = None
                     if status is not None:
+                        self.last_raw_status = status
+                    # Check if process failed. This raises with the child's
+                    # error message and traceback (e.g. a missing-checkpoint
+                    # AssertionError that means the stage must be re-run with
+                    # force_overwrite). Translate it into a failed state rather
+                    # than letting it escape and silently freeze the monitor.
+                    try:
+                        workload_local_mp\
+                            .check_and_raise_if_process_failed(
+                                self.stage.name, self.process, 
+                                self.model.directory)
+                    except Exception as e:
+                        self.state = "failed"
+                        self.manager_status = "idle"
+                        print(f"[local-run] stage {self.stage.name} failed:\n"
+                              f"{e}")
+                    if status is not None and self.state != "failed":
                         self.state = status["stage_status"]["state"]
                         self.progress = status["stage_status"]["progress"]
                         manager_status = status["manager_status"]

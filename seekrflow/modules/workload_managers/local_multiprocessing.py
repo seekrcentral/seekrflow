@@ -440,11 +440,21 @@ def status_local(
                 stage_status["notes"] = f"Process {process_state.pid} "\
                     "exited unexpectedly"
                 stage_manager_status["error"] = "Process crashed"
+                if not current_run_alive:
+                    stage_status["state"] = "failed"
+                    stage_status["finished"] = False
         elif process_state.status in ["failed", "killed"]:
             stage_status["notes"] = f"Process {process_state.status}: "\
                 f"{process_state.error}"
             if process_state.status == "failed":
                 stage_manager_status["error"] = process_state.error
+                # Surface a genuine failure so the monitor can react. Guard on
+                # current_run_alive so a stale "failed" record from a prior run
+                # (before a freshly-spawned child writes its own state file)
+                # does not mask an actively running stage.
+                if not current_run_alive:
+                    stage_status["state"] = "failed"
+                    stage_status["finished"] = False
             # DON'T add job to jobs list - these processes are done and 
             # not running, this allows stage_manager_status to be "idle" 
             # so a new run can be submitted
