@@ -4,21 +4,35 @@ tools/make_input.py
 Produce an example input object for a seekrflow calculation.
 """
 
-import json
+import os
 import argparse
-
-from cattrs import unstructure
 
 import seekrflow.modules.base as base
 import seekrflow.modules.structures as structures
 import seekrflow.modules.workflows.structures as workflow_structures
 import seekrflow.modules.parameters_topology_structures as parameters_topology_structures
-import seekrflow.modules.workflows.protein_ligand_seekr2.structures as protein_ligand_seekr2_structures
+import seekrflow.modules.parameterize_workflow as parameterize_workflow_module
+import seekrflow.modules.workflows.workflow as workflow_module
+import seekrflow.modules.workflows.components as components_module
+import seekrflow.modules.workflows.cv_specs as cv_specs_module
+import seekrflow.modules.workflows.anchor_specs as anchor_specs_module
+import seekrflow.modules.workflows.scale_settings as scale_settings_module
+import seekrflow.modules.workflows.stage_procedures as stage_procedures_module
+
+
+def _hostguest_data_directory() -> str:
+    """
+    Locate the seekr3 ``hostguest_files`` data directory (parameter, structure
+    and PQR files for the host-guest test system).
+    """
+    import seekr
+    return os.path.join(
+        os.path.dirname(seekr.__file__), "data", "hostguest_files")
 
 def create_example_seekrflow(ff="amber") -> structures.Seekrflow:
     seekrflow = structures.Seekrflow()
     seekrflow.name = "example_seekrflow"
-    workflow = protein_ligand_seekr2_structures.Protein_ligand_seekr2_workflow()
+    workflow = parameterize_workflow_module.Parameterize_workflow()
     workflow.solvated_system_for_md = workflow_structures.Solvated_system_for_md()
     if ff == "amber":
         workflow.solvated_system_for_md.parameters_topology = parameters_topology_structures.Amber_parameters_topology()
@@ -46,12 +60,10 @@ def create_example_seekrflow(ff="amber") -> structures.Seekrflow:
     workflow.receptor_indices = []
     workflow.receptor_pqr_filename_for_bd = ""
     workflow.ligand_pqr_filename_for_bd = ""
-    workflow.parameterizer_information = protein_ligand_seekr2_structures.Parameterizer_information()
-    workflow.mmvt_settings = protein_ligand_seekr2_structures.MMVT_seekr_settings()
-    workflow.hidr_settings = protein_ligand_seekr2_structures.HIDR_settings_metaD()
+    workflow.parameterizer_information = parameterize_workflow_module.Parameterizer_information()
     workflow.md_settings = workflow_structures.MD_settings()
     workflow.bd_settings = workflow_structures.BD_settings()
-    seekrflow.workflow = workflow
+    seekrflow.parameterize_workflow = workflow
     physical_attributes = base.Physical_attributes()
     physical_attributes.temperature = 298.15
     physical_attributes.hydrogen_mass = 3.0
@@ -78,10 +90,138 @@ def create_example_seekrflow(ff="amber") -> structures.Seekrflow:
     delta_slurm_resource.transfer_settings.remote_collection_id = "MY_REMOTE_COLLECTION_ID"
     seekrflow.run_settings.resources = [delta_slurm_resource]
     #anvil_slurm_resource = structures.Slurm_resource()
-    seekrflow.run_settings.bd_stage_resource_name = "local"
-    seekrflow.run_settings.hidr_stage_resource_name = "delta"
-    seekrflow.run_settings.seekr_stage_resource_name = "delta"
+    seekrflow.run_settings.stage_resource_name = {
+        "bd": "local",
+        "hidr": "delta",
+        "seekr": "delta",
+    }
     
+    return seekrflow
+
+def create_host_guest_example_seekrflow(
+        work_directory: str,
+        provide_pqr_filenames: bool = True
+        ) -> structures.Seekrflow:
+    """
+    Build a complete, runnable seekrflow input for the beta-cyclodextrin /
+    1-butanol host-guest test system, using the composable ``Workflow``.
+
+    Mirrors the seekr3 host-guest example (``seekr/tools/make_input.py``):
+    a distance collective variable between the host (resname MGO) and guest
+    (resname APN), spherical anchors from 0.05 to 1.35 nm, an
+    equilibration -> metadynamics-seeding -> MMVT -> Brownian-dynamics
+    procedure, and two Brownian-dynamics rigid bodies (one per molecule).
+    """
+    hostguest_directory = _hostguest_data_directory()
+    prmtop_filename = os.path.join(hostguest_directory, "hostguest.parm7")
+    solvated_pdb_filename = os.path.join(
+        hostguest_directory, "hostguest_at0.5.pdb")
+    receptor_pqr_filename = os.path.join(
+        hostguest_directory, "hostguest_receptor.pqr")
+    ligand_pqr_filename = os.path.join(
+        hostguest_directory, "hostguest_ligand.pqr")
+
+    # Components: the host and the guest, each a small molecule selected by
+    #  residue name. Classifying them as small molecules means their
+    #  Brownian-dynamics PQRs are automatically emitted with one residue per
+    #  atom.
+    receptor_component = components_module.Small_molecule_component(
+        name="host",
+        selector=components_module.Selector_by_resname(resname="MGO"))
+    ligand_component = components_module.Small_molecule_component(
+        name="guest",
+        selector=components_module.Selector_by_resname(resname="APN"))
+    components = components_module.Components(
+        members=[receptor_component, ligand_component])
+
+    # Collective variable: host-guest center-of-mass distance.
+    cv_spec = cv_specs_module.Com_com_distance_CV_spec(
+        name="distance_host_guest",
+        group1_selection_name="host",
+        group2_selection_name="guest",
+        min_value=0.0,
+        max_value=1.4)
+
+    # Anchors: 14 evenly-spaced anchors spanning the collective-variable range
+    #  (0.0 - 1.4 nm), i.e. cell centers at 0.05, 0.15, ..., 1.35 nm. The bound
+    #  state (the anchor containing the starting structure) and the bulk state
+    #  (the outermost anchor) are determined automatically during prepare.
+    anchor_spec = anchor_specs_module.Uniform_anchor_spec(n_anchors=14)
+
+    # Procedure: equilibrate -> seed anchors by metadynamics -> MMVT -> BD.
+    equilibration = stage_procedures_module.Explicit_stage_procedure(
+        name="equilibration",
+        items=[stage_procedures_module.MD_stage_item(
+            name="equilibration",
+            run_minimization=True,
+            ensemble="NVT",
+            sampling=stage_procedures_module.Conventional_sampling_spec(
+                heat_ramp_temperatures=[100.0, 298.15],
+                heat_ramp_step_interval=1000),
+            completion=stage_procedures_module
+                .Number_of_steps_completion_spec(number_of_steps=100000),
+        )])
+    seeding = stage_procedures_module.Seeding_stage_procedure(
+        name="metadynamics",
+        method="metadynamics",
+        cv_names=["distance_host_guest"])
+    mmvt = stage_procedures_module.MMVT_stage_procedure(
+        name="MMVT",
+        ensemble="NVT",
+        number_of_steps=250000)
+    bd = stage_procedures_module.BD_stage_procedure(
+        name="bd",
+        n_trajectories_per_output=1000,
+        n_steps_per_output=100000,
+        number_of_trajectories=10000)
+    procedure = stage_procedures_module.Composite_stage_procedure(
+        name="full_procedure",
+        procedures=[equilibration, seeding, mmvt, bd])
+
+    # Per-scale settings: molecular dynamics + Brownian dynamics.
+    md_scale = scale_settings_module.Molecular_dynamics_scale_settings()
+    md_scale.system.parameters_topology = \
+        parameters_topology_structures.Amber_parameters_topology()
+    md_scale.system.parameters_topology.prmtop_filename = prmtop_filename
+    md_scale.system.solvated_pdb = solvated_pdb_filename
+    md_scale.platform_type = "cuda"
+
+    bd_scale = scale_settings_module.Brownian_dynamics_scale_settings()
+    bd_scale.engine = "browndye"
+    bd_scale.binary_directory = ""
+    bd_scale.system.molecules = [
+        scale_settings_module.BD_molecule(
+            name="beta-cyclodextrin",
+            component_names=["host"],
+            pqr_filename=receptor_pqr_filename if provide_pqr_filenames else "",
+            role="receptor"),
+        scale_settings_module.BD_molecule(
+            name="1-butanol",
+            component_names=["guest"],
+            pqr_filename=ligand_pqr_filename if provide_pqr_filenames else "",
+            role="ligand"),
+    ]
+
+    workflow = workflow_module.Workflow(
+        components=components,
+        cv_specs=[cv_spec],
+        anchor_spec=anchor_spec,
+        procedure=procedure,
+        scale_settings=[md_scale, bd_scale])
+
+    seekrflow = structures.Seekrflow()
+    seekrflow.name = "host_guest_example"
+    seekrflow.workflow = workflow
+    # The host-guest system is pre-parameterized, so no parameterize step.
+    seekrflow.parameterize_workflow = None
+    physical_attributes = base.Physical_attributes()
+    physical_attributes.temperature = 298.15
+    physical_attributes.ionic_strength = 0.15
+    physical_attributes.hydrogen_mass = 3.0
+    physical_attributes.random_seed = 111
+    seekrflow.physical_attributes = physical_attributes
+    seekrflow.work_directory = work_directory
+    seekrflow.run_settings = structures.Run_settings()
     return seekrflow
 
 if __name__ == "__main__":
@@ -89,11 +229,21 @@ if __name__ == "__main__":
     argparser.add_argument(
         "input_file", metavar="INPUT_FILE", type=str, 
         help="The name of the input JSON file to generate.")
+    argparser.add_argument(
+        "-s", "--system", dest="system", type=str, default="parameterize",
+        choices=["parameterize", "hostguest"],
+        help="Which example input to generate: 'parameterize' (default) for "
+             "the parameterize-side example, or 'hostguest' for the complete "
+             "prepared host-guest workflow.")
     argspace = argparser.parse_args()
     args = vars(argspace)
     json_filename = args["input_file"]
-    seekrflow = create_example_seekrflow()
-    seekrflow_dict = unstructure(seekrflow)
-    json_dump = json.dumps(seekrflow_dict, indent=4)
-    with open(json_filename, "w") as file:
-        file.write(json_dump)
+    if args["system"] == "hostguest":
+        provide_pqr_filenames = False
+        work_directory = "~/tmp/seekrflow_hostguest_example/"
+        seekrflow = create_host_guest_example_seekrflow(
+            provide_pqr_filenames=provide_pqr_filenames,
+            work_directory=work_directory)
+    else:
+        seekrflow = create_example_seekrflow()
+    seekrflow.save(json_filename)

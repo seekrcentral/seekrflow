@@ -40,6 +40,10 @@ class Physical_attributes:
         default=1.008,
         validator=validators.instance_of(float),
         )
+    random_seed: int = field(
+        default=0,
+        validator=validators.instance_of(int),
+        )
 
 def initialize_ref_indices(
         ref_indices: str

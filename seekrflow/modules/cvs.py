@@ -15,7 +15,7 @@ import seekr2.modules.common_base as seekr2_base
 
 import seekrflow.modules.base as base
 import seekrflow.modules.workflows.structures as workflow_structures
-import seekrflow.modules.workflows.protein_ligand_seekr2.structures as protein_ligand_seekr2_structures
+import seekrflow.modules.parameterize_workflow as parameterize_workflow_module
 
 # NOTE: These are valid for SEEKR2 - will need to change for SEEKR3
 # TODO: move these to base?
@@ -109,7 +109,7 @@ def alpha_carbon_selection_within_cutoff(
     return alpha_carbon_indices
 
 def get_receptor_ligand_com_com_selections(
-        workflow: protein_ligand_seekr2_structures.Protein_ligand_seekr2_workflow,
+        workflow: parameterize_workflow_module.Parameterize_workflow,
         complex_pdb_filename: str,
         alpha_carbon_ligand_threshold: float = 0.6,
         ) -> typing.Tuple[list, list]:

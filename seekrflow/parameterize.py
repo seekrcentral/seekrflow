@@ -34,10 +34,10 @@ def make_ligand_sdf_file(
     Make an SDF file for the ligand from the PDB file.
     """
     ligand_pdb_filename = os.path.join(
-        param_directory, seekrflow.workflow.get_parameterizer_ligand_pdb_filename())
+        param_directory, seekrflow.parameterize_workflow.get_parameterizer_ligand_pdb_filename())
     ligand_sdf_filename = os.path.join(
-        param_directory, seekrflow.workflow.get_parameterizer_default_sdf_filename())
-    seekrflow.workflow.set_parameterizer_sdf_filename(ligand_sdf_filename)
+        param_directory, seekrflow.parameterize_workflow.get_parameterizer_default_sdf_filename())
+    seekrflow.parameterize_workflow.set_parameterizer_sdf_filename(ligand_sdf_filename)
     assert os.path.exists(ligand_pdb_filename), \
         f"Ligand PDB file {ligand_pdb_filename} does not exist."
     # Create input and output molecule streams
@@ -65,18 +65,12 @@ def parameterize(
     as a starting structure, attempt to parameterize the file based on input 
     parameters.
     """
-    assert seekrflow.workflow.type \
-        in ["protein_ligand_seekr2", "protein_ligand_membrane_seekr2",
-            "protein_protein_seekr2"], \
-        "Only the following workflows are supported at this time:"\
-        " - protein-ligand"\
-        " - protein-ligand-membrane"\
-        " - protein-protein"\
-        " supported at this time for parameterize.py"
+    assert seekrflow.parameterize_workflow.type == "parameterize_workflow", \
+        "parameterize.py requires a parameterize_workflow."
     work_param_dir = seekrflow.get_parameterize_directory()
     param_dir = structures.PARAMETERIZE
     curdir = os.getcwd()
-    pdb_with_system = seekrflow.workflow.get_parameterizer_pdb_filename()
+    pdb_with_system = seekrflow.parameterize_workflow.get_parameterizer_pdb_filename()
     work_copy_pdb_with_system = os.path.join(
         seekrflow.work_directory, os.path.basename(pdb_with_system))
     copyfile(pdb_with_system, work_copy_pdb_with_system)
@@ -89,61 +83,61 @@ def parameterize(
     print(f"Saving noh file at: {work_copy_pdb_with_system_noh}")
     traj_noh.save(work_copy_pdb_with_system_noh)
 
-    seekrflow.workflow.set_parameterizer_pdb_filename(os.path.basename(work_copy_pdb_with_system))
-    ligand_sdf_filename = seekrflow.workflow.get_parameterizer_sdf_filename()
+    seekrflow.parameterize_workflow.set_parameterizer_pdb_filename(os.path.basename(work_copy_pdb_with_system))
+    ligand_sdf_filename = seekrflow.parameterize_workflow.get_parameterizer_sdf_filename()
     if ligand_sdf_filename != "":
         work_copy_ligand_sdf = os.path.join(
-            work_param_dir, seekrflow.workflow.get_parameterizer_default_sdf_filename())
+            work_param_dir, seekrflow.parameterize_workflow.get_parameterizer_default_sdf_filename())
         copyfile(ligand_sdf_filename, work_copy_ligand_sdf)
     os.chdir(seekrflow.work_directory)
-    seekrflow.workflow.split_molecules(param_dir)
-    if seekrflow.workflow.has_small_molecule_ligand():
+    seekrflow.parameterize_workflow.split_molecules(param_dir)
+    if seekrflow.parameterize_workflow.has_small_molecule_ligand():
         if ligand_sdf_filename == "":
             make_ligand_sdf_file(seekrflow)
 
     if seekrflow.parameterizer is None:
         # TODO: logger?
         print("seekrflow.parameterizer is None, Skipping full parameterization.")
-        if (seekrflow.workflow.solvated_system_for_md is not None) \
-                and (seekrflow.workflow.solvated_system_for_md.solvated_pdb != "") \
-                and (seekrflow.workflow.solvated_system_for_md.parameters_topology is not None):
-            parmed_complex = seekrflow.workflow.solvated_system_for_md.parameters_topology\
-                .make_parmed(seekrflow.workflow.solvated_system_for_md.solvated_pdb, 
+        if (seekrflow.parameterize_workflow.solvated_system_for_md is not None) \
+                and (seekrflow.parameterize_workflow.solvated_system_for_md.solvated_pdb != "") \
+                and (seekrflow.parameterize_workflow.solvated_system_for_md.parameters_topology is not None):
+            parmed_complex = seekrflow.parameterize_workflow.solvated_system_for_md.parameters_topology\
+                .make_parmed(seekrflow.parameterize_workflow.solvated_system_for_md.solvated_pdb, 
                              seekrflow.work_directory)
-            if seekrflow.workflow.bd_settings is not None:
-                seekrflow.workflow.write_component_pqr_files(parmed_complex, structures.PARAMETERIZE)
+            if seekrflow.parameterize_workflow.bd_settings is not None:
+                seekrflow.parameterize_workflow.write_component_pqr_files(parmed_complex, structures.PARAMETERIZE)
         else:
             print("No solvated system for MD is set; cannot write PQR files. "
                   "There is nothing for parameterize.py to do.")
         os.chdir(curdir)
         return None, None
     else:
-        assert seekrflow.workflow.solvated_system_for_md is None,\
+        assert seekrflow.parameterize_workflow.solvated_system_for_md is None,\
             "Attempting to parameterize a system that has already be parameterized:"\
             "the solvated_system_for_md should be set to None for parameterize.py."
         serialized_system_xml, output_pdb_filename \
-            = seekrflow.workflow.create_complex(
+            = seekrflow.parameterize_workflow.create_complex(
                 seekrflow.parameterizer,
                 seekrflow.physical_attributes,
-                seekrflow.workflow.md_settings,
+                seekrflow.parameterize_workflow.md_settings,
                 param_dir
             )
         starting_pdb_basename = os.path.basename(output_pdb_filename)
-        seekrflow.workflow.solvated_system_for_md = workflow_structures.Solvated_system_for_md()
-        seekrflow.workflow.solvated_system_for_md.solvated_pdb \
+        seekrflow.parameterize_workflow.solvated_system_for_md = workflow_structures.Solvated_system_for_md()
+        seekrflow.parameterize_workflow.solvated_system_for_md.solvated_pdb \
             = os.path.join(param_dir, starting_pdb_basename)
         system_basename = os.path.basename(serialized_system_xml)
-        seekrflow.workflow.solvated_system_for_md.parameters_topology \
+        seekrflow.parameterize_workflow.solvated_system_for_md.parameters_topology \
             = parameters_topology_structures.Openmm_system(
                 system_filename=os.path.join(structures.PARAMETERIZE, system_basename),)
-        parmed_complex = seekrflow.workflow.solvated_system_for_md.parameters_topology.make_parmed(
+        parmed_complex = seekrflow.parameterize_workflow.solvated_system_for_md.parameters_topology.make_parmed(
             output_pdb_filename)
-        if seekrflow.workflow.has_small_molecule_ligand():
+        if seekrflow.parameterize_workflow.has_small_molecule_ligand():
             # Need to resolve the ligand indices between the old and new parmed structures
-            assert seekrflow.workflow.ligand_indices is not None, \
+            assert seekrflow.parameterize_workflow.ligand_indices is not None, \
                 "ligand_indices is None; cannot resolve ligand indices in new structure."
             ligand_resname = None
-            for lig_index in seekrflow.workflow.ligand_indices:
+            for lig_index in seekrflow.parameterize_workflow.ligand_indices:
                 lig_atom_name = work_copy.topology.atom(lig_index).name
                 if ligand_resname is None:
                     lig_resname = work_copy.topology.atom(lig_index).residue.name
@@ -158,10 +152,10 @@ def parameterize(
                     new_ligand_indices.append(atom.idx)
             assert len(new_ligand_indices) > 0, \
                 "No ligand indices found in new parmed structure; cannot resolve ligand indices."
-            seekrflow.workflow.ligand_indices = new_ligand_indices
+            seekrflow.parameterize_workflow.ligand_indices = new_ligand_indices
         
-        if seekrflow.workflow.bd_settings is not None:
-            seekrflow.workflow.write_component_pqr_files(parmed_complex, structures.PARAMETERIZE)
+        if seekrflow.parameterize_workflow.bd_settings is not None:
+            seekrflow.parameterize_workflow.write_component_pqr_files(parmed_complex, structures.PARAMETERIZE)
         os.chdir(curdir)
         return serialized_system_xml, output_pdb_filename
 
@@ -222,17 +216,17 @@ def main() -> None:
         seekrflow = structures.Seekrflow()
 
     if pdb_with_system == "":
-        pdb_with_system = seekrflow.workflow.get_parameterizer_pdb_filename()
+        pdb_with_system = seekrflow.parameterize_workflow.get_parameterizer_pdb_filename()
     else:
-        seekrflow.workflow.set_parameterizer_pdb_filename(pdb_with_system)
+        seekrflow.parameterize_workflow.set_parameterizer_pdb_filename(pdb_with_system)
 
-    assert os.path.exists(seekrflow.workflow.get_parameterizer_pdb_filename()), \
-        f"Input PDB file {seekrflow.workflow.get_parameterizer_pdb_filename()} does not exist."
+    assert os.path.exists(seekrflow.parameterize_workflow.get_parameterizer_pdb_filename()), \
+        f"Input PDB file {seekrflow.parameterize_workflow.get_parameterizer_pdb_filename()} does not exist."
 
     if ligand_sdf_file != "":
         assert os.path.exists(ligand_sdf_file), \
             "Nonexistent ligand SDF file: {}".format(ligand_sdf_file)
-        seekrflow.workflow.parameterizer_information.ligand_sdf_file\
+        seekrflow.parameterize_workflow.parameterizer_information.ligand_sdf_file\
             = ligand_sdf_file
     if work_dir == "":
         work_dir = seekrflow.work_directory

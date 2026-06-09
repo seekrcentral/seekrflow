@@ -17,12 +17,13 @@ from cattrs.strategies import include_subclasses
 
 import seekrflow.modules.base as base
 import seekrflow.modules.workflows.structures as workflow_structures
-import seekrflow.modules.workflows.protein_ligand_seekr2.structures \
-    as protein_ligand_seekr2_structures
-import seekrflow.modules.workflows.protein_ligand_membrane_seekr2.structures \
-    as protein_ligand_membrane_seekr2_structures
-import seekrflow.modules.workflows.protein_protein_seekr2.structures \
-    as protein_protein_seekr2_structures
+import seekrflow.modules.workflows.workflow as workflow_module
+import seekrflow.modules.workflows.components as components_module
+import seekrflow.modules.workflows.cv_specs as cv_specs_module
+import seekrflow.modules.workflows.anchor_specs as anchor_specs_module
+import seekrflow.modules.workflows.scale_settings as scale_settings_module
+import seekrflow.modules.workflows.stage_procedures as stage_procedures_module
+import seekrflow.modules.parameterize_workflow as parameterize_workflow_module
 import seekrflow.modules.parameterize_structures as parameterizer_structures
 import seekrflow.modules.parameters_topology_structures \
     as parameters_topology_structures
@@ -33,6 +34,33 @@ WORK = "work"
 PARAMETERIZE = "parameterize"
 ROOT = "root"
 RUN = "run"
+
+
+def _register_workflow_subclasses(converter: cattrs.Converter) -> None:
+    """
+    Register all polymorphic base classes used by the generic Workflow so that
+    cattrs (un)structures them as their concrete subtypes.
+
+    Registration order matters: ``include_subclasses`` eagerly bakes structure
+    hooks for each subclass's fields at registration time, so any union that is
+    NESTED inside another must be registered BEFORE its container. The order
+    below therefore proceeds from the most deeply nested unions outward.
+    """
+    # Selectors are nested inside components.
+    include_subclasses(components_module.Selector_base, converter)
+    include_subclasses(components_module.Component_base, converter)
+    include_subclasses(components_module.Group_selector_base, converter)
+    include_subclasses(cv_specs_module.CV_spec_base, converter)
+    include_subclasses(anchor_specs_module.Anchor_spec_base, converter)
+    include_subclasses(scale_settings_module.Scale_settings_base, converter)
+    # Sampling / restraint / completion specs are nested inside stage items,
+    #  which are in turn nested inside stage procedures.
+    include_subclasses(stage_procedures_module.Sampling_spec_base, converter)
+    include_subclasses(stage_procedures_module.Restraint_spec_base, converter)
+    include_subclasses(stage_procedures_module.Completion_spec_base, converter)
+    include_subclasses(stage_procedures_module.Stage_item_base, converter)
+    include_subclasses(stage_procedures_module.Stage_procedure_base, converter)
+    return
 
 @define
 class Remote_interface_base:
@@ -63,11 +91,11 @@ class Remote_interface_ssh(Remote_interface_base):
         default=22,
         validator=validators.optional(validators.instance_of(int)),
     )
-    private_key_filename: str = field(
+    private_key_filename: str | None = field(
         default=None,
         validator=validators.optional(validators.instance_of(str)),
     )
-    private_key_passphrase: str = field(
+    private_key_passphrase: str | None = field(
         default=None,
         validator=validators.optional(validators.instance_of(str)),
     )
@@ -377,24 +405,17 @@ class Seekrflow:
     #  attributes within the parameterize attribute. Backwards compatibility to
     #  structure version 1.1 was not implemented because seekrflow was not yet 
     #  released. Removed parsl-related attributes.
-    # NOTE: structure version 1.3 implemented changes for the migration to seekr3,
-    #  which included general stage names in the  Run_settings object, inclusion of
-    #  mps in some resources. Backwards compatibility to structure version 1.2 
-    #  should not need to be implemented because the software will be forked, and
-    #  support for seekr2 will be maintained in seekrflow 2.x versions.
-    structure_version: str = field(default="1.3",
+    # NOTE: structure version 1.4 implemented the generalized, composable
+    #  Workflow (single prepare-side Workflow object replacing the per-system
+    #  workflow classes) and split the parameterize-side state into a separate
+    #  parameterize_workflow object. Added random_seed to physical_attributes.
+    # Backwards compatibility to earlier versions was not implemented because 
+    # not needed.
+    structure_version: str = field(default="1.4",
                                  validator=validators.instance_of(str))
-    # TODO: new workflows for seekr3.
-    workflow: protein_ligand_seekr2_structures.Protein_ligand_seekr2_workflow \
-         | protein_ligand_membrane_seekr2_structures.Protein_ligand_membrane_seekr2_workflow \
-         | protein_protein_seekr2_structures.Protein_protein_seekr2_workflow \
-        = field(
-        default=Factory(protein_ligand_seekr2_structures.Protein_ligand_seekr2_workflow),
-        validator=validators.instance_of(
-            protein_ligand_seekr2_structures.Protein_ligand_seekr2_workflow \
-            | protein_ligand_membrane_seekr2_structures.Protein_ligand_membrane_seekr2_workflow \
-            | protein_protein_seekr2_structures.Protein_protein_seekr2_workflow
-            ),
+    workflow: workflow_module.Workflow = field(
+        default=Factory(workflow_module.Workflow),
+        validator=validators.instance_of(workflow_module.Workflow),
         )
     physical_attributes: base.Physical_attributes = field(
         default=Factory(base.Physical_attributes),
@@ -408,6 +429,13 @@ class Seekrflow:
         default=None,
         validator=validators.optional(validators.instance_of(str))
     )
+    # TODO: resolve these two
+    parameterize_workflow: \
+        parameterize_workflow_module.Parameterize_workflow | None = field(
+        default=Factory(parameterize_workflow_module.Parameterize_workflow),
+        validator=validators.optional(validators.instance_of(
+            parameterize_workflow_module.Parameterize_workflow)),
+        )
     parameterizer: parameterizer_structures.Parameterizer | None = field(
         default=None,
         validator=validators.optional(validators.instance_of(parameterizer_structures.Parameterizer)),
@@ -427,7 +455,7 @@ class Seekrflow:
         converter: cattrs.Converter = cattrs.Converter()
         # Make sure that interited data classes are unstructured as their
         #  subtypes.
-        include_subclasses(protein_ligand_seekr2_structures.HIDR_settings_base, converter)
+        _register_workflow_subclasses(converter)
         include_subclasses(Transfer_settings_base, converter)
         include_subclasses(Resource_base, converter)
         seekrflow_dict: dict = converter.unstructure(self)
@@ -489,19 +517,19 @@ class Seekrflow:
         """
         Handle the ligand indices string and set the ligand_indices attribute.
         """
-        if self.workflow.has_small_molecule_ligand():
+        if self.parameterize_workflow.has_small_molecule_ligand():
             # If the ligand resname is not provided, use the one from the seekrflow input
             if ligand_resname == "":
-                ligand_resname = self.workflow.parameterizer_information.ligand_resname
+                ligand_resname = self.parameterize_workflow.parameterizer_information.ligand_resname
             else:
-                self.workflow.parameterizer_information.ligand_resname = ligand_resname
+                self.parameterize_workflow.parameterizer_information.ligand_resname = ligand_resname
             
             # if the ligand indices are provided, use them preferentially
             if ligand_indices != "":
                 ligand_indices = base.initialize_ref_indices(ligand_indices)
             else:
-                if len(self.workflow.ligand_indices) > 0:
-                    ligand_indices = self.workflow.ligand_indices
+                if len(self.parameterize_workflow.ligand_indices) > 0:
+                    ligand_indices = self.parameterize_workflow.ligand_indices
                 elif ligand_resname != "":
                     ligand_indices = base.get_ligand_indices(pdb_filename, ligand_resname)
                 else:
@@ -509,14 +537,14 @@ class Seekrflow:
                     # in a molecular complex?
                     ligand_indices = []
             if len(ligand_indices) > 0:
-                self.workflow.ligand_indices = ligand_indices
+                self.parameterize_workflow.ligand_indices = ligand_indices
             else:
-                if len(self.workflow.ligand_indices) == 0:
-                    if self.workflow.parameterizer_information.ligand_resname != "":
-                        self.workflow.ligand_indices = base.get_ligand_indices(
-                            self.workflow.parameterizer_information\
+                if len(self.parameterize_workflow.ligand_indices) == 0:
+                    if self.parameterize_workflow.parameterizer_information.ligand_resname != "":
+                        self.parameterize_workflow.ligand_indices = base.get_ligand_indices(
+                            self.parameterize_workflow.parameterizer_information\
                                 .receptor_ligand_pdb_filename, 
-                            self.workflow.parameterizer_information.ligand_resname)
+                            self.parameterize_workflow.parameterizer_information.ligand_resname)
                     else:
                         raise Exception("No ligand indices provided and no ligand "
                                         "residue name specified.")
@@ -529,8 +557,8 @@ class Seekrflow:
         """
         Handle the receptor indices string and set the receptor_indices attribute.
         """
-        if self.workflow.has_small_molecule_ligand():
-            ligand_indices = self.workflow.ligand_indices
+        if self.parameterize_workflow.has_small_molecule_ligand():
+            ligand_indices = self.parameterize_workflow.ligand_indices
             assert len(ligand_indices) > 0, \
                 "Cannot determine receptor indices without ligand " \
                 "indices."
@@ -538,7 +566,7 @@ class Seekrflow:
                 pdb_filename,
                 ligand_indices
             )
-            self.workflow.receptor_indices = receptor_indices
+            self.parameterize_workflow.receptor_indices = receptor_indices
 
         return
     
@@ -557,9 +585,9 @@ class Seekrflow:
             for f in parameter_topology_files:
                 ext = os.path.splitext(f)[-1].lower()
                 if ext == ".prmtop" or ext == ".parm7":
-                    self.workflow.solvated_system_for_md.parameters_topology \
+                    self.parameterize_workflow.solvated_system_for_md.parameters_topology \
                         = parameters_topology_structures.Amber_parameters_topology()
-                    self.workflow.solvated_system_for_md.parameters_topology\
+                    self.parameterize_workflow.solvated_system_for_md.parameters_topology\
                         .prmtop_filename = f
                     break
         elif ".psf" in file_extensions:
@@ -568,13 +596,13 @@ class Seekrflow:
             for f in parameter_topology_files:
                 ext = os.path.splitext(f)[-1].lower()
                 if ext == ".psf":
-                    self.workflow.solvated_system_for_md.parameters_topology \
+                    self.parameterize_workflow.solvated_system_for_md.parameters_topology \
                         = parameters_topology_structures.Charmm_parameters_topology()
-                    self.workflow.solvated_system_for_md.parameters_topology\
+                    self.parameterize_workflow.solvated_system_for_md.parameters_topology\
                         .psf_filename = f
                 else:
                     other_parameter_files.append(f)
-            self.workflow.solvated_system_for_md.parameters_topology\
+            self.parameterize_workflow.solvated_system_for_md.parameters_topology\
                 .param_filename_list = other_parameter_files
         elif ".top" in file_extensions or ".gro" in file_extensions:
             raise NotImplementedError(
@@ -584,9 +612,9 @@ class Seekrflow:
             for f in parameter_topology_files:
                 ext = os.path.splitext(f)[-1].lower()
                 if ext == ".xml":
-                    self.workflow.solvated_system_for_md.parameters_topology \
+                    self.parameterize_workflow.solvated_system_for_md.parameters_topology \
                         = parameters_topology_structures.Openmm_system()
-                    self.workflow.solvated_system_for_md.parameters_topology\
+                    self.parameterize_workflow.solvated_system_for_md.parameters_topology\
                         .system_filename = f
                     break
         else:
@@ -655,7 +683,7 @@ def load_seekrflow(
     with open(filename, "r") as file:
         json_string: str = json.load(file)
     converter: cattrs.Converter = cattrs.Converter()
-    include_subclasses(protein_ligand_seekr2_structures.HIDR_settings_base, converter)
+    _register_workflow_subclasses(converter)
     include_subclasses(Transfer_settings_base, converter)
     include_subclasses(Resource_base, converter)
     seekrflow_obj: Seekrflow = converter.structure(json_string, Seekrflow)
@@ -692,18 +720,15 @@ def assign_default_prepare_settings(
         seekrflow: Seekrflow
         ) -> None:
     """
-    Assign default prepare settings to the seekrflow structure.
+    Assign default parameterize-side settings to the seekrflow structure.
     """
-    seekrflow.workflow.parameterizer_information = \
-        protein_ligand_seekr2_structures.Parameterizer_information()
-    seekrflow.workflow.hidr_settings = protein_ligand_seekr2_structures\
-        .HIDR_settings_metaD()
-    seekrflow.workflow.mmvt_settings = protein_ligand_seekr2_structures\
-        .MMVT_seekr_settings()
-    seekrflow.workflow.mmvt_settings.anchor_radius_list \
-        = [0.15, 0.225, 0.3, 0.375, 0.45, 0.525, 0.6, 0.7, 0.8, 0.9, \
-           1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0, 2.2, \
-            2.4, 2.6, 2.8]
-    seekrflow.workflow.md_settings = workflow_structures.MD_settings()
-    seekrflow.workflow.bd_settings = workflow_structures.BD_settings()
+    seekrflow.parameterize_workflow = \
+        parameterize_workflow_module.Parameterize_workflow()
+    seekrflow.parameterize_workflow.parameterizer_information = \
+        parameterize_workflow_module.Parameterizer_information()
+    seekrflow.parameterize_workflow.md_settings = \
+        workflow_structures.MD_settings()
+    seekrflow.parameterize_workflow.bd_settings = \
+        workflow_structures.BD_settings()
     seekrflow.physical_attributes = base.Physical_attributes()
+    return

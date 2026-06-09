@@ -219,10 +219,27 @@ def site_finder_monte_carlo(
     ligand COM or a location behind the ligand if an opening is provided).
     """
     traj = mdtraj.load(pdb_filename)
+    return site_finder_monte_carlo_from_traj(traj, ligand_indices)
+
+def site_finder_monte_carlo_from_traj(
+        traj: mdtraj.Trajectory,
+        ligand_indices: list[int],
+        inner_cutoff: float = INNER_DISTANCE_CUTOFF,
+        outer_cutoff: float = OUTER_DISTANCE_CUTOFF,
+        random_seed: int | None = None,
+        ) -> list[int]:
+    """
+    In-memory variant of site_finder_monte_carlo. Operates on an already-loaded
+    trajectory (so callers that already hold a structure do not pay for a
+    reload) and accepts an optional random_seed so the stochastic search is
+    reproducible.
+    """
+    if random_seed is not None:
+        np.random.seed(random_seed)
     current_atoms = atom_selection_within_cutoff(
-        traj, ligand_indices, INNER_DISTANCE_CUTOFF)
+        traj, ligand_indices, inner_cutoff)
     possible_atoms = atom_selection_within_cutoff(
-        traj, ligand_indices, OUTER_DISTANCE_CUTOFF)
+        traj, ligand_indices, outer_cutoff)
     new_atom_indices, final_COM = adjust_to_tolerance(
         traj, ligand_indices, current_atoms, possible_atoms)
     return new_atom_indices

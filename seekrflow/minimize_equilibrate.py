@@ -22,15 +22,9 @@ def minimize_equilibrate(
         ) -> str:
     startdir = os.path.abspath(os.getcwd())
     os.chdir(seekrflow.work_directory)
-    assert seekrflow.workflow.type \
-        in ["protein_ligand_seekr2", "protein_ligand_membrane_seekr2",
-            "protein_protein_seekr2"], \
-        "Only the following workflows are supported at this time:"\
-        " - protein-ligand"\
-        " - protein-ligand-membrane"\
-        " - protein-protein"\
-        " supported at this time for parameterize.py"
-    equilibrated_pdb_filename = seekrflow.workflow.minimize_equilibrate(
+    assert seekrflow.parameterize_workflow.type == "parameterize_workflow", \
+        "minimize_equilibrate.py requires a parameterize_workflow."
+    equilibrated_pdb_filename = seekrflow.parameterize_workflow.minimize_equilibrate(
         seekrflow.physical_attributes, unsolvated_pdb_filename=reference_pdb_filename)
     os.chdir(startdir)
     return equilibrated_pdb_filename
@@ -89,19 +83,19 @@ def main() -> None:
         seekrflow = structures.Seekrflow()
 
     if pdb_with_system == "":
-        pdb_with_system = seekrflow.workflow.get_parameterizer_pdb_filename()
+        pdb_with_system = seekrflow.parameterize_workflow.get_parameterizer_pdb_filename()
     else:
-        seekrflow.workflow.set_parameterizer_pdb_filename(pdb_with_system)
+        seekrflow.parameterize_workflow.set_parameterizer_pdb_filename(pdb_with_system)
 
-    assert os.path.exists(seekrflow.workflow.get_parameterizer_pdb_filename()), \
-        f"Input PDB file {seekrflow.workflow.get_parameterizer_pdb_filename()} does not exist."
+    assert os.path.exists(seekrflow.parameterize_workflow.get_parameterizer_pdb_filename()), \
+        f"Input PDB file {seekrflow.parameterize_workflow.get_parameterizer_pdb_filename()} does not exist."
 
     if work_dir == "":
         work_dir = seekrflow.work_directory
     seekrflow.make_work_directory(work_dir)
     seekrflow.handle_ligand_indices(ligand_indices, ligand_resname, pdb_with_system)
     equilibrated_pdb_filename = minimize_equilibrate(seekrflow)
-    seekrflow.workflow.solvated_system_for_md.solvated_pdb = equilibrated_pdb_filename
+    seekrflow.parameterize_workflow.solvated_system_for_md.solvated_pdb = equilibrated_pdb_filename
     structures.save_new_seekrflow(seekrflow, EQUIL_SEEKRFLOW_GLOB, EQUIL_SEEKRFLOW_BASE,
                                   directory=seekrflow.work_directory)
     

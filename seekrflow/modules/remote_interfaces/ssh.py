@@ -4,15 +4,12 @@ modules/remote_interfaces/globus_compute_sdk.py
 Provide workflow submission with globus compute SDK.
 """
 
-import sys
 import ast
 import shlex
-import select
 import typing
 import fabric
 import inspect
 from io import StringIO
-import seekrflow.modules.prettify as prettify
 
 def submit_remote_workflow_with_ssh(
         name: str,

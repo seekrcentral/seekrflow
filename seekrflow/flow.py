@@ -8,65 +8,64 @@ includes preparation and running.
 import os
 import argparse
 
-import seekrflow.modules.parameters_topology_structures as parameters_topology_structures
+#import seekrflow.modules.parameters_topology_structures as parameters_topology_structures
 import seekrflow.modules.structures as structures
-import seekrflow.modules.workflows.structures as workflow_structures
 import seekrflow.modules.seekr_input as seekr_input
 import seekrflow.modules.seekr_run as seekr_run
 
+"""
 def assign_seekrflow_defaults(
         seekrflow: structures.Seekrflow,
         pdb_with_system: str
         ) -> None:
-    """
+    ""
     Assign default values to any missing seekrflow parameters.
-    """
-    if seekrflow.workflow.solvated_system_for_md is None:
-        starting_pdb_basename = "complex-equil.pdb"
-        seekrflow.workflow.solvated_system_for_md = \
-            workflow_structures.Solvated_system_for_md()
-        src_pdb_filename = os.path.join(structures.PARAMETERIZE, starting_pdb_basename)
-        seekrflow.workflow.solvated_system_for_md.solvated_pdb = src_pdb_filename
-        seekrflow.workflow.solvated_system_for_md.parameters_topology \
-            = parameters_topology_structures.Openmm_system()
-        starting_system_basename = "complex.xml"
-        src_system_filename = os.path.join(
-            structures.PARAMETERIZE, starting_system_basename)
-        seekrflow.workflow.solvated_system_for_md.parameters_topology\
-            .system_filename = src_system_filename
-    elif seekrflow.workflow.solvated_system_for_md.solvated_pdb == "":
-        starting_pdb_basename = "complex-equil.pdb"
-        src_pdb_filename = os.path.join(structures.PARAMETERIZE, starting_pdb_basename)
-        seekrflow.workflow.solvated_system_for_md.solvated_pdb = src_pdb_filename
-        seekrflow.workflow.solvated_system_for_md.parameters_topology \
-            = parameters_topology_structures.Openmm_system()
-        starting_system_basename = "complex.xml"
-        src_system_filename = os.path.join(
-            structures.PARAMETERIZE, starting_system_basename)
-        seekrflow.workflow.solvated_system_for_md.parameters_topology\
-            .system_filename = src_system_filename
+    ""
+    # TODO: extract from generic scale settings object instead of MD hardcode
+    md_system = seekrflow.workflow.get_md_settings().system
+    param_wf = seekrflow.parameterize_workflow
+    if md_system.solvated_pdb == "":
+        # Pull from the parameterize output if present, else fall back to the
+        #  standard parameterize-directory outputs.
+        if param_wf is not None \
+                and param_wf.solvated_system_for_md is not None \
+                and param_wf.solvated_system_for_md.solvated_pdb != "":
+            md_system.solvated_pdb = \
+                param_wf.solvated_system_for_md.solvated_pdb
+            md_system.parameters_topology = \
+                param_wf.solvated_system_for_md.parameters_topology
+        else:
+            starting_pdb_basename = "complex-equil.pdb"
+            md_system.solvated_pdb = os.path.join(
+                structures.PARAMETERIZE, starting_pdb_basename)
+            md_system.parameters_topology \
+                = parameters_topology_structures.Openmm_system()
+            md_system.parameters_topology.system_filename = os.path.join(
+                structures.PARAMETERIZE, "complex.xml")
+        src_pdb_filename = md_system.solvated_pdb
     else:
         if pdb_with_system != "":
-            seekrflow.workflow.solvated_system_for_md.solvated_pdb = pdb_with_system
-        src_pdb_filename = seekrflow.workflow.solvated_system_for_md.solvated_pdb
+            md_system.solvated_pdb = pdb_with_system
+        src_pdb_filename = md_system.solvated_pdb
     return src_pdb_filename
 
 def assign_seekrflow_pdb_with_system(
         seekrflow: structures.Seekrflow,
         pdb_with_system: str
         ) -> None:
-    """
+    ""
     Assign the provided PDB file with the solvated system to the seekrflow
     structure.
-    """
-    seekrflow.workflow.solvated_system_for_md.solvated_pdb = pdb_with_system
+    ""
+    seekrflow.workflow.get_md_settings().system.solvated_pdb = pdb_with_system
     assert os.path.exists(pdb_with_system), \
         f"Expected PDB file {pdb_with_system} to exist."
+"""
 
 def flow(
         seekrflow: structures.Seekrflow, 
         instruction: str,
-        src_pdb_filename: str | None = None,
+        #src_pdb_filename: str | None = None,
         transfer_before: str | None = None,
         transfer_from_remote_only: str | None = None,
         force_rerun: list[str] | None = None,
@@ -74,43 +73,41 @@ def flow(
         semaphore_dict: dict[str, str] | None = None,
         resource_dict: dict[str, str] | None = None,
         keystrokes_enabled: bool = True,
+        skip_checks: bool = False,
         ) -> None:
     """
     Execute the instructed seekrflow stage.
     """
+    assert instruction in ["any", "prepare", "run"], \
+        f"Invalid instruction '{instruction}'. Options are: 'any', 'prepare', 'run'."
+    # TODO: add parameterize as an option?
+    doing_prepare = False
+    doing_run = False
     if instruction == "any":
-        # Automatically perform the next step
-        print("Preparing system...")
-        seekr_input.prepare_model(seekrflow, src_pdb_filename)
-        # Run
-        print("Running system...")
-        seekr_run.run_model(
-            seekrflow, transfer_before, transfer_from_remote_only, force_rerun,
-            benchmark_stage=benchmark_stage, stage_resource_dict=resource_dict, 
-            semaphore_dict=semaphore_dict,
-            keystrokes_enabled=keystrokes_enabled)
-        return
-        
+        doing_prepare = True
+        doing_run = True
     elif instruction == "prepare":
-        # Prepare the system
-        print("Preparing system...")
-        seekr_input.prepare_model(seekrflow, src_pdb_filename)
-        return
-        
+        doing_prepare = True
     elif instruction == "run":
-        # Run the system
+        doing_run = True
+        
+    if doing_prepare:
+        print("Preparing system...")
+        #seekr_input.prepare_model(seekrflow, src_pdb_filename)
+        # If force_rerun is not None and either empty (force all) 
+        # or contains "prepare", then set prepare_force_overwrite to True
+        prepare_force_overwrite = force_rerun is not None \
+            and (not force_rerun or "prepare" in force_rerun)
+        seekr_input.prepare_model(
+            seekrflow, force_overwrite=prepare_force_overwrite, 
+            skip_checks=skip_checks)
+    if doing_run:
         print("Running system...")
         seekr_run.run_model(
             seekrflow, transfer_before, transfer_from_remote_only, force_rerun,
             benchmark_stage=benchmark_stage, stage_resource_dict=resource_dict, 
             semaphore_dict=semaphore_dict,
             keystrokes_enabled=keystrokes_enabled)
-        return
-        
-    else:
-        raise ValueError(
-            f"Invalid instruction '{instruction}'. Options are: 'any', "
-            f"'prepare', 'run'.")
     
 def main():
     argparser = argparse.ArgumentParser(
@@ -134,10 +131,11 @@ def main():
         "so-called 'hotshot mode', where an existing model.xml file can be run "\
         "easily without needing to prepare a full seekrflow structure. Note that "\
         "if this is provided, the seekrflow JSON file must not be provided.")
-    argparser.add_argument(
-        "-p", "--pdb_with_system", dest="pdb_with_system", 
-        metavar="PDB_WITH_SYSTEM", type=str, default="",
-        help="Path to the input PDB file that contains the solvated molecules.")
+    # TODO: still needed?
+    #argparser.add_argument(
+    #    "-p", "--pdb_with_system", dest="pdb_with_system", 
+    #    metavar="PDB_WITH_SYSTEM", type=str, default="",
+    #    help="Path to the input PDB file that contains the solvated molecules.")
     argparser.add_argument(
         "-n", "--name", dest="name",
         metavar="NAME", type=str, default="",
@@ -202,13 +200,20 @@ def main():
         "is the name of the resource as defined in the seekrflow input JSON file "\
         "or in the user's .seekrflow_resources.json file. Example: --resources "\
         "stage1:local,stage2:supercomputerName.")
+    argparser.add_argument(
+        "-s", "--skip_checks", dest="skip_checks", default=False, 
+        help="By default, pre-simulation checks will be run after the "\
+        "preparation is complete, and if the checks fail, the SEEKR "\
+        "model will not be saved. This argument bypasses those "\
+        "checks and allows the model to be generated anyways.", 
+        action="store_true")    
     
     args = argparser.parse_args()
     args = vars(args)
     instruction = args["instruction"]
     input_json = args["input_json"]
     model_filename = args["model_filename"]
-    pdb_with_system = args["pdb_with_system"]
+    #pdb_with_system = args["pdb_with_system"]
     name = args["name"]
     work_dir = args["work_directory"]
     transfer_before = args["transfer_before"]
@@ -216,12 +221,12 @@ def main():
     force_rerun = args["force_rerun"]
     benchmark = args["benchmark"]
     keystrokes_enabled = not args["no_keystrokes"]
+    skip_checks = args["skip_checks"]
 
-
-    if pdb_with_system != "":
-        #pdb_with_system = os.path.abspath(pdb_with_system)
-        assert os.path.exists(pdb_with_system), \
-            f"PDB file with system {pdb_with_system} does not exist."
+    #if pdb_with_system != "":
+    #    #pdb_with_system = os.path.abspath(pdb_with_system)
+    #    assert os.path.exists(pdb_with_system), \
+    #        f"PDB file with system {pdb_with_system} does not exist."
         
     # Parse semaphore argument using generic stage names.
     semaphore_dict = {}
@@ -271,7 +276,7 @@ def main():
             resource_dict[stage] = value
 
     hotshot_mode = False
-    src_pdb_filename = None
+    #src_pdb_filename = None
     if input_json == "":
         # Create default seekrflow structure
         seekrflow = structures.Seekrflow()
@@ -282,24 +287,21 @@ def main():
                 "In hotshot mode, only 'run' instruction is allowed."
             assert os.path.exists(model_filename), \
                 f"Model file {model_filename} does not exist."
-            # Generate a unique name based on the directory's inode and device
-            model_dirname = os.path.dirname(model_filename)
-            if model_dirname == "":
-                model_dirname = os.path.abspath(os.curdir)
-            st = os.stat(model_dirname)
             if name != "":
                 seekrflow.name = name
             else:
+                # Generate a unique name based on the directory's inode and device
+                model_dirname = os.path.dirname(model_filename)
+                if model_dirname == "":
+                    model_dirname = os.path.abspath(os.curdir)
+                st = os.stat(model_dirname)
                 seekrflow.name = "hotshot_" + str(st.st_dev) + "_" + str(st.st_ino)
             print("Running in hotshot mode with seekrflow name:", seekrflow.name)
             seekrflow.work_directory = None
             seekrflow.root_directory = os.path.dirname(
                 os.path.abspath(model_filename))
             structures.try_to_load_resources_json(seekrflow)
-            seekrflow.workflow.solvated_system_for_md = \
-                workflow_structures.Solvated_system_for_md()
-            seekrflow.workflow.solvated_system_for_md.solvated_pdb \
-                = pdb_with_system
+            
     else:
         assert model_filename == "", \
             "If input JSON file is provided, model filename must not be provided."
@@ -311,23 +313,29 @@ def main():
         
     if not hotshot_mode:
         if work_dir is None:
-            work_dir = seekrflow.work_directory
+            work_dir = os.path.abspath(
+                os.path.expanduser(seekrflow.work_directory))
         seekrflow.make_work_directory(work_dir)
         curdir = os.getcwd()
         os.chdir(seekrflow.work_directory)
-        src_pdb_filename = assign_seekrflow_defaults(
-            seekrflow, pdb_with_system)
+        #src_pdb_filename = assign_seekrflow_defaults(
+        #    seekrflow, pdb_with_system)
         os.chdir(curdir)
+    
+    # TODO: still needed? If so, retrieve using a more general
+    # scale mechanism - or from an object that retrieves solvated system PDB
+    #if pdb_with_system != "":
+    #    assign_seekrflow_pdb_with_system(
+    #        seekrflow, pdb_with_system)
         
-    if pdb_with_system != "":
-        assign_seekrflow_pdb_with_system(
-            seekrflow, pdb_with_system)
-        
-    flow(seekrflow, instruction, src_pdb_filename, transfer_before, 
+    #flow(seekrflow, instruction, src_pdb_filename, transfer_before, 
+    flow(seekrflow, instruction, transfer_before, 
          transfer_from_remote_only, force_rerun, benchmark, 
          semaphore_dict=semaphore_dict,
          resource_dict=resource_dict,
-         keystrokes_enabled=keystrokes_enabled)
+         keystrokes_enabled=keystrokes_enabled,
+         skip_checks=skip_checks,
+         )
     
 if __name__ == "__main__":
     main()
