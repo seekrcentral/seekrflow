@@ -181,7 +181,7 @@ def parameterize_and_check_complex(
                         'ewaldErrorTolerance': base.PME_TOL, 
                         'constraints': openmm_app.HBonds, 
                         'rigidWater': True, 
-                        'hydrogenMass': physical_attributes.hydrogen_mass * unit.amu}
+                        'hydrogenMass': md_settings.hydrogen_mass * unit.amu}
     periodic_forcefield_kwargs = {'nonbondedMethod': openmm_app.PME}
     if physical_attributes.pressure is not None:
         barostat = openmm.MonteCarloBarostat(

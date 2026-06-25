@@ -1,0 +1,168 @@
+{
+    "procedures": [
+        {
+            "name": "equilibration_globular_protein",
+            "type": "explicit",
+            "items": [
+                {
+                    "name": "stage_1",
+                    "scope": "unpartitioned",
+                    "type": "md",
+                    "run_minimization": true,
+                    "checkpoint_interval": 10000,
+                    "ensemble": "NVT",
+                    "sampling": {
+                        "type": "conventional",
+                        "heat_ramp_temperatures": [
+                            100.0, 110.0, 120.0, 130.0,
+                            140.0, 150.0, 160.0, 170.0,
+                            180.0, 190.0, 200.0, 210.0,
+                            220.0, 230.0, 240.0, 250.0,
+                            260.0, 270.0, 280.0, 290.0,
+                            300.0
+                        ],
+                        "heat_ramp_step_interval": 10000
+                    },
+                    "restraints": [
+                        {
+                            "type": "backbone_positional_restraint",
+                            "reference_structure_name": "reference",
+                            "selection_name": "backbone",
+                            "force_constant": 100.0
+                        },
+                        {
+                            "type": "sidechain_positional_restraint",
+                            "reference_structure_name": "reference",
+                            "selection_name": "sidechain",
+                            "force_constant": 100.0
+                        },
+                        {
+                            "type": "nonprotein_positional_restraint",
+                            "reference_structure_name": "reference",
+                            "selection_name": "nonprotein",
+                            "force_constant": 100.0
+                        }
+                    ],
+                    "completion": {
+                        "type": "number_of_steps",
+                        "number_of_steps": 210000
+                    },
+                },
+                {
+                    "name": "stage_2",
+                    "scope": "unpartitioned",
+                    "type": "md",
+                    "run_minimization": false,
+                    "checkpoint_interval": 10000,
+                    "ensemble": "NVT",
+                    "sampling": {
+                        "type": "conventional"
+                    },
+                    "restraints": [
+                        {
+                            "type": "backbone_positional_restraint",
+                            "reference_structure_name": "reference",
+                            "selection_name": "backbone",
+                            "force_constant": 100.0
+                        },
+                        {
+                            "type": "sidechain_positional_restraint",
+                            "reference_structure_name": "reference",
+                            "selection_name": "sidechain",
+                            "force_constant": 100.0
+                        },
+                        {
+                            "type": "nonprotein_positional_restraint",
+                            "reference_structure_name": "reference",
+                            "selection_name": "nonprotein",
+                            "force_constant": 100.0
+                        }
+                    ],
+                    "completion": {
+                        "type": "number_of_steps",
+                        "number_of_steps": 100000
+                    },
+                },
+                {
+                    "name": "stage_3",
+                    "scope": "unpartitioned",
+                    "type": "md",
+                    "run_minimization": false,
+                    "checkpoint_interval": 10000,
+                    "ensemble": "NVT",
+                    "sampling": {
+                        "type": "conventional",
+                        "heat_ramp_temperatures": [
+                            100.0, 110.0, 120.0, 130.0,
+                            140.0, 150.0, 160.0, 170.0,
+                            180.0, 190.0, 200.0, 210.0,
+                            220.0, 230.0, 240.0, 250.0,
+                            260.0, 270.0, 280.0, 290.0,
+                            300.0
+                        ],
+                        "heat_ramp_step_interval": 10000
+                    },
+                    "restraints": [
+                        {
+                            "type": "backbone_positional_restraint",
+                            "reference_structure_name": "reference",
+                            "selection_name": "backbone",
+                            "force_constant": 10.0
+                        },
+                        {
+                            "type": "sidechain_positional_restraint",
+                            "reference_structure_name": "reference",
+                            "selection_name": "sidechain",
+                            "force_constant": 10.0
+                        },
+                        {
+                            "type": "nonprotein_positional_restraint",
+                            "reference_structure_name": "reference",
+                            "selection_name": "nonprotein",
+                            "force_constant": 10.0
+                        }
+                    ],
+                    "completion": {
+                        "type": "number_of_steps",
+                        "number_of_steps": 210000
+                    },
+                },
+                {
+                    "name": "stage_4",
+                    "scope": "unpartitioned",
+                    "type": "md",
+                    "run_minimization": false,
+                    "checkpoint_interval": 10000,
+                    "ensemble": "NVT",
+                    "sampling": {
+                        "type": "conventional"
+                    },
+                    "restraints": [
+                        {
+                            "type": "backbone_positional_restraint",
+                            "reference_structure_name": "reference",
+                            "selection_name": "backbone",
+                            "force_constant": 10.0
+                        },
+                        {
+                            "type": "sidechain_positional_restraint",
+                            "reference_structure_name": "reference",
+                            "selection_name": "sidechain",
+                            "force_constant": 10.0
+                        },
+                        {
+                            "type": "nonprotein_positional_restraint",
+                            "reference_structure_name": "reference",
+                            "selection_name": "nonprotein",
+                            "force_constant": 10.0
+                        }
+                    ],
+                    "completion": {
+                        "type": "number_of_steps",
+                        "number_of_steps": 100000
+                    },
+                },
+            ]
+        }
+    ]
+}

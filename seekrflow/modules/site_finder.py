@@ -234,6 +234,7 @@ def site_finder_monte_carlo_from_traj(
     reload) and accepts an optional random_seed so the stochastic search is
     reproducible.
     """
+    assert len(ligand_indices) > 0, "No ligand indices."
     if random_seed is not None:
         np.random.seed(random_seed)
     current_atoms = atom_selection_within_cutoff(

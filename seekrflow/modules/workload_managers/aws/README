@@ -1,0 +1,211 @@
+## AWS CLOUD README ##
+
+Notes for how to get the Cloud platform set up for submitting a SEEKR calc
+
+# 1. Log into AWS with Cloudbank
+# Log into AWS from Cloudbank
+
+# In terminal:
+
+aws login
+
+# 2. Create an S3 bucket for seekrflow data
+# In browser pointed to AWS account console, find S3 
+
+# Click "Create Bucket". Work through the best bucket options - probably just use defaults.
+
+# 3. Upload docker image to AWS Elastic Container Registry (ECR)
+# Get to seekrflow docker directory and see what images are in docker:
+
+cd ~/seekrflow/docker
+docker images
+
+#They will be named 'seekr-base:latest' and 'seekr-engines-bd:latest'.
+
+#Assign variables, for example:
+
+REPOSITORY_NAME=seekr-engines-bd
+TAG=latest
+
+#My region is 'us-west-2'
+
+REGION=us-west-2
+
+#Get our AWS account ID:
+
+AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+
+# Create the ECR repository
+
+aws ecr create-repository \
+  --repository-name $REPOSITORY_NAME \
+  --region $REGION
+  
+# Log docker into ECR
+
+aws ecr get-login-password --region $REGION \
+  | docker login \
+    --username AWS \
+    --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com
+    
+# You want to see "Login Succeeded". See your docker images again.
+  
+LOCAL_IMAGE=seekr-engines-bd:latest
+
+# Create the full ECR image name
+
+ECR_IMAGE=$AWS_ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/$REPOSITORY_NAME:$TAG
+
+# Create a link to the same local image but with another name:
+
+docker tag $LOCAL_IMAGE $ECR_IMAGE
+
+# You can now see the new one with "docker images". Push to AWS.
+
+docker push $ECR_IMAGE
+
+AWS now has the docker image logged in the Elastic Container Registry.
+
+# 4. Create the Batch compute environment.
+
+# Next, we will create the batch "machinery" that will run the image on GPU EC2 instances.
+# Define the necessary variables:
+
+# Use the exact image URI you pushed to ECR:
+IMAGE_URI=$ECR_IMAGE
+
+# In my case:
+
+IMAGE_URI=628031635908.dkr.ecr.us-west-2.amazonaws.com/seekr-engines-bd:latest
+
+COMPUTE_ENV_NAME=seekrflow-gpu-compute
+JOB_QUEUE_NAME=seekrflow-gpu-queue
+
+JOB_DEF_STAGE=seekrflow-job-stage
+
+# Make sure the right Identity and Access Management (IAM) roles.
+# First, the batch service-linked role
+
+aws iam create-service-linked-role --aws-service-name batch.amazonaws.com
+
+# Create the Elastic Container Service (ECS) instance role
+
+
+cat > ecs-instance-trust-policy.json <<'EOF'
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "ec2.amazonaws.com"
+      },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}
+EOF
+
+# Then create the role
+# I had to ask CloudBank to create this role for me.
+# Then I had to ask them to create the profile and add
+# The role to the instance profile
+
+aws iam add-role-to-instance-profile \
+  --instance-profile-name ecsInstanceRole \
+  --role-name ecsInstanceRole
+
+# 4.2 Find VPC and subnets
+
+VPC_ID=$(aws ec2 describe-vpcs \
+  --region $REGION \
+  --filters Name=is-default,Values=true \
+  --query 'Vpcs[0].VpcId' \
+  --output text)
+
+echo $VPC_ID
+
+SUBNET_IDS=$(aws ec2 describe-subnets \
+  --region $REGION \
+  --filters Name=vpc-id,Values=$VPC_ID \
+  --query 'Subnets[*].SubnetId' \
+  --output text)
+  
+echo $SUBNET_IDS
+
+SECURITY_GROUP_ID=$(aws ec2 describe-security-groups \
+  --region $REGION \
+  --filters Name=vpc-id,Values=$VPC_ID Name=group-name,Values=default \
+  --query 'SecurityGroups[0].GroupId' \
+  --output text)
+  
+echo $SECURITY_GROUP_ID
+
+# 4.3 Create the Batch Compute Environment
+
+COMPUTE_ENV_NAME=seekrflow-gpu-compute
+JOB_QUEUE_NAME=seekrflow-gpu-queue
+
+cat > compute-environment.json <<EOF
+{
+  "computeEnvironmentName": "${COMPUTE_ENV_NAME}",
+  "type": "MANAGED",
+  "state": "ENABLED",
+  "computeResources": {
+    "type": "EC2",
+    "allocationStrategy": "BEST_FIT_PROGRESSIVE",
+    "minvCpus": 0,
+    "maxvCpus": 32,
+    "desiredvCpus": 0,
+    "instanceTypes": [
+      "g4dn.xlarge",
+      "g5.xlarge",
+      "p3.2xlarge"
+    ],
+    "subnets": [
+$(echo $SUBNET_IDS | awk '{for (i=1;i<=NF;i++) printf "      \"%s\"%s\n", $i, (i<NF?",":"")}')
+    ],
+    "securityGroupIds": [
+      "${SECURITY_GROUP_ID}"
+    ],
+    "instanceRole": "ecsInstanceRole",
+    "ec2Configuration": [
+      {
+        "imageType": "ECS_AL2_NVIDIA"
+      }
+    ]
+  }
+}
+EOF
+
+aws batch create-compute-environment \
+  --region $REGION \
+  --cli-input-json file://compute-environment.json
+  
+aws batch describe-compute-environments \
+  --region $REGION \
+  --compute-environments $COMPUTE_ENV_NAME \
+  --query 'computeEnvironments[0].{status:status,statusReason:statusReason,state:state,type:type}'
+  
+You should see something like:
+status: VALID
+state: ENABLED
+If it says INVALID, inspect the statusReason
+
+# 4.4 Create the Batch Job Queue
+
+aws batch create-job-queue \
+  --region $REGION \
+  --job-queue-name $JOB_QUEUE_NAME \
+  --state ENABLED \
+  --priority 1 \
+  --compute-environment-order order=1,computeEnvironment=$COMPUTE_ENV_NAME
+  
+aws batch describe-job-queues \
+  --region $REGION \
+  --job-queues $JOB_QUEUE_NAME \
+  --query 'jobQueues[0].{jobQueueName:jobQueueName,state:state,status:status,statusReason:statusReason}'
+  
+You want to see:
+status: VALID
+state: ENABLED

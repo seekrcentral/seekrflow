@@ -36,10 +36,6 @@ class Physical_attributes:
         default=0.15,
         validator=validators.instance_of(float),
         )
-    hydrogen_mass: float = field(
-        default=1.008,
-        validator=validators.instance_of(float),
-        )
     random_seed: int = field(
         default=0,
         validator=validators.instance_of(int),

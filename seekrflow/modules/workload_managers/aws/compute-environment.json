@@ -1,0 +1,32 @@
+{
+  "computeEnvironmentName": "seekrflow-gpu-compute",
+  "type": "MANAGED",
+  "state": "ENABLED",
+  "computeResources": {
+    "type": "EC2",
+    "allocationStrategy": "BEST_FIT_PROGRESSIVE",
+    "minvCpus": 0,
+    "maxvCpus": 32,
+    "desiredvCpus": 0,
+    "instanceTypes": [
+      "g4dn.xlarge",
+      "g5.xlarge",
+      "p3.2xlarge"
+    ],
+    "subnets": [
+      "subnet-01b3632c925ca0e27",
+      "subnet-05c81dd3bf4e62b17",
+      "subnet-051b9aa49bae021b5",
+      "subnet-06f0127fd333e8e5e"
+    ],
+    "securityGroupIds": [
+      "sg-0305933d8dff1dc4e"
+    ],
+    "instanceRole": "arn:aws:iam::628031635908:instance-profile/ecsInstanceRole",
+    "ec2Configuration": [
+      {
+        "imageType": "ECS_AL2_NVIDIA"
+      }
+    ]
+  }
+}

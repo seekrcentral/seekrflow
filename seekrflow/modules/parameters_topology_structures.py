@@ -26,13 +26,17 @@ class Amber_parameters_topology:
     type: typing.Literal["Amber"] = "Amber"
     prmtop_filename: str = field(default="",
                                 validator=validators.instance_of(str))
+    inpcrd_filename: None | str = field(default=None,
+                                validator=validators.optional(
+                                    validators.instance_of(str)))
     
     def same_parameters(
             self, 
             other: "Parameters_topology"
             ) -> bool:
         assert self.type == other.type, "Type mismatch."
-        if self.prmtop_filename == other.prmtop_filename:
+        if (self.prmtop_filename == other.prmtop_filename) \
+                and (self.inpcrd_filename == other.inpcrd_filename):
             return True
         else:
             return False
@@ -50,6 +54,12 @@ class Amber_parameters_topology:
         anchor_prmtop_full_path = os.path.join(dest_directory,
                                             prmtop_basename)
         copyfile(os.path.expanduser(self.prmtop_filename), anchor_prmtop_full_path)
+        if self.inpcrd_filename is not None:
+            inpcrd_basename = os.path.basename(self.inpcrd_filename)
+            anchor_inpcrd_full_path = os.path.join(dest_directory,
+                                                inpcrd_basename)
+            copyfile(os.path.expanduser(self.inpcrd_filename), anchor_inpcrd_full_path)
+            new_md_parameters_topology.inpcrd_filename = inpcrd_basename
         new_md_parameters_topology.prmtop_filename = prmtop_basename
         return
     
@@ -63,7 +73,9 @@ class Amber_parameters_topology:
         """
         assert self.prmtop_filename != "", "prmtop_filename must be defined."
         prmtop_full_path = os.path.join(directory, self.prmtop_filename)
-        if pdb_filename is None:
+        if self.inpcrd_filename is not None:
+            structure = parmed.load_file(prmtop_full_path, xyz=self.inpcrd_filename)
+        elif pdb_filename is None:
             structure = parmed.load_file(prmtop_full_path)
         else:
             structure = parmed.load_file(prmtop_full_path, xyz=pdb_filename)
