@@ -209,3 +209,58 @@ aws batch describe-job-queues \
 You want to see:
 status: VALID
 state: ENABLED
+
+# 4.5 Create the generic job definition
+
+cat > job-definition-stage.json <<EOF
+{
+  "jobDefinitionName": "${JOB_DEF_STAGE}",
+  "type": "container",
+  "containerProperties": {
+    "image": "${IMAGE_URI}",
+    "resourceRequirements": [
+      {
+        "type": "GPU",
+        "value": "1"
+      },
+      {
+        "type": "VCPU",
+        "value": "4"
+      },
+      {
+        "type": "MEMORY",
+        "value": "24000"
+      }
+    ],
+    "environment": [
+      {
+        "name": "SEEKRFLOW_STAGE",
+        "value": "generic"
+      },
+      {
+        "name": "SEEKRFLOW_S3_PREFIX",
+        "value": "s3://seekrflow-data-${ACCOUNT_ID}-${REGION}-an/REPLACE_ME_PREFIX"
+      },
+      {
+        "name": "SEEKRFLOW_ANCHOR_INDEX",
+        "value": "0"
+      }
+    ],
+    "command": [
+      "bash",
+      "-lc",
+      "python -m seekr.run --stage \$SEEKRFLOW_STAGE --s3-prefix \$SEEKRFLOW_S3_PREFIX --anchor-index \$SEEKRFLOW_ANCHOR_INDEX"
+    ],
+    "logConfiguration": {
+      "logDriver": "awslogs"
+    }
+  },
+  "platformCapabilities": [
+    "EC2"
+  ]
+}
+EOF
+
+aws batch register-job-definition \
+  --region $REGION \
+  --cli-input-json file://job-definition-hidr.json

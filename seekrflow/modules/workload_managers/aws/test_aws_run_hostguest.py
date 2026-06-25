@@ -8,6 +8,8 @@ What is needed before running this script:
 1. AWS account through Cloudbank (Or just have one yourself).
 2. Have created an S3 bucket. Assumed to be named f"seekrflow-data-{ACCOUNT_ID}-{REGION}-an"
 3. The docker image named "seekr-engines-bd" with tag "latest" pushed to the ECR
+4. A batch compute environment named "seekrflow-gpu-compute"
+5. A batch queue named "seekrflow-gpu-queue"
 """
 
 REGION = "us-west-2"
