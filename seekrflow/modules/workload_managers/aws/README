@@ -263,4 +263,4 @@ EOF
 
 aws batch register-job-definition \
   --region $REGION \
-  --cli-input-json file://job-definition-hidr.json
+  --cli-input-json file://job-definition-stage.json
