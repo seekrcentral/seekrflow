@@ -136,7 +136,6 @@ Sampling_spec = (
     # | RAMD_sampling_spec
 )
 
-
 # ======================================================================
 #  Restraint specs (reference selections by name).
 # ======================================================================
@@ -625,6 +624,40 @@ class Equilibration_globular_stage_procedure(Stage_procedure_base):
                 ))
         return _chain(items, input_stage_name)
 
+#@define
+#class Seeding_method_input:
+#    type: typing.Literal["base"] = "base"
+
+@define
+class Steered_seeding_method_input: #(Seeding_method_input):
+    """
+    A steered MD input specification.
+    """
+    type: typing.Literal["steered"] = "steered"
+    force_constant: float = field(
+        default=10000.0, validator=validators.instance_of(float))
+    velocity: float = field(
+        default=1.0, validator=validators.instance_of(float))
+
+@define
+class Metadynamics_seeding_method_input: #(Seeding_method_input):
+    """
+    A metadynamics input specification.
+    """
+    type: typing.Literal["metadynamics"] = "metadynamics"
+    bias_factor: float = field(
+        default=10.0, validator=validators.instance_of(float))
+    gaussian_height: float = field(
+        default=0.5, validator=validators.instance_of(float))
+    gaussian_width: float = field(
+        default=0.1, validator=validators.instance_of(float))
+    steps_per_update: int = field(
+        default=250, validator=validators.instance_of(int))
+    number_of_points: int = field(
+        default=101, validator=validators.instance_of(int))
+
+Seeding_method_input = Steered_seeding_method_input \
+                     | Metadynamics_seeding_method_input
 
 @define
 class Seeding_stage_procedure(Stage_procedure_base):
@@ -637,9 +670,12 @@ class Seeding_stage_procedure(Stage_procedure_base):
     type: typing.Literal["seeding"] = "seeding"
     # TODO: implement additional per-method parameters - this will
     #  be objects like Sampling_spec.
-    method: str = field(
-        default="metadynamics",
-        validator=validators.in_(["metadynamics", "steered"]))
+    #method: str = field(
+    #    default="metadynamics",
+    #    validator=validators.in_(["metadynamics", "steered"]))
+    method_input: Seeding_method_input = field(
+        default=Factory(Metadynamics_seeding_method_input),
+        validator=validators.instance_of(Seeding_method_input))
     cv_names: list[str] = field(
         default=Factory(list),
         validator=validators.deep_iterable(
@@ -659,11 +695,20 @@ class Seeding_stage_procedure(Stage_procedure_base):
             input_stage_name: str = INITIAL,
             ) -> list[Resolved_stage_item]:
         reporter_name = f"{self.name}_anchor_reporter"
-        if self.method == "metadynamics":
+        if self.method_input.type == "metadynamics":
             sampling: Sampling_spec = Metadynamics_sampling_spec(
-                cv_names=list(self.cv_names))
+                cv_names=list(self.cv_names), bias_factor=self.method_input.bias_factor,
+                gaussian_height=self.method_input.gaussian_height,
+                gaussian_width=self.method_input.gaussian_width,
+                steps_per_update=self.method_input.steps_per_update,
+                number_of_points=self.method_input.number_of_points)
+        elif self.method_input.type == "steered":
+            sampling = Steered_sampling_spec(
+                cv_names=list(self.cv_names),
+                force_constant=self.method_input.force_constant,
+                velocity=self.method_input.velocity)
         else:
-            sampling = Steered_sampling_spec(cv_names=list(self.cv_names))
+            raise ValueError(f"Unknown seeding method type: {self.method_input.type}")
         seed_stage = MD_stage_item(
             name=f"{self.name}_seed",
             scope="unpartitioned",

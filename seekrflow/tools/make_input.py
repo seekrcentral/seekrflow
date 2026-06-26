@@ -161,9 +161,16 @@ def create_host_guest_example_seekrflow(
             completion=stage_procedures_module
                 .Number_of_steps_completion_spec(number_of_steps=100000),
         )])
+    metad_method_input = stage_procedures_module.Metadynamics_seeding_method_input(
+        bias_factor=10.0,
+        gaussian_height=0.1,
+        gaussian_width=0.1,
+        steps_per_update=250,
+        number_of_points=101)
     seeding = stage_procedures_module.Seeding_stage_procedure(
         name="metadynamics",
-        method="metadynamics",
+        #method="metadynamics",
+        method_input=metad_method_input,
         cv_names=["distance_host_guest"])
     mmvt = stage_procedures_module.MMVT_stage_procedure(
         name="MMVT",
@@ -184,6 +191,8 @@ def create_host_guest_example_seekrflow(
         parameters_topology_structures.Amber_parameters_topology()
     md_scale.system.parameters_topology.prmtop_filename = prmtop_filename
     md_scale.system.solvated_pdb = solvated_pdb_filename
+    md_scale.hydrogen_mass = 3.0
+    md_scale.timestep = 0.004
     md_scale.platform_type = "cuda"
 
     bd_scale = scale_settings_module.Brownian_dynamics_scale_settings()
@@ -192,12 +201,12 @@ def create_host_guest_example_seekrflow(
     bd_scale.system.molecules = [
         scale_settings_module.BD_molecule(
             name="beta-cyclodextrin",
-            component_names=["host"],
+            component_name="host",
             pqr_filename=receptor_pqr_filename if provide_pqr_filenames else "",
             role="receptor"),
         scale_settings_module.BD_molecule(
             name="1-butanol",
-            component_names=["guest"],
+            component_name="guest",
             pqr_filename=ligand_pqr_filename if provide_pqr_filenames else "",
             role="ligand"),
     ]
@@ -217,7 +226,6 @@ def create_host_guest_example_seekrflow(
     physical_attributes = base.Physical_attributes()
     physical_attributes.temperature = 298.15
     physical_attributes.ionic_strength = 0.15
-    physical_attributes.hydrogen_mass = 3.0
     physical_attributes.random_seed = 111
     seekrflow.physical_attributes = physical_attributes
     seekrflow.work_directory = work_directory

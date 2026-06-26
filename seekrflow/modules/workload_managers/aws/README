@@ -1,5 +1,7 @@
 ## AWS CLOUD README ##
 
+TODO: accumulate a list here of things to ask Cloudbank to do for you.
+
 Notes for how to get the Cloud platform set up for submitting a SEEKR calc
 
 # 1. Log into AWS with Cloudbank
@@ -263,4 +265,7 @@ EOF
 
 aws batch register-job-definition \
   --region $REGION \
-  --cli-input-json file://job-definition-hidr.json
+  --cli-input-json file://job-definition-stage.json
+  
+You will need to request an increase in your vCPU quote to 8.
+You will also need to add S3 Permissions to your ecsInstanceRole.
