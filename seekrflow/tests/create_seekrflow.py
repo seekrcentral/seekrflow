@@ -55,9 +55,7 @@ def create_unparameterized_seekrflow(
         ]
     seekrflow.parameterizer = parameterizer
     seekrflow.run_settings = structures.Run_settings()
-    seekrflow.run_settings.bd_stage_resource_name = "local"
-    seekrflow.run_settings.hidr_stage_resource_name = "local"
-    seekrflow.run_settings.seekr_stage_resource_name = "local"
+    seekrflow.run_settings.procedure_resource_name = {}
     return seekrflow
 
 def create_parameterized_seekrflow(

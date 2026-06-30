@@ -23,14 +23,12 @@ def _get_stage_resource_name(
         stage_name: str,
         ) -> str:
     """
-    Resolve the configured resource name for a stage using the canonical
-    run_settings.stage_resource_name mapping.
+    Resolve the configured resource name for a stage by finding the procedure
+    that produces the stage and returning that procedure's assigned resource
+    (run_settings.procedure_resource_name).
     """
-    if stage_name not in seekrflow.run_settings.stage_resource_name:
-        raise ValueError(
-            f"Unknown stage name {stage_name!r} in run_settings.stage_resource_name"
-        )
-    return seekrflow.run_settings.stage_resource_name[stage_name]
+    return seekrflow.run_settings.get_stage_resource_name(
+        stage_name, seekrflow.workflow.procedure)
 
 
 def _normalize_stage_status(
@@ -197,8 +195,8 @@ def status_remote(
         benchmark_mode: bool = False,
         ) -> dict:
     """
-    Generalized remote stage status query for any stage configured in
-    run_settings.stage_resource_name.
+    Generalized remote stage status query for any stage whose producing
+    procedure is configured in run_settings.procedure_resource_name.
     """
     resource_name = _get_stage_resource_name(seekrflow, stage_name)
     if resource_name == "local":

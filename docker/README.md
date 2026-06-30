@@ -9,10 +9,11 @@ NOTE: all commands must be run from seekrflow/ base directory.
 # Build (from the seekrflow repo root):
 
    DOCKER_BUILDKIT=1 docker build \
-     --network=host \
-     -f docker/seekr-base.Dockerfile \
-     --secret id=github_token,src=$HOME/.config/seekr/github_token \
-     -t seekr-base:latest .
+  --network=host \
+  -f docker/seekr-base.Dockerfile \
+  --secret id=github_token,src=$HOME/.config/seekr/github_token \
+  --build-arg SEEKR_CACHE_BUST="$(date +%s)" \
+  -t seekr-base:latest .
 
 # Run the following command to see the outputs from the previous run:
 

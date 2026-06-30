@@ -90,10 +90,11 @@ def create_example_seekrflow(ff="amber") -> structures.Seekrflow:
     delta_slurm_resource.transfer_settings.remote_collection_id = "MY_REMOTE_COLLECTION_ID"
     seekrflow.run_settings.resources = [delta_slurm_resource]
     #anvil_slurm_resource = structures.Slurm_resource()
-    seekrflow.run_settings.stage_resource_name = {
+    seekrflow.run_settings.procedure_resource_name = {
+        "equilibration": "local",
+        "metadynamics": "delta",
+        "MMVT": "delta",
         "bd": "local",
-        "hidr": "delta",
-        "seekr": "delta",
     }
     
     return seekrflow

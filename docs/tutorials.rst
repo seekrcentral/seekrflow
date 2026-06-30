@@ -326,10 +326,12 @@ one will likely need to modify in order to complete this tutorial.
      it by searching for the Globus collection UUID of the HPC resource in the Globus web portal 
      "Collections" page.
 
-- "bd_stage_resource_name", "hidr_stage_resource_name", and "seekr_stage_resource_name":
-  These are the names of the resources that will be used to stage the Browndye, Hidr, and SEEKR 
-  calculations, respectively. These should match the names defined in the "resources" section of the 
-  configuration file. Note that multiple resources can be defined and used, including just a local
+- "procedure_resource_name": A mapping from each procedure name (as defined in the workflow's
+  "procedure" section) to the name of the resource that will run the stages produced by that
+  procedure. The resource names should match the names defined in the "resources" section of the
+  configuration file (the special name "local" runs on the local computer). Because each procedure
+  expands into one or more automatically named stages, resources are assigned per procedure rather
+  than per stage. Note that multiple resources can be defined and used, including just a local
   computer.
 
 .. note::

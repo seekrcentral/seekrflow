@@ -85,8 +85,11 @@
     },
     "run_settings": {
         "resources": [],
-        "bd_stage_resource_name": "local",
-        "hidr_stage_resource_name": "local",
-        "seekr_stage_resource_name": "local"
+        "procedure_resource_name": {
+            "equilibration": "local",
+            "metadynamics": "local",
+            "MMVT": "local",
+            "bd": "local"
+        }
     }
 }

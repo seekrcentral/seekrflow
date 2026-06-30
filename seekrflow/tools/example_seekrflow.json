@@ -88,8 +88,11 @@
                 }
             }
         ],
-        "bd_stage_resource_name": "local",
-        "hidr_stage_resource_name": "delta",
-        "seekr_stage_resource_name": "delta"
+        "procedure_resource_name": {
+            "equilibration": "local",
+            "metadynamics": "delta",
+            "MMVT": "delta",
+            "bd": "local"
+        }
     }
 }

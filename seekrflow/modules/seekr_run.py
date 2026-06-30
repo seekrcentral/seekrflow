@@ -774,7 +774,7 @@ class SeekrPipeline:
         self.stage_names.append(stage.name)
         try:
             stage_resource = self.seekrflow.run_settings.get_stage_resource(
-                stage.name)
+                stage.name, self.seekrflow.workflow.procedure)
         except ValueError:
             stage_resource = None
         resource_name = "local" if stage_resource is None else stage_resource.name
@@ -1437,7 +1437,7 @@ def run_model(
         transfer_from_remote_only: str | None = None,
         force_rerun: list[str] | None = None,
         benchmark_stage: str | None = None,
-        stage_resource_dict: dict[str, str] | None = None,
+        procedure_resource_dict: dict[str, str] | None = None,
         semaphore_dict: dict[str, str] | None = None,
         keystrokes_enabled: bool = True,
         ) -> None:
@@ -1511,12 +1511,13 @@ def run_model(
     # 2 check cycles (60 seconds)
     MIN_RUNNING_TIME_BEFORE_IDLE = 2 * MAIN_LOOP_INTERVAL  
 
-    # Override resource names if provided
-    if stage_resource_dict is not None:
-        for stage_name in stage_resource_dict:
-            resource_name = stage_resource_dict[stage_name]
+    # Override resource names if provided (keyed by procedure name).
+    if procedure_resource_dict is not None:
+        for procedure_name in procedure_resource_dict:
+            resource_name = procedure_resource_dict[procedure_name]
             if resource_name is not None:
-                seekrflow.run_settings.set_stage_resource(stage_name, resource_name)
+                seekrflow.run_settings.set_procedure_resource(
+                    procedure_name, resource_name)
     
     # Signal handling is installed by SeekrPipeline.run_workflows().
 
@@ -1537,7 +1538,8 @@ def run_model(
         resources_by_name: dict[str, structures.Resource_remote_base] = {}
         for stage_name in stage_names:
             try:
-                resource = seekrflow.run_settings.get_stage_resource(stage_name)
+                resource = seekrflow.run_settings.get_stage_resource(
+                    stage_name, seekrflow.workflow.procedure)
             except ValueError:
                 resource = None
             if resource is None:

@@ -174,9 +174,11 @@ def test_run_settings_with_pbs_resource():
 
     run_settings = Run_settings(
         resources=[pbs_resource],
-        bd_stage_resource_name="local",
-        hidr_stage_resource_name="pbs_cluster",
-        seekr_stage_resource_name="pbs_cluster",
+        procedure_resource_name={
+            "bd": "local",
+            "hidr": "pbs_cluster",
+            "seekr": "pbs_cluster",
+        },
     )
 
     assert len(run_settings.resources) == 1
@@ -202,9 +204,11 @@ def test_run_settings_mixed_resources():
 
     run_settings = Run_settings(
         resources=[slurm_resource, pbs_resource],
-        bd_stage_resource_name="local",
-        hidr_stage_resource_name="slurm_cluster",
-        seekr_stage_resource_name="pbs_cluster",
+        procedure_resource_name={
+            "bd": "local",
+            "hidr": "slurm_cluster",
+            "seekr": "pbs_cluster",
+        },
     )
 
     assert len(run_settings.resources) == 2

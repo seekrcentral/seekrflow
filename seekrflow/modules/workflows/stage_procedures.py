@@ -460,6 +460,22 @@ class Stage_procedure_base:
         """
         raise NotImplementedError
 
+    def get_stage_names(self) -> list[str]:
+        """
+        Return, in order, the names of the stage items this procedure will
+        produce when expanded.
+
+        Unlike :meth:`expand`, this is a lightweight, ``ctx``-free lookup: it
+        must not load structures, write files, or otherwise require a prepared
+        system. It exists so that resource assignment (and any other tooling)
+        can map a stage name back to the user-authored procedure that creates
+        it WITHOUT performing a full, expensive expansion.
+
+        IMPORTANT: subclasses must keep the names returned here in sync with the
+        names assigned to the stage items created in :meth:`expand`.
+        """
+        raise NotImplementedError
+
 
 def _chain(items: list[Stage_item_base], input_stage_name: str
            ) -> list[Resolved_stage_item]:
@@ -494,6 +510,9 @@ class Explicit_stage_procedure(Stage_procedure_base):
             input_stage_name: str = INITIAL,
             ) -> list[Resolved_stage_item]:
         return _chain(list(self.items), input_stage_name)
+
+    def get_stage_names(self) -> list[str]:
+        return [item.name for item in self.items]
 
 
 @define
@@ -624,6 +643,9 @@ class Equilibration_globular_stage_procedure(Stage_procedure_base):
                 ))
         return _chain(items, input_stage_name)
 
+    def get_stage_names(self) -> list[str]:
+        return [row["name"] for row in self.schedule]
+
 #@define
 #class Seeding_method_input:
 #    type: typing.Literal["base"] = "base"
@@ -689,11 +711,15 @@ class Seeding_stage_procedure(Stage_procedure_base):
         default=100, validator=validators.instance_of(int))
     
 
+    def get_stage_names(self) -> list[str]:
+        return [f"{self.name}_seed", f"{self.name}_assign_structures"]
+
     def expand(
             self,
             ctx: typing.Any,
             input_stage_name: str = INITIAL,
             ) -> list[Resolved_stage_item]:
+        seed_name, assign_name = self.get_stage_names()
         reporter_name = f"{self.name}_anchor_reporter"
         if self.method_input.type == "metadynamics":
             sampling: Sampling_spec = Metadynamics_sampling_spec(
@@ -710,7 +736,7 @@ class Seeding_stage_procedure(Stage_procedure_base):
         else:
             raise ValueError(f"Unknown seeding method type: {self.method_input.type}")
         seed_stage = MD_stage_item(
-            name=f"{self.name}_seed",
+            name=seed_name,
             scope="unpartitioned",
             ensemble=self.ensemble,
             sampling=sampling,
@@ -720,7 +746,7 @@ class Seeding_stage_procedure(Stage_procedure_base):
             position_reporter_interval=self.position_reporter_interval,
         )
         logistic_stage = Logistic_anchor_from_reporter_stage_item(
-            name=f"{self.name}_assign_structures",
+            name=assign_name,
             scope="partitioned",
             reporter_name=reporter_name,
         )
@@ -741,6 +767,9 @@ class MMVT_stage_procedure(Stage_procedure_base):
         default=200000, validator=validators.instance_of(int))
     checkpoint_interval: int = field(
         default=5000, validator=validators.instance_of(int))
+
+    def get_stage_names(self) -> list[str]:
+        return [self.name]
 
     def expand(
             self,
@@ -772,6 +801,9 @@ class BD_stage_procedure(Stage_procedure_base):
         default=100000, validator=validators.instance_of(int))
     number_of_trajectories: int = field(
         default=10000, validator=validators.instance_of(int))
+
+    def get_stage_names(self) -> list[str]:
+        return [self.name]
 
     def expand(
             self,
@@ -822,12 +854,17 @@ class RAMD_stage_procedure(Stage_procedure_base):
     ensemble: str = field(
         default="NVT", validator=validators.in_(
             ["NVT", "NPT", "NPT_membrane", "NVE"]))
-    
+
+    def get_stage_names(self) -> list[str]:
+        return [f"{self.name}_sampling", f"{self.name}_assign_swarm",
+                f"{self.name}_ramd"]
+
     def expand(
             self,
             ctx: typing.Any,
             input_stage_name: str = INITIAL,
             ) -> list[Resolved_stage_item]:
+        sampling_name, assign_swarm_name, ramd_name = self.get_stage_names()
         equil_sampling = Conventional_sampling_spec()
         number_of_equil_steps = self.starting_structure_interval \
             * self.swarm_size
@@ -847,7 +884,7 @@ class RAMD_stage_procedure(Stage_procedure_base):
         )
         #reporter_name = f"{self.name}_swarm_reporter"
         sampling_stage = MD_stage_item(
-            name=f"{self.name}_sampling",
+            name=sampling_name,
             run_minimization=False,
             ensemble=self.ensemble,
             sampling=equil_sampling,
@@ -858,12 +895,12 @@ class RAMD_stage_procedure(Stage_procedure_base):
             )
         reporter_name = sampling_stage.get_position_reporter_name()
         logistic_stage = Logistic_swarm_from_reporter_stage_item(
-            name=f"{self.name}_assign_swarm",
+            name=assign_swarm_name,
             scope="partitioned",
             reporter_name=reporter_name,
         )
         ramd_stage = MD_stage_item(
-            name=f"{self.name}_ramd",
+            name=ramd_name,
             scope="unpartitioned",
             ensemble=self.ensemble,
             sampling=ramd_sampling,
@@ -901,6 +938,49 @@ class Composite_stage_procedure(Stage_procedure_base):
             if items:
                 previous_exit = items[-1][1].name
         return all_items
+
+    def get_stage_names(self) -> list[str]:
+        names: list[str] = []
+        for procedure in self.procedures:
+            names.extend(procedure.get_stage_names())
+        return names
+
+
+def build_stage_to_procedure_map(
+        top_procedure: Stage_procedure_base,
+        ) -> dict[str, str]:
+    """
+    Map each produced stage name to the name of the user-authored procedure
+    that creates it.
+
+    The user-authored procedures are the direct children of a top-level
+    ``Composite_stage_procedure`` (the procedures the user lists in the input).
+    If ``top_procedure`` is not a composite, it is treated as the single
+    authored procedure and owns all of its stages.
+
+    Raises
+    ------
+    ValueError
+        If two procedures produce a stage with the same name (stage names must
+        be unique, since seekr chains stages by name).
+    """
+    if isinstance(top_procedure, Composite_stage_procedure):
+        owning_procedures: list[Stage_procedure_base] = list(
+            top_procedure.procedures)
+    else:
+        owning_procedures = [top_procedure]
+
+    stage_to_procedure: dict[str, str] = {}
+    for procedure in owning_procedures:
+        for stage_name in procedure.get_stage_names():
+            if stage_name in stage_to_procedure:
+                raise ValueError(
+                    f"Duplicate stage name {stage_name!r} produced by both "
+                    f"procedure {stage_to_procedure[stage_name]!r} and "
+                    f"procedure {procedure.name!r}. Stage names must be unique "
+                    f"across all procedures.")
+            stage_to_procedure[stage_name] = procedure.name
+    return stage_to_procedure
 
 
 Stage_procedure = (

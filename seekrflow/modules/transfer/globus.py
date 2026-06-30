@@ -6,8 +6,6 @@ where password entry and two-factor authentication would otherwise be
 burdensome.
 """
 
-import os
-
 GLOBUS_SEEKRFLOW_APP_CLIENT_ID = "683ab038-1578-4520-bfb4-57de7411102f"
 GLOBUS_TRANSFER_RESOURCE_SERVER = "transfer.api.globus.org"
 
@@ -22,36 +20,8 @@ def transfer_files_with_globus(
     """
     Transfer files to remote system using Globus.
     """
-    from globus_sdk import TransferClient, NativeAppAuthClient, \
-        TransferData, RefreshTokenAuthorizer, UserApp
-    from globus_sdk.scopes import TransferScopes, MutableScope
-    from globus_sdk.tokenstorage import SimpleJSONFileAdapter
-
-    # Attempt to transfer files
-    token_file = os.path.expanduser("~/.globus_tokens.json")
-    transfer_scope = MutableScope(TransferScopes.all)
-    
-    # Setup token storage and auth client
-    file_adapter = SimpleJSONFileAdapter(token_file)
-    client = NativeAppAuthClient(GLOBUS_SEEKRFLOW_APP_CLIENT_ID)        
-    client.oauth2_start_flow(requested_scopes=transfer_scope, 
-                             refresh_tokens=True)
-
-    # Get or refresh tokens
-    tokens = file_adapter.get_token_data(GLOBUS_TRANSFER_RESOURCE_SERVER)
-    if not tokens:
-        authorize_url = client.oauth2_get_authorize_url()
-        print(f"Please go to this URL and login: {authorize_url}")
-        get_input = getattr(__builtins__, "raw_input", input)
-        auth_code = get_input(
-            "Please enter the code you get after login here: ").strip()
-        token_response = client.oauth2_exchange_code_for_tokens(auth_code)
-        file_adapter.store(token_response)
-        tokens = token_response.by_resource_server[GLOBUS_TRANSFER_RESOURCE_SERVER]
-
-    transfer_refresh_token = tokens['refresh_token']
-    transfer_access_token = tokens['access_token']
-    expires_at_sec = tokens['expires_at_seconds']
+    from globus_sdk import TransferClient, TransferData, UserApp, \
+        GlobusAppConfig
 
     # Ensure trailing slashes for directories
     if not local_path.endswith("/"):
@@ -59,17 +29,28 @@ def transfer_files_with_globus(
     if not remote_path.endswith("/"):
         remote_path += "/"
 
-    # Create RefreshTokenAuthorizer
-    authorizer = RefreshTokenAuthorizer(
-        refresh_token=transfer_refresh_token,
-        auth_client=client,
-        access_token=transfer_access_token, 
-        expires_at=expires_at_sec
-    )
-
     # ========== TRANSFER CLIENT SETUP ==========
-    app = UserApp("seekrflow", client_id=GLOBUS_SEEKRFLOW_APP_CLIENT_ID)
-    tc = TransferClient(app=app).add_app_data_access_scope(remote_collection_id)
+    # The GlobusApp framework handles token storage (in ~/.globus/app/),
+    # the login flow, and authorization automatically. When a required
+    # token is missing, it prints the login URL and prompts for the code.
+    #
+    # Force the command-line login flow so it uses the redirect URI that is
+    # registered on the native ("Thick Client") app
+    # (https://auth.globus.org/v2/web/auth-code). The default would
+    # auto-select a local-server flow that redirects to http://localhost:<port>,
+    # which is not a registered redirect URI and causes a
+    # "Mismatching redirect URI" error.
+    config = GlobusAppConfig(
+        login_flow_manager="command-line",
+        request_refresh_tokens=True,
+    )
+    app = UserApp(
+        "seekrflow",
+        client_id=GLOBUS_SEEKRFLOW_APP_CLIENT_ID,
+        config=config,
+    )
+    tc = TransferClient(app=app)
+    tc.add_app_data_access_scope(remote_collection_id)
 
     if backwards:
         # Transferring from remote to local
@@ -86,7 +67,6 @@ def transfer_files_with_globus(
         destination_collection_id = remote_collection_id
 
     tdata = TransferData(
-        tc,
         source_collection_id,
         destination_collection_id,
         label=f"{name} files transfer",

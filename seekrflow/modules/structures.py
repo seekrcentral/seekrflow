@@ -335,7 +335,12 @@ class Run_settings:
         Resource_remote_slurm | Resource_remote_pbs
     ] = field(
         default=Factory(list),)
-    stage_resource_name: dict[str, str] = field(
+    # Maps a user-authored PROCEDURE name to the name of the resource that runs
+    #  it. Users author procedures (not stages) in the input, and each
+    #  procedure expands into one or more auto-named stages; resources are
+    #  therefore assigned per procedure and resolved to stages on demand via
+    #  the procedure's ``get_stage_names``.
+    procedure_resource_name: dict[str, str] = field(
         default=Factory(dict),
         validator=validators.instance_of(dict),
         )
@@ -355,32 +360,70 @@ class Run_settings:
                 return resource
         raise ValueError(
             f"Resource with name '{resource_name}' not found in run_settings.resources.")
-    
-    def get_stage_resource(
+
+    def get_procedure_resource(
             self,
-            stage_name: str
+            procedure_name: str,
             ) -> Resource_base | None:
         """
-        Get the resource for a given stage.
+        Get the resource assigned to a given procedure (None means local).
         """
-        if stage_name not in self.stage_resource_name:
-            raise ValueError(f"Unknown stage name '{stage_name}'")
-        resource_name = self.stage_resource_name[stage_name]
+        if procedure_name not in self.procedure_resource_name:
+            raise ValueError(
+                f"No resource assigned to procedure '{procedure_name}'.")
+        resource_name = self.procedure_resource_name[procedure_name]
         return self.get_resource_by_name(resource_name)
 
-    def set_stage_resource(
+    def set_procedure_resource(
             self,
-            stage_name: str,
+            procedure_name: str,
             resource_name: str,
             ) -> None:
         """
-        Assign a resource name to a stage after validating that the resource
-        exists (or is local).
+        Assign a resource name to a procedure after validating that the
+        resource exists (or is local).
         """
         # Validate resource name early for clearer CLI/runtime errors.
         self.get_resource_by_name(resource_name)
-        self.stage_resource_name[stage_name] = resource_name
+        self.procedure_resource_name[procedure_name] = resource_name
         return
+
+    def get_stage_resource_name(
+            self,
+            stage_name: str,
+            procedure: stage_procedures_module.Stage_procedure_base,
+            ) -> str:
+        """
+        Resolve the resource name configured for a given stage by finding the
+        procedure that produces the stage and returning its assigned resource.
+
+        ``procedure`` is the workflow's top-level stage procedure (usually a
+        ``Composite_stage_procedure`` whose children are the user-authored
+        procedures).
+        """
+        stage_to_procedure = stage_procedures_module\
+            .build_stage_to_procedure_map(procedure)
+        if stage_name not in stage_to_procedure:
+            raise ValueError(
+                f"Stage '{stage_name}' is not produced by any procedure.")
+        procedure_name = stage_to_procedure[stage_name]
+        if procedure_name not in self.procedure_resource_name:
+            raise ValueError(
+                f"No resource assigned to procedure '{procedure_name}' "
+                f"(which produces stage '{stage_name}').")
+        return self.procedure_resource_name[procedure_name]
+
+    def get_stage_resource(
+            self,
+            stage_name: str,
+            procedure: stage_procedures_module.Stage_procedure_base,
+            ) -> Resource_base | None:
+        """
+        Get the resource for a given stage by resolving the procedure that
+        produces it (None means local).
+        """
+        resource_name = self.get_stage_resource_name(stage_name, procedure)
+        return self.get_resource_by_name(resource_name)
 
 @define
 class Seekrflow:

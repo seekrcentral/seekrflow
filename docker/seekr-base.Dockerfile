@@ -53,12 +53,21 @@ RUN micromamba install -y -n base -c conda-forge \
 
 # --- seekr (private repo) --------------------------------------------------
 # Cloned with a BuildKit secret so the token never lands in a layer.
-# NOTE: adjust the branch (--branch) once the target branch is finalized.
+#
+# SEEKR_GIT_REF selects the branch/tag to clone (default: main).
+# SEEKR_CACHE_BUST forces Docker to re-run this layer even when nothing else
+# changed -- pass a changing value (e.g. the latest commit SHA or a timestamp)
+# at build time so the clone always picks up the newest seekr code:
+#   --build-arg SEEKR_CACHE_BUST="$(date +%s)"
+ARG SEEKR_GIT_REF=main
+ARG SEEKR_CACHE_BUST=0
 RUN --mount=type=secret,id=github_token \
-    GITHUB_TOKEN="$(cat /run/secrets/github_token)" \
-    && git clone --depth 1 \
+    echo "Cache bust: ${SEEKR_CACHE_BUST}" \
+    && GITHUB_TOKEN="$(cat /run/secrets/github_token)" \
+    && git clone --depth 1 --branch "${SEEKR_GIT_REF}" \
         "https://x-access-token:${GITHUB_TOKEN}@github.com/lvotapka/seekr.git" \
         /opt/seekr \
+    && git -C /opt/seekr rev-parse HEAD \
     && python -m pip install --no-cache-dir /opt/seekr
 
 # --- Sanity: verify OpenMM sees a CUDA platform at build time --------------
