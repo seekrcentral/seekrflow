@@ -87,11 +87,13 @@
     "parameterizer": null,
     "run_settings": {
         "resources": [],
-        "procedure_resource_name": {
-            "equilibration": "local",
-            "metadynamics": "local",
-            "MMVT": "local",
-            "bd": "local"
-        }
+        "placements": [
+            { "target": [], "resource": "local" },
+            { "target": ["equilibration"], "resource": "local" },
+            { "target": ["metadynamics", "sampling"], "resource": "local" },
+            { "target": ["metadynamics", "logistic"], "resource": "local" },
+            { "target": ["MMVT"], "resource": "local" },
+            { "target": ["bd"], "resource": "local" }
+        ]
     }
 }

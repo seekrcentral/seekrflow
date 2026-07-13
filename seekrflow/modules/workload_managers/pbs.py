@@ -730,8 +730,7 @@ def pbs_remote_run_workflow(args):
         - indices : list[int] or None (args[13])
         - model_filename : str (args[14])
         - workflow_type : str (args[15])
-        - mps : int (args[16])
-        - anchor_times_at_submission : dict or None (args[17])
+        - anchor_times_at_submission : dict or None (args[16])
 
     Returns
     -------
@@ -764,8 +763,7 @@ def pbs_remote_run_workflow(args):
     indices = args[13]
     model_filename = args[14]
     workflow_type = args[15]
-    mps = args[16]
-    anchor_times_at_submission = args[17] if len(args) > 17 else None
+    anchor_times_at_submission = args[16] if len(args) > 16 else None
 
     kwargs = {
         "working_dir": working_dir,
@@ -783,7 +781,6 @@ def pbs_remote_run_workflow(args):
         "indices": indices,
         "model_filename": model_filename,
         "workflow_type": workflow_type,
-        "mps": mps,
         "anchor_times_at_submission": anchor_times_at_submission
     }
 
@@ -874,16 +871,8 @@ def pbs_remote_run_workflow(args):
             mem: Optional[str],
             cmd_template: str,
             worker_init: str = "",
-            mps: int = 1
             ) -> str:
         ensure_dir(logdir)
-
-        # Create new condensed array spec for MPS bundling
-        if array_spec is not None and mps > 1:
-            n_bundles = (len(array_spec) + mps - 1) // mps  # ceiling division
-            condensed_array_spec = list(range(n_bundles))
-        else:
-            condensed_array_spec = array_spec
 
         # Build PBS script
         script_lines = ["#!/bin/bash"]
@@ -900,14 +889,12 @@ def pbs_remote_run_workflow(args):
         if resource_list:
             script_lines.append(f"#PBS -l {resource_list}")
 
-        if condensed_array_spec is None:
+        if array_spec is None:
             script_lines.append(f"#PBS -o {logdir}/{name}.out")
             script_lines.append(f"#PBS -e {logdir}/{name}.err")
         else:
-            array_str = collapse_indices(condensed_array_spec)
+            array_str = collapse_indices(array_spec)
             script_lines.append(f"#PBS -J {array_str}")
-            # For array jobs, specify output directory only
-            # PBS will use default naming: jobname.oJOBID-ARRAYID
             script_lines.append(f"#PBS -o {logdir}/")
             script_lines.append(f"#PBS -e {logdir}/")
 
@@ -919,24 +906,7 @@ def pbs_remote_run_workflow(args):
         script_lines.append("")
         script_lines.append(f"echo PBS_ARRAY_INDEX: $PBS_ARRAY_INDEX; cd {workdir}")
 
-        # Replace placeholders in cmd_template
         wrap_cmd = cmd_template
-
-        if array_spec is not None and mps > 1:
-            # For MPS mode: replace {index0}, {index1}, etc. and {len_array}
-            for mps_index in range(mps):
-                # Calculate the original index: PBS_ARRAY_INDEX * mps + mps_index
-                original_index = f"$(( ${{PBS_ARRAY_INDEX:error}} * {mps} + {mps_index} ))"
-                wrap_cmd = wrap_cmd.replace(f"{{index{mps_index}}}", original_index)
-
-            # Calculate len_array: how many indices this PBS task should process
-            # Formula: min(mps, total_indices - task_id * mps)
-            remaining = f"{len(array_spec)} - ${{PBS_ARRAY_INDEX:error}} * {mps}"
-            len_array_formula = f"$(( ({remaining}) < {mps} ? ({remaining}) : {mps} ))"
-            wrap_cmd = wrap_cmd.replace("{len_array}", len_array_formula)
-        else:
-            # Single index mode: just replace {index} with PBS_ARRAY_INDEX
-            wrap_cmd = wrap_cmd.replace("{index}", "${PBS_ARRAY_INDEX:error}")
 
         if worker_init:
             script_lines.append("")
@@ -1003,7 +973,6 @@ def pbs_remote_run_workflow(args):
             mem=args["mem"],
             cmd_template=args["command_string"],
             worker_init=args["worker_init"],
-            mps=args["mps"]
         )
         st = RunState(
             run_id=run_id,
@@ -1046,52 +1015,92 @@ def pbs_remote_run_workflow(args):
 
 def pbs_remote_cancel_workflow(args):
     """
-    Cancel PBS job.
+    Cancel PBS job(s) by id and/or scheduler job name.
 
     Args:
         args[0]: working_dir
-        args[1]: job_id
+        args[1]: job_id (optional)
+        args[2]: job_name (optional)
     """
     import subprocess
-    
-    working_dir = args[0]
-    job_id = args[1]
 
+    job_id = args[1] if len(args) > 1 else None
+    job_name = args[2] if len(args) > 2 else None
+
+    if not job_id and not job_name:
+        return {"success": False, "error": "job_id or job_name required"}
+
+    canceled: list[str] = []
     try:
-        result = subprocess.run(
-            ["qdel", job_id],
-            capture_output=True,
-            text=True,
-            timeout=10
-        )
+        if job_id:
+            result = subprocess.run(
+                ["qdel", str(job_id)],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if result.returncode != 0 and "Unknown Job Id" not in result.stderr:
+                return {
+                    "success": False,
+                    "error": f"qdel failed: {result.stderr}",
+                    "result": None,
+                }
+            canceled.append(str(job_id))
 
-        if result.returncode != 0 and "Unknown Job Id" not in result.stderr:
-            return {
-                "success": False,
-                "error": f"qdel failed: {result.stderr}",
-                "result": None
-            }
+        if job_name:
+            sel = subprocess.run(
+                ["qselect", "-N", str(job_name)],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if sel.returncode != 0:
+                return {
+                    "success": False,
+                    "error": f"qselect failed: {sel.stderr}",
+                    "result": None,
+                }
+            for jid in sel.stdout.split():
+                jid = jid.strip()
+                if not jid:
+                    continue
+                result = subprocess.run(
+                    ["qdel", jid],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+                if result.returncode != 0 and "Unknown Job Id" not in result.stderr:
+                    return {
+                        "success": False,
+                        "error": f"qdel failed for {jid}: {result.stderr}",
+                        "result": None,
+                    }
+                canceled.append(jid)
 
         return {
             "success": True,
             "error": None,
-            "result": {"canceled_job": job_id}
+            "result": {"canceled_jobs": canceled},
         }
 
     except Exception as e:
         return {
             "success": False,
             "error": str(e),
-            "result": None
+            "result": None,
         }
 
 
 def pbs_remote_force_rerun_workflow(args):
     """
-    Force re-run a stage on a PBS system by:
-    1. Canceling any running jobs for that stage
-    2. Deleting the requisite files to reset the stage
-    
+    Cancel a stage's running PBS job and reset its runner bookkeeping.
+
+    Cancels any job recorded for the stage, waits until it is fully gone
+    (so a resubmission cannot clobber a still-running job), and clears the
+    ``.pbs_runner`` state files. Stage output cleanup is NOT done here; it
+    is handled by seekr's own ``force_overwrite`` in the run command.
+
     Parameters
     ----------
     args : list
@@ -1099,8 +1108,8 @@ def pbs_remote_force_rerun_workflow(args):
         - working_dir : str
             Path to the working directory containing model.xml
         - stage_name : str
-            Name of the stage ("bd", "hidr", or "seekr")
-    
+            Name of the stage to reset
+
     Returns
     -------
     dict
@@ -1114,7 +1123,6 @@ def pbs_remote_force_rerun_workflow(args):
     import json
     import time
     import uuid
-    import xml.etree.ElementTree as ET
     from dataclasses import dataclass
     from typing import Dict, List, Optional
     
@@ -1164,97 +1172,32 @@ def pbs_remote_force_rerun_workflow(args):
     def get_state_dir(workdir: pathlib.Path) -> pathlib.Path:
         return workdir / ".pbs_runner"
     
-    def force_bd_rerun_remote(model_dir: pathlib.Path) -> None:
-        """Delete BD result files."""
-        try:
-            model_path = model_dir / "model.xml"
-            if not model_path.exists():
-                print(f"Model file not found: {model_path}")
+    def cleanup_stage_state_files(workdir: pathlib.Path, stage: str) -> None:
+        state_dir = get_state_dir(workdir)
+        if not state_dir.exists():
+            return
+        for pattern in (f"{stage}_latest.json", f"{stage}_*.json"):
+            for filepath in state_dir.glob(pattern):
+                try:
+                    filepath.unlink()
+                except Exception:
+                    pass
+
+    def wait_until_gone(
+            jobid: str,
+            max_checks: int = 20,
+            poll_seconds: float = 3.0,
+            ) -> None:
+        """Poll qstat until the job no longer appears (bounded)."""
+        for _ in range(max_checks):
+            rc, out, err = run(
+                ["bash", "-lc", f"qstat {shlex.quote(jobid)}"], check=False)
+            if rc != 0 or not out.strip():
                 return
-            
-            tree = ET.parse(str(model_path))
-            root = tree.getroot()
-            
-            # Find b_surface directory from model.xml
-            b_surface_elem = root.find(".//b_surface_directory")
-            if b_surface_elem is not None and b_surface_elem.text:
-                b_surface_dir = model_dir / b_surface_elem.text.strip()
-                if b_surface_dir.exists():
-                    print(f"Deleting BD results directory: {b_surface_dir}")
-                    # Delete all results files
-                    for results_file in b_surface_dir.glob("results*.xml"):
-                        results_file.unlink()
-                        print(f"  Deleted {results_file.name}")
-                    # Try to remove directory if empty
-                    try:
-                        b_surface_dir.rmdir()
-                        print(f"  Removed empty directory {b_surface_dir}")
-                    except OSError:
-                        print(f"  Directory {b_surface_dir} not empty, keeping it")
-                else:
-                    print(f"BD directory does not exist: {b_surface_dir}")
-            else:
-                print("No b_surface_directory element found in model.xml")
-                    
-        except Exception as e:
-            print(f"Error in force_bd_rerun_remote: {e}")
-    
-    def force_hidr_rerun_remote(model_dir: pathlib.Path) -> None:
-        """Restore model.xml from pre-HIDR backup."""
-        try:
-            model_path = model_dir / "model.xml"
-            backup_path = model_dir / "model_backup_pre_hidr.xml"
-            
-            if backup_path.exists():
-                print(f"Restoring model.xml from {backup_path}")
-                backup_path.replace(model_path)
-                print("  Model restored successfully")
-            else:
-                print(f"No HIDR backup found at {backup_path}, nothing to restore")
-                    
-        except Exception as e:
-            print(f"Error in force_hidr_rerun_remote: {e}")
-    
-    def force_seekr_rerun_remote(model_dir: pathlib.Path) -> None:
-        """Delete production directory contents."""
-        try:
-            model_path = model_dir / "model.xml"
-            if not model_path.exists():
-                print(f"Model file not found: {model_path}")
-                return
-            
-            tree = ET.parse(str(model_path))
-            root = tree.getroot()
-            
-            # Find all SEEKR anchors
-            anchors_list = root.find(".//anchors")
-            if anchors_list is None:
-                print("No anchors list found in model.xml")
-                return
-            
-            deleted_count = 0
-            for anchor_elem in anchors_list:
-                directory_elem = anchor_elem.find("directory")
-                if directory_elem is not None and directory_elem.text:
-                    anchor_dir = model_dir / directory_elem.text.strip()
-                    prod_dir = anchor_dir / "prod"
-                    
-                    if prod_dir.exists():
-                        # Delete all files in prod directory
-                        for item in prod_dir.iterdir():
-                            if item.is_file():
-                                item.unlink()
-                                deleted_count += 1
-                        print(f"  Deleted {deleted_count} files from {prod_dir}")
-            
-            if deleted_count > 0:
-                print(f"Total files deleted from SEEKR production directories: {deleted_count}")
-            else:
-                print("No SEEKR production files found to delete")
-                                
-        except Exception as e:
-            print(f"Error in force_seekr_rerun_remote: {e}")
-    
+            time.sleep(poll_seconds)
+        print(f"Warning: job {jobid} still visible after cancel; "
+              f"proceeding anyway")
+
     result = {
         "success": False,
         "error": None,
@@ -1264,33 +1207,26 @@ def pbs_remote_force_rerun_workflow(args):
     work_dir = pathlib.Path(working_dir)
     state_path = get_state_dir(work_dir) / f"{stage_name}_latest.json"
     
-    # Step 1: Cancel any running job for this stage
+    # Step 1: Cancel any running job for this stage and confirm it is gone,
+    # so a resubmission cannot clobber a still-running job.
     if state_path.exists():
         try:
             st = RunState.load(state_path)
             run(["bash", "-lc", f"qdel {shlex.quote(st.jobid)}"], check=False)
             result["canceled_job"] = st.jobid
             print(f"Canceled job {st.jobid} for {stage_name} stage")
+            wait_until_gone(st.jobid)
         except Exception as e:
             print(f"Warning: Could not cancel job: {e}")
     
-    # Step 2: Delete stage files
+    # Step 2: Clear runner state so the stage resubmits fresh. Stage output
+    # cleanup is handled by seekr's own force_overwrite in the run command.
     try:
-        if stage_name == "bd":
-            force_bd_rerun_remote(work_dir)
-        elif stage_name == "hidr":
-            force_hidr_rerun_remote(work_dir)
-        elif stage_name == "seekr":
-            force_seekr_rerun_remote(work_dir)
-        else:
-            result["error"] = f"Unknown stage name: {stage_name}"
-            return result
-        
-        print(f"Deleted files for {stage_name} stage")
+        cleanup_stage_state_files(work_dir, stage_name)
+        print(f"Cleared runner state for {stage_name} stage")
         result["success"] = True
-        
     except Exception as e:
-        result["error"] = f"Failed to delete files: {e}"
+        result["error"] = f"Failed to clear runner state: {e}"
         result["success"] = False
     
     return result

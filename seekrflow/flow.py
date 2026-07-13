@@ -106,7 +106,7 @@ def flow(
         seekr_run.run_model(
             seekrflow, transfer_before, transfer_from_remote_only, force_rerun,
             benchmark_stage=benchmark_stage,
-            procedure_resource_dict=resource_dict,
+            placement_resource_overrides=resource_dict,
             semaphore_dict=semaphore_dict,
             keystrokes_enabled=keystrokes_enabled)
     
@@ -195,12 +195,13 @@ def main():
         "at a later time, set semaphore to 'wait' for that stage.")
     argparser.add_argument(
         "-r", "--resources", dest="resources", 
-        metavar="PROCEDURE_CONTROL", type=str, default=None,
-        help="Control procedure resource assignments. Format: 'procedure:value,"\
-        "procedure:value,...' where procedure is any configured procedure name "\
-        "and value is the name of the resource as defined in the seekrflow input "\
-        "JSON file or in the user's .seekrflow_resources.json file. Example: "\
-        "--resources equilibration:local,mmvt:supercomputerName.")
+        metavar="PLACEMENT_CONTROL", type=str, default=None,
+        help="Control placement resource assignments. Format: "
+        "'target:resource,target:resource,...' where target is a dotted "
+        "procedure/role path (e.g. metadynamics.logistic) and resource is "
+        "the name defined in the seekrflow input JSON or "
+        ".seekrflow_resources.json. Example: "
+        "--resources equilibration:local,mmvt:delta.")
     argparser.add_argument(
         "-s", "--skip_checks", dest="skip_checks", default=False, 
         help="By default, pre-simulation checks will be run after the "\
@@ -265,16 +266,17 @@ def main():
                     f"--semaphore {stage}:stop. "
                     "Cannot benchmark a stopped stage.")
             
-    # Parse resource assignment argument using procedure names.
+    # Parse resource assignment argument using dotted placement targets.
     resource_dict = {}
     if args["resources"]:
         for item in args["resources"].split(","):
             parts = item.strip().split(":")
             if len(parts) != 2:
                 raise ValueError(
-                    f"Invalid resources format: {item}. Expected 'procedure:value'")
-            procedure, value = parts[0].strip(), parts[1].strip()
-            resource_dict[procedure] = value
+                    f"Invalid resources format: {item}. "
+                    f"Expected 'target:resource'")
+            target, value = parts[0].strip(), parts[1].strip()
+            resource_dict[target] = value
 
     hotshot_mode = False
     #src_pdb_filename = None

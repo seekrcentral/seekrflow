@@ -326,13 +326,16 @@ one will likely need to modify in order to complete this tutorial.
      it by searching for the Globus collection UUID of the HPC resource in the Globus web portal 
      "Collections" page.
 
-- "procedure_resource_name": A mapping from each procedure name (as defined in the workflow's
-  "procedure" section) to the name of the resource that will run the stages produced by that
-  procedure. The resource names should match the names defined in the "resources" section of the
-  configuration file (the special name "local" runs on the local computer). Because each procedure
-  expands into one or more automatically named stages, resources are assigned per procedure rather
-  than per stage. Note that multiple resources can be defined and used, including just a local
-  computer.
+- "placements": A list of placement objects. Each placement has a ``target`` path
+  (a list of procedure and/or role names, e.g. ``["metadynamics", "logistic"]``),
+  an optional ``resource`` name, optional ``dispatch`` settings
+  (``dimensions``, ``group_size``, ``concurrency`` for array/MPS control),
+  optional ``co_schedule_with`` (``"predecessor"`` or ``"successor"`` to fold a
+  stage into a neighbor's allocation), and optional per-stage scheduler overrides.
+  Resource names should match the ``resources`` section (use ``"local"`` for the
+  local computer). Longer matching target paths override shorter ones. A placement
+  with an empty target (``{"target": [], "resource": "local"}``) matches every
+  stage and acts as the default.
 
 .. note::
 

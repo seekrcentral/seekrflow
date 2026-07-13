@@ -14,6 +14,7 @@ import seekr2.modules.common_base as seekr2_base
 import seekrflow.modules.structures as structures
 import seekrflow.modules.workload_managers.slurm as workload_slurm
 import seekrflow.modules.workload_managers.pbs as workload_pbs
+import seekrflow.modules.workload_managers.dispatch_lowering as dispatch_lowering
 import seekrflow.modules.remote_interfaces.globus_compute_sdk as remote_globus
 import seekrflow.modules.remote_interfaces.ssh as remote_ssh
 
@@ -23,12 +24,10 @@ def _get_stage_resource_name(
         stage_name: str,
         ) -> str:
     """
-    Resolve the configured resource name for a stage by finding the procedure
-    that produces the stage and returning that procedure's assigned resource
-    (run_settings.procedure_resource_name).
+    Resolve the configured resource name for a stage via placement policies.
     """
-    return seekrflow.run_settings.get_stage_resource_name(
-        stage_name, seekrflow.workflow.procedure)
+    return seekrflow.run_settings.resolve_stage_execution(
+        stage_name, seekrflow.workflow.procedure).resource_name
 
 
 def _normalize_stage_status(
@@ -196,7 +195,7 @@ def status_remote(
         ) -> dict:
     """
     Generalized remote stage status query for any stage whose producing
-    procedure is configured in run_settings.procedure_resource_name.
+    procedure is configured in run_settings.placements.
     """
     resource_name = _get_stage_resource_name(seekrflow, stage_name)
     if resource_name == "local":
@@ -240,6 +239,67 @@ def status_remote(
     # is unavailable in the status-check environment).
     result["stage_status"] = _normalize_stage_status(result)
     return result
+
+
+def remote_run_python_snippet_workflow(args):
+    """Run a python snippet on the remote worker; return raw stdout/stderr.
+    Args: [working_dir, snippet, worker_init]. Stdlib only (no seekrflow)."""
+    import shlex, pathlib, subprocess
+    working_dir, snippet = args[0], args[1]
+    worker_init = args[2] if len(args) > 2 else ""
+    init = (worker_init or "").strip()
+    cmd = (f"{init}; python -c {shlex.quote(snippet)}" if init
+           else f"python -c {shlex.quote(snippet)}")
+    try:
+        proc = subprocess.run(["bash", "-lc", cmd],
+                              cwd=str(pathlib.Path(working_dir)),
+                              capture_output=True, text=True, timeout=120)
+        return {"success": True, "error": None, "stdout": proc.stdout,
+                "stderr": proc.stderr, "returncode": proc.returncode}
+    except Exception as e:
+        return {"success": False, "error": str(e), "stdout": "", "stderr": ""}
+
+
+def fetch_unit_counts_remote(
+        seekrflow: structures.Seekrflow,
+        launching_stage: typing.Any,
+        resource: structures.Resource_remote_base,
+        silent: bool = False,
+        ) -> dispatch_lowering.StageUnitCounts:
+    """
+    Query seekr ``info`` on a remote worker for launch-time unit enumeration.
+    """
+    if resource.type not in ("slurm_remote", "pbs_remote"):
+        raise NotImplementedError(
+            f"Resource type {resource.type} is not implemented.")
+
+    input_stage_index = getattr(launching_stage, "input_stage_index", 0)
+    launching_stage_index = getattr(
+        launching_stage, "index", launching_stage.name)
+    snippet = dispatch_lowering.build_info_fetch_snippet(
+        "model.json",
+        launching_stage.name,
+        input_stage_index,
+        launching_stage_index,
+    )
+    extra_args = [
+        snippet,
+        getattr(resource, "worker_init", "") or "",
+    ]
+
+    result = submit_remote_workflow(
+        seekrflow,
+        resource.name,
+        remote_run_python_snippet_workflow,
+        extra_args=extra_args,
+        silent=silent,
+    )
+    if not result.get("success"):
+        raise RuntimeError(
+            f"Remote unit-count fetch failed: {result.get('error')}")
+    return dispatch_lowering.parse_info_fetch_output(
+        result.get("stdout", ""))
+
 
 def submit_remote_run_workflow(
         seekrflow: structures.Seekrflow,
@@ -286,7 +346,6 @@ def submit_remote_run_workflow(
             indices,
             model_filename,
             workflow_type,
-            getattr(resource, "mps", 1),
             anchor_times
         ]
         run_workflow = workload_slurm.slurm_remote_run_workflow
@@ -307,7 +366,6 @@ def submit_remote_run_workflow(
             indices,
             model_filename,
             workflow_type,
-            getattr(resource, "mps", 1),
             anchor_times
         ]
         run_workflow = workload_pbs.pbs_remote_run_workflow
@@ -322,14 +380,26 @@ def submit_remote_run_workflow(
 def submit_remote_cancel_workflow(
         seekrflow: structures.Seekrflow,
         resource_name: str,
-        job_id: str,
+        job_id: str | None = None,
+        job_name: str | None = None,
         silent: bool = False
     ) -> None:
     """
     Cancel the remote stage. Submit a Globus Compute or SSH workflow to
     signal the cancellation.
+
+    Cancel by ``job_id``, by scheduler ``job_name``, or both when provided.
     """
-    args = [job_id]
+    if job_id is None and job_name is None:
+        raise ValueError("job_id or job_name is required for remote cancel")
+    extra_args: list[str] = []
+    if job_id is not None:
+        extra_args.append(job_id)
+    if job_name is not None:
+        if job_id is None:
+            extra_args = ["", job_name]
+        else:
+            extra_args.append(job_name)
     resource = seekrflow.run_settings.get_resource_by_name(resource_name)
 
     if resource.type == "slurm_remote":
@@ -340,23 +410,28 @@ def submit_remote_cancel_workflow(
         raise NotImplementedError(f"Resource type {resource.type} not implemented")
 
     submit_remote_workflow(seekrflow, resource_name,
-                           cancel_workflow, extra_args=args, silent=silent)
+                           cancel_workflow, extra_args=extra_args, silent=silent)
     return
 
-def force_rerun_stage_remote(
+def cancel_and_reset_remote_stage(
         seekrflow: structures.Seekrflow,
         stage_name: str,
         silent: bool = False
         ) -> None:
     """
-    Force re-run a stage on a remote resource by canceling jobs and deleting files.
-    
+    Cancel a stage's remote job and reset its scheduler/runner bookkeeping.
+
+    Cancels any running job for the stage, waits until it is fully gone, and
+    clears the workload-manager runner state so the stage resubmits fresh.
+    Stage output cleanup is handled separately by seekr's own
+    ``force_overwrite`` in the run command, so this does not delete data files.
+
     Parameters
     ----------
     seekrflow : structures.Seekrflow
         The seekrflow configuration
     stage_name : str
-        Name of the stage ("bd", "hidr", or "seekr")
+        Name of the stage to reset
     silent : bool
         Whether to suppress output
     """
@@ -365,24 +440,24 @@ def force_rerun_stage_remote(
     if resource_name == "local":
         raise ValueError(f"Stage {stage_name} is configured to run locally, not remotely")
 
-    print(f"Forcing re-run of remote stage: {stage_name} on resource {resource_name}")
+    print(f"Canceling and resetting remote stage: {stage_name} on resource {resource_name}")
 
     resource = seekrflow.run_settings.get_resource_by_name(resource_name)
 
     if resource.type == "slurm_remote":
-        force_rerun_workflow = workload_slurm.slurm_remote_force_rerun_workflow
+        cancel_reset_workflow = workload_slurm.slurm_remote_force_rerun_workflow
     elif resource.type == "pbs_remote":
-        force_rerun_workflow = workload_pbs.pbs_remote_force_rerun_workflow
+        cancel_reset_workflow = workload_pbs.pbs_remote_force_rerun_workflow
     else:
         raise NotImplementedError(f"Resource type {resource.type} not implemented")
 
     result = submit_remote_workflow(
-        seekrflow, resource_name, force_rerun_workflow,
+        seekrflow, resource_name, cancel_reset_workflow,
         extra_args=[stage_name], silent=silent)
 
     if result.get("canceled_job"):
         print(f"  Canceled job: {result['canceled_job']}")
 
-    print(f"  Deleted files for {stage_name} stage")
+    print(f"  Cleared runner state for {stage_name} stage")
 
     return

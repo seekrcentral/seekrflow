@@ -161,11 +161,13 @@
                 }
             }
         ],
-        "procedure_resource_name": {
-            "equilibration": "local",
-            "metadynamics": "anvil",
-            "MMVT": "delta",
-            "bd": "local"
-        }
+        "placements": [
+            { "target": [], "resource": "local" },
+            { "target": ["equilibration"], "resource": "local" },
+            { "target": ["metadynamics", "sampling"], "resource": "anvil" },
+            { "target": ["metadynamics", "logistic"], "resource": "local" },
+            { "target": ["MMVT"], "resource": "delta" },
+            { "target": ["bd"], "resource": "local" }
+        ]
     }
 }

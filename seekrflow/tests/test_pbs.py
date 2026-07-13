@@ -9,7 +9,8 @@ import pytest
 import json
 from seekrflow.modules.structures import (
     Resource_remote_pbs,
-    Run_settings
+    Run_settings,
+    Placement,
 )
 from cattrs.strategies import include_subclasses
 
@@ -174,11 +175,11 @@ def test_run_settings_with_pbs_resource():
 
     run_settings = Run_settings(
         resources=[pbs_resource],
-        procedure_resource_name={
-            "bd": "local",
-            "hidr": "pbs_cluster",
-            "seekr": "pbs_cluster",
-        },
+        placements=[
+            Placement(target=["bd"], resource="local"),
+            Placement(target=["hidr"], resource="pbs_cluster"),
+            Placement(target=["seekr"], resource="pbs_cluster"),
+        ],
     )
 
     assert len(run_settings.resources) == 1
@@ -204,11 +205,11 @@ def test_run_settings_mixed_resources():
 
     run_settings = Run_settings(
         resources=[slurm_resource, pbs_resource],
-        procedure_resource_name={
-            "bd": "local",
-            "hidr": "slurm_cluster",
-            "seekr": "pbs_cluster",
-        },
+        placements=[
+            Placement(target=["bd"], resource="local"),
+            Placement(target=["hidr"], resource="slurm_cluster"),
+            Placement(target=["seekr"], resource="pbs_cluster"),
+        ],
     )
 
     assert len(run_settings.resources) == 2

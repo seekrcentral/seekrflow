@@ -45,17 +45,85 @@ import seekrflow.modules.structures as structures
 import seekrflow.modules.transfer.base as transfer_base
 import seekrflow.modules.workload_managers.local_multiprocessing as workload_local_mp
 import seekrflow.modules.workload_managers.remote as workload_remote
+import seekrflow.modules.workload_managers.co_schedule_fusion as co_schedule_fusion
+import seekrflow.modules.workload_managers.dispatch_lowering as dispatch_lowering
+import seekrflow.modules.workload_managers.remote_stage_lifecycle as remote_stage_lifecycle
 
 _RICH_CONSOLE = Console()
 
 KEYSTROKE_CHECK_INTERVAL = 1.0 # seconds
 MAIN_LOOP_INTERVAL = 30.0 # 600.0  # seconds
 MAX_SUBSEQUENT_NONCOMPLETED_RUNS = 3
+IDLE_INCOMPLETE_CHECKS_BEFORE_RESUBMIT = 3
+COMPLETED_DRAIN_CHECKS = 3
+SHUTDOWN_CANCEL_TIMEOUT = 30.0
+ENGINE_SHUTDOWN_TIMEOUT = 15.0
 
 POLLING_INTERVAL = 5.0  # seconds
 STATUS_WRITE_INTERVAL = 5.0  # seconds
 STATUS_FILE_NAME = ".seekrflow_job_status.json"
 STATUS_SCHEMA_VERSION = 1
+
+combine_fused_commands = co_schedule_fusion.combine_fused_commands
+populate_fusion_map = co_schedule_fusion.populate_fusion_map
+fusion_dependencies_satisfied = co_schedule_fusion.fusion_dependencies_satisfied
+skips_remote_submit = co_schedule_fusion.skips_remote_submit
+remote_scheduler_job_name = remote_stage_lifecycle.remote_scheduler_job_name
+classify_remote_probe_status = remote_stage_lifecycle.classify_remote_probe_status
+
+
+def build_remote_stage_command_string(
+        seekrflow: structures.Seekrflow,
+        stage: scales_base.Base_stage,
+        resource: structures.Resource_remote_base,
+        resolved_execution: structures.Resolved_execution | None,
+        destination_path: str,
+        *,
+        force_overwrite: bool,
+        benchmark_mode: bool,
+        ) -> tuple[str, list[int] | None]:
+    """
+    Build the remote command for one stage (single job or array driver).
+    """
+    output_filename = os.path.join(
+        destination_path, f"{stage.name}_run.out")
+    force_overwrite_flag = "True" if force_overwrite else "False"
+    benchmark_flag = "True" if benchmark_mode else "False"
+    dispatch = (
+        resolved_execution.dispatch
+        if resolved_execution is not None else None)
+    dimensions = dispatch.dimensions if dispatch is not None else None
+    group_size = dispatch.group_size if dispatch is not None else None
+    concurrency = dispatch.concurrency if dispatch is not None else 1
+
+    if dispatch_lowering.needs_unit_enumeration(dimensions):
+        unit_counts = workload_remote.fetch_unit_counts_remote(
+            seekrflow, stage, resource)
+        lowered = dispatch_lowering.lower_dispatch(
+            dimensions,
+            group_size,
+            concurrency,
+            unit_counts,
+        )
+        command_string = dispatch_lowering.build_remote_command_string(
+            stage.name,
+            lowered,
+            force_overwrite=force_overwrite,
+            benchmark=benchmark_mode,
+            output_filename=output_filename,
+        )
+        indices = dispatch_lowering.array_member_indices(lowered)
+        return command_string, indices
+
+    command_string = (
+        "python -c \"import seekr.modules.structures as structures; "
+        "import seekr.run as seekr_run; "
+        "model = structures.load_model('model.json'); "
+        f"seekr_run.run(model, '{stage.name}', 'any', None, "
+        f"{force_overwrite_flag}, None, benchmark={benchmark_flag})\""
+        f" > {output_filename}"
+    )
+    return command_string, None
 
 
 def load_job_status(root_directory: str) -> dict:
@@ -93,6 +161,7 @@ def determine_stage_manager_status(manager_status: dict | None) -> str:
     else:
         return "unknown"
 
+
 @attrs.define
 class StageWorkflow:
     """
@@ -105,6 +174,8 @@ class StageWorkflow:
     workflow_engine: WorkflowEngine = attrs.field(repr=False)
     resource_name: str = attrs.field(default="local")
     resource: structures.Resource_remote_base | None = attrs.field(
+        default=None, repr=False)
+    resolved_execution: structures.Resolved_execution | None = attrs.field(
         default=None, repr=False)
 
     # Derived / mutable state
@@ -135,6 +206,12 @@ class StageWorkflow:
     transfer_status: str = attrs.field(default="idle")
     transfer_error: str | None = attrs.field(default=None)
     last_raw_status: dict | None = attrs.field(default=None, repr=False)
+    co_schedule_with: str | None = attrs.field(default=None)
+    fusion_host: str | None = attrs.field(default=None)
+    fused_before: list[str] = attrs.field(factory=list)
+    fused_after: list[str] = attrs.field(factory=list)
+    peer_workflows: dict[str, "StageWorkflow"] = attrs.field(
+        factory=dict, repr=False)
 
     def __attrs_post_init__(self) -> None:
         """
@@ -172,10 +249,47 @@ class StageWorkflow:
             self.transfer_from = dependency_resource_name
         return
 
-    async def create_task(self):
+    async def create_monitor_only_task(self) -> None:
+        """Register only the monitor loop (no transfer or submission)."""
+        @self.workflow_engine.function_task
+        async def monitor_only(*args):
+            await self._monitor_stage_loop()
+
+        self.task = monitor_only()
+        await asyncio.sleep(0)
+
+    async def probe_remote_launch(
+            self,
+            ) -> tuple[str, dict | None]:
+        """
+        One-shot remote probe for fresh launch from ``unstarted`` / ``unknown``.
+
+        Returns ``(action, status)`` where action is ``completed``,
+        ``reattach``, or ``submit``.
+        """
+        if self.resource_name == "local" or self.fusion_host is not None:
+            return "submit", None
+        try:
+            status = workload_remote.status_remote(
+                self.seekrflow,
+                self.stage.name,
+                self.model,
+                benchmark_mode=self.benchmark_mode,
+            )
+        except Exception as e:
+            print(
+                f"[remote-probe] stage {self.stage.name}: probe failed "
+                f"({e}); submitting fresh")
+            return "submit", None
+        return classify_remote_probe_status(status), status
+
+    async def create_tasks(self):
         """
         Register tasks that will be python functions and shell command strings.
         """
+        if skips_remote_submit(self):
+            await self.create_monitor_only_task()
+            return
 
         # Transfer files if dependent stage resource is different
         @self.workflow_engine.function_task
@@ -281,30 +395,76 @@ class StageWorkflow:
                     raise Exception(
                         f"Remote resource config missing for {self.resource_name!r}")
                 try:
-                    force_overwrite_flag = "True" if self.force_overwrite else "False"
-                    if self.force_overwrite:
-                        workload_remote.force_rerun_stage_remote(
-                            self.seekrflow, self.stage.name)
-                        # Force-rerun is a one-shot request.
-                        self.force_overwrite = False
-
                     destination_path = os.path.join(
                         self.resource.remote_working_directory, self.seekrflow.name)
                     destination_model_filename = os.path.join(
                         destination_path, "model.json")
-                    output_filename = os.path.join(
-                        destination_path, f"{self.stage.name}_run.out")
-                    benchmark_flag = "True" if self.benchmark_mode else "False"
 
-                    # Use seekr.run directly for remote parity with local_multiprocessing.
-                    command_string = (
-                        "python -c \"import seekr.modules.structures as structures; "
-                        "import seekr.run as seekr_run; "
-                        "model = structures.load_model('model.json'); "
-                        f"seekr_run.run(model, '{self.stage.name}', 'any', None, "
-                        f"{force_overwrite_flag}, None, benchmark={benchmark_flag})\""
-                        f" > {output_filename}"
+                    # Capture and apply each stage's one-shot force_overwrite.
+                    # For remote stages this both (a) cancels any running job
+                    # and clears runner state via cancel_and_reset_remote_stage and
+                    # (b) threads the flag into the seekr run command so seekr
+                    # wipes the stage output, mirroring the local path.
+                    stages_in_job = (
+                        list(self.fused_before)
+                        + [self.stage.name]
+                        + list(self.fused_after))
+                    force_map: dict[str, bool] = {}
+                    for stage_name in stages_in_job:
+                        target_sw = (
+                            self if stage_name == self.stage.name
+                            else self.peer_workflows[stage_name])
+                        force_now = target_sw.force_overwrite
+                        force_map[stage_name] = force_now
+                        if force_now:
+                            workload_remote.cancel_and_reset_remote_stage(
+                                self.seekrflow, stage_name)
+                            target_sw.force_overwrite = False
+
+                    stage_commands: list[str] = []
+                    indices = None
+                    for fused_name in self.fused_before:
+                        fused_sw = self.peer_workflows[fused_name]
+                        fused_cmd, _ = build_remote_stage_command_string(
+                            self.seekrflow,
+                            fused_sw.stage,
+                            self.resource,
+                            fused_sw.resolved_execution,
+                            destination_path,
+                            force_overwrite=force_map[fused_name],
+                            benchmark_mode=fused_sw.benchmark_mode,
+                        )
+                        stage_commands.append(fused_cmd)
+
+                    host_cmd, host_indices = build_remote_stage_command_string(
+                        self.seekrflow,
+                        self.stage,
+                        self.resource,
+                        self.resolved_execution,
+                        destination_path,
+                        force_overwrite=force_map[self.stage.name],
+                        benchmark_mode=self.benchmark_mode,
                     )
+                    stage_commands.append(host_cmd)
+                    indices = host_indices
+
+                    for fused_name in self.fused_after:
+                        fused_sw = self.peer_workflows[fused_name]
+                        fused_cmd, _ = build_remote_stage_command_string(
+                            self.seekrflow,
+                            fused_sw.stage,
+                            self.resource,
+                            fused_sw.resolved_execution,
+                            destination_path,
+                            force_overwrite=force_map[fused_name],
+                            benchmark_mode=fused_sw.benchmark_mode,
+                        )
+                        stage_commands.append(fused_cmd)
+
+                    if len(stage_commands) == 1:
+                        command_string = host_cmd
+                    else:
+                        command_string = combine_fused_commands(stage_commands)
 
                     # Determine effective walltime:
                     #   - benchmark mode: short fixed cap
@@ -361,7 +521,7 @@ class StageWorkflow:
                         command_string,
                         destination_model_filename,
                         workflow_type=self.stage.name,
-                        indices=None,
+                        indices=indices,
                         anchor_times=anchor_times_for_submit,
                         time_limit_override=time_limit_override,
                     )
@@ -408,155 +568,191 @@ class StageWorkflow:
         self.task = run_stage(*self.dependency_tasks)
         await asyncio.sleep(0) # let run_stage's async_wrapper register
 
-        # Monitor stage
         @self.workflow_engine.function_task
         async def monitor_stage(task):
-            while True:
-                if self.detached_requested:
-                    break
-                # Check telemetry for updates on the task, and update self.state, self.progress, etc. accordingly.
-                if self.semaphore == "stop":
-                    break
-                if self.resource_name == "local":
-                    # TODO: handle anchor and swarm_id args here
-                    process_alive = (
-                        self.process is not None and self.process.is_alive())
-                    try:
-                        status = workload_local_mp.status_local(
-                            self.model.directory, self.stage.index, 
-                            self.stage.name, self.process)
-                    except Exception as e:
-                        # The status check itself failed (e.g. seekr.status
-                        # tried to read a checkpoint that is missing or being
-                        # rewritten by a freshly relaunched force_overwrite
-                        # run). If the run process is still alive this is a
-                        # transient condition: log it and retry next cycle
-                        # rather than letting the exception freeze the monitor.
-                        # If the process is not alive, fall through so the
-                        # failure check below can surface the real error.
-                        if process_alive:
-                            print(f"[local-status] stage {self.stage.name}: "
-                                  f"status check raised (process still alive, "
-                                  f"will retry): {e}")
-                            await asyncio.sleep(POLLING_INTERVAL)
-                            continue
-                        print(f"[local-status] stage {self.stage.name}: status "
-                              f"check raised and process not alive: {e}")
-                        status = None
-                    if status is not None:
-                        self.last_raw_status = status
-                    # Check if process failed. This raises with the child's
-                    # error message and traceback (e.g. a missing-checkpoint
-                    # AssertionError that means the stage must be re-run with
-                    # force_overwrite). Translate it into a failed state rather
-                    # than letting it escape and silently freeze the monitor.
-                    try:
-                        workload_local_mp\
-                            .check_and_raise_if_process_failed(
-                                self.stage.name, self.process, 
-                                self.model.directory)
-                    except Exception as e:
-                        self.state = "failed"
-                        self.manager_status = "idle"
-                        print(f"[local-run] stage {self.stage.name} failed:\n"
-                              f"{e}")
-                    if status is not None and self.state != "failed":
-                        self.state = status["stage_status"]["state"]
-                        self.progress = status["stage_status"]["progress"]
-                        manager_status = status["manager_status"]
-                        self.manager_status \
-                            = determine_stage_manager_status(manager_status)
-                        if manager_status and manager_status.get("jobs"):
-                            for job in manager_status["jobs"]:
-                                self.job_ids.add(job["JobID"])
-                else:
-                    status = None
-                    try:
-                        status = workload_remote.status_remote(
-                            self.seekrflow,
-                            self.stage.name,
-                            self.model,
-                            benchmark_mode=self.benchmark_mode,
-                        )
-                    except Exception as e:
-                        # Network/auth/parse failure: log cleanly, keep current state.
-                        print(
-                            f"[remote-status] stage {self.stage.name}: "
-                            f"status call raised an exception: {e}"
-                        )
-                        await asyncio.sleep(POLLING_INTERVAL)
-                        continue
-                    if status is not None:
-                        self.last_raw_status = status
-                        manager_status = status.get("manager_status")
-                        # Always update manager/job info from whatever we got.
-                        self.manager_status = determine_stage_manager_status(
-                            manager_status)
-                        if manager_status and manager_status.get("jobs"):
-                            for job in manager_status["jobs"]:
-                                job_id = job.get("JobID")
-                                if job_id:
-                                    self.job_ids.add(str(job_id))
-                        status_ok = status.get("success", True)
-                        stage_status = status.get("stage_status", {})
-                        if not status_ok:
-                            # Remote workflow failed (e.g. seekr not on PATH for
-                            # progress check).  Log cleanly.  If the scheduler
-                            # still shows jobs we keep state=started so the user
-                            # can see the job is still running.
-                            remote_err = status.get("error") or stage_status.get("notes", "")
-                            notes_msg = stage_status.get("notes", "")
-                            display_err = notes_msg if notes_msg else remote_err
-                            if self.manager_status in {"running", "queued", "running/queued"}:
-                                print(
-                                    f"[remote-status] stage {self.stage.name}: "
-                                    f"progress check failed (job still in scheduler): "
-                                    f"{display_err}"
-                                )
-                                # Keep whatever state we had; scheduler shows active jobs.
-                            else:
-                                print(
-                                    f"[remote-status] stage {self.stage.name}: "
-                                    f"progress check failed and no active jobs: "
-                                    f"{display_err}"
-                                )
-                                self.state = "failed"
-                        else:
-                            self.state = stage_status.get("state", self.state)
-                            self.progress = stage_status.get("progress", self.progress)
-                
-                # TODO: handle non-completed runs.
-                if self.state == "completed":
-                    break
-                elif self.state == "failed":
-                    if self.semaphore != "wait":
-                        self.semaphore = "wait"
-                        print(f"[semaphore] stage {self.stage.name} failed; "
-                              f"setting semaphore=wait")
-                    break
-                else:
-                    """
-                    if self.progress > self.last_progress:
-                        self.subsequent_noncompleted_runs = 0
-                        self.last_progress = self.progress
-                    else:
-                        self.subsequent_noncompleted_runs += 1
-                        if self.subsequent_noncompleted_runs > MAX_SUBSEQUENT_NONCOMPLETED_RUNS:
-                            print(f"Warning: Stage {self.stage.name} has had "
-                                  f"{self.subsequent_noncompleted_runs} subsequent "
-                                  f"checks without progress. Last progress: "
-                                  f"{self.last_progress:.2%}")
-                    """
-                    # Keep running the monitor until completion or failure, 
-                    await asyncio.sleep(POLLING_INTERVAL)
-            # Loop exited (completed, failed, or stop/detach requested).
-            # Clear the task ref so the scheduler may relaunch the stage if
-            # appropriate.
-            self.task = None
-            return
-        
+            await self._monitor_stage_loop()
+
         self.task = monitor_stage(self.task)
         await asyncio.sleep(0) # let monitor_stage's async_wrapper register
+        return
+
+    async def _monitor_stage_loop(self) -> None:
+        idle_incomplete_checks = 0
+        completed_drain_checks = 0
+        remote_scheduler_active = False
+        while True:
+            if self.detached_requested:
+                break
+            if self.semaphore == "stop":
+                break
+            if self.resource_name == "local":
+                process_alive = (
+                    self.process is not None and self.process.is_alive())
+                try:
+                    status = workload_local_mp.status_local(
+                        self.model.directory, self.stage.index,
+                        self.stage.name, self.process)
+                except Exception as e:
+                    if process_alive:
+                        print(f"[local-status] stage {self.stage.name}: "
+                              f"status check raised (process still alive, "
+                              f"will retry): {e}")
+                        await asyncio.sleep(POLLING_INTERVAL)
+                        continue
+                    print(f"[local-status] stage {self.stage.name}: status "
+                          f"check raised and process not alive: {e}")
+                    status = None
+                if status is not None:
+                    self.last_raw_status = status
+                try:
+                    workload_local_mp.check_and_raise_if_process_failed(
+                        self.stage.name, self.process,
+                        self.model.directory)
+                except Exception as e:
+                    self.state = "failed"
+                    self.manager_status = "idle"
+                    print(f"[local-run] stage {self.stage.name} failed:\n{e}")
+                if status is not None and self.state != "failed":
+                    self.state = status["stage_status"]["state"]
+                    self.progress = status["stage_status"]["progress"]
+                    manager_status = status["manager_status"]
+                    self.manager_status = determine_stage_manager_status(
+                        manager_status)
+                    if manager_status and manager_status.get("jobs"):
+                        for job in manager_status["jobs"]:
+                            self.job_ids.add(job["JobID"])
+            else:
+                host_sw = None
+                if self.fusion_host is not None:
+                    host_sw = self.peer_workflows.get(self.fusion_host)
+                status = None
+                try:
+                    status = workload_remote.status_remote(
+                        self.seekrflow,
+                        self.stage.name,
+                        self.model,
+                        benchmark_mode=self.benchmark_mode,
+                    )
+                except Exception as e:
+                    print(
+                        f"[remote-status] stage {self.stage.name}: "
+                        f"status call raised an exception: {e}"
+                    )
+                    await asyncio.sleep(POLLING_INTERVAL)
+                    continue
+                if status is not None:
+                    self.last_raw_status = status
+                    manager_status = status.get("manager_status")
+                    self.manager_status = determine_stage_manager_status(
+                        manager_status)
+                    if manager_status and manager_status.get("jobs"):
+                        for job in manager_status["jobs"]:
+                            job_id = job.get("JobID")
+                            if job_id:
+                                self.job_ids.add(str(job_id))
+                    host_active = False
+                    if host_sw is not None:
+                        host_active = host_sw.manager_status in {
+                            "running", "queued", "running/queued",
+                        }
+                        if host_sw.job_ids:
+                            self.job_ids.update(host_sw.job_ids)
+                    status_ok = status.get("success", True)
+                    stage_status = status.get("stage_status", {})
+                    scheduler_active = self.manager_status in {
+                        "running", "queued", "running/queued",
+                    }
+                    if host_sw is not None:
+                        scheduler_active = scheduler_active or host_active
+                    remote_scheduler_active = scheduler_active
+                    if not status_ok:
+                        remote_err = (
+                            status.get("error")
+                            or stage_status.get("notes", ""))
+                        notes_msg = stage_status.get("notes", "")
+                        display_err = notes_msg if notes_msg else remote_err
+                        if scheduler_active:
+                            print(
+                                f"[remote-status] stage {self.stage.name}: "
+                                f"progress check failed (job still in "
+                                f"scheduler): {display_err}"
+                            )
+                        else:
+                            print(
+                                f"[remote-status] stage {self.stage.name}: "
+                                f"progress check failed and no active jobs: "
+                                f"{display_err}"
+                            )
+                            self.state = "failed"
+                    else:
+                        self.state = stage_status.get("state", self.state)
+                        self.progress = stage_status.get(
+                            "progress", self.progress)
+                        if (self.fusion_host is None
+                                and self.state != "completed"
+                                and not scheduler_active):
+                            idle_incomplete_checks += 1
+                            if (idle_incomplete_checks
+                                    >= IDLE_INCOMPLETE_CHECKS_BEFORE_RESUBMIT):
+                                if self.progress > self.last_progress:
+                                    self.last_progress = self.progress
+                                    self.subsequent_noncompleted_runs = 0
+                                    print(
+                                        f"[remote-resubmit] stage "
+                                        f"{self.stage.name}: job gone with "
+                                        f"progress advance "
+                                        f"({self.progress:.1%}); resubmitting")
+                                    self.state = "unstarted"
+                                    break
+                                self.subsequent_noncompleted_runs += 1
+                                if (self.subsequent_noncompleted_runs
+                                        > MAX_SUBSEQUENT_NONCOMPLETED_RUNS):
+                                    print(
+                                        f"[remote-resubmit] stage "
+                                        f"{self.stage.name}: no progress after "
+                                        f"{self.subsequent_noncompleted_runs} "
+                                        f"idle resubmits; giving up")
+                                    self.state = "failed"
+                                    self.semaphore = "wait"
+                                    break
+                                print(
+                                    f"[remote-resubmit] stage "
+                                    f"{self.stage.name}: job gone without "
+                                    f"progress "
+                                    f"({self.subsequent_noncompleted_runs}/"
+                                    f"{MAX_SUBSEQUENT_NONCOMPLETED_RUNS}); "
+                                    f"resubmitting")
+                                self.state = "unstarted"
+                                break
+                        else:
+                            idle_incomplete_checks = 0
+
+            if self.state == "completed":
+                if (self.resource_name != "local"
+                        and remote_scheduler_active):
+                    completed_drain_checks += 1
+                    if completed_drain_checks >= COMPLETED_DRAIN_CHECKS:
+                        print(
+                            f"[remote-drain] stage {self.stage.name}: "
+                            f"scheduler still active after "
+                            f"{completed_drain_checks} completion checks; "
+                            f"forcing manager=idle")
+                        self.manager_status = "idle"
+                        break
+                    await asyncio.sleep(POLLING_INTERVAL)
+                    continue
+                if self.resource_name != "local":
+                    self.manager_status = "idle"
+                break
+            elif self.state == "failed":
+                if self.semaphore != "wait":
+                    self.semaphore = "wait"
+                    print(f"[semaphore] stage {self.stage.name} failed; "
+                          f"setting semaphore=wait")
+                break
+            else:
+                await asyncio.sleep(POLLING_INTERVAL)
+        self.task = None
         return
 
     def status_snapshot(self) -> dict:
@@ -617,31 +813,45 @@ class StageWorkflow:
         if self.resource_name != "local":
             if self.resource is None:
                 return
-            if len(self.job_ids) == 0:
-                try:
-                    status = workload_remote.status_remote(
-                        self.seekrflow,
-                        self.stage.name,
-                        self.model,
-                        benchmark_mode=self.benchmark_mode,
-                    )
-                except Exception as e:
-                    print(f"Warning: failed to query remote jobs for cancel: {e}")
-                    status = None
-                manager_status = (status or {}).get("manager_status") or {}
-                for job in manager_status.get("jobs", []):
-                    job_id = job.get("JobID")
-                    if job_id:
-                        self.job_ids.add(str(job_id))
+            try:
+                status = workload_remote.status_remote(
+                    self.seekrflow,
+                    self.stage.name,
+                    self.model,
+                    benchmark_mode=self.benchmark_mode,
+                )
+            except Exception as e:
+                print(f"Warning: failed to query remote jobs for cancel: {e}")
+                status = None
+            manager_status = (status or {}).get("manager_status") or {}
+            for job in manager_status.get("jobs", []):
+                job_id = job.get("JobID")
+                if job_id:
+                    self.job_ids.add(str(job_id))
+            job_name = remote_scheduler_job_name(
+                self.seekrflow.name, self.stage.name)
+            print(
+                f"[shutdown] cancelling remote jobs for {self.stage.name}: "
+                f"ids={sorted(self.job_ids)}, name={job_name!r}")
             for job_id in sorted(self.job_ids):
                 try:
                     workload_remote.submit_remote_cancel_workflow(
                         self.seekrflow,
                         self.resource_name,
-                        job_id,
+                        job_id=job_id,
                     )
                 except Exception as e:
                     print(f"Warning: failed to cancel remote job {job_id}: {e}")
+            try:
+                workload_remote.submit_remote_cancel_workflow(
+                    self.seekrflow,
+                    self.resource_name,
+                    job_name=job_name,
+                )
+            except Exception as e:
+                print(
+                    f"Warning: failed to cancel remote jobs by name "
+                    f"{job_name!r}: {e}")
             self.manager_status = "idle"
             return
         process = self.process
@@ -752,6 +962,8 @@ class SeekrPipeline:
     _live_display: typing.Any = attrs.field(default=None, repr=False)
     _detached_requested: bool = attrs.field(default=False, repr=False)
     _shutting_down: bool = attrs.field(default=False, repr=False)
+    _shutdown_task: asyncio.Task | None = attrs.field(
+        default=None, repr=False)
     _stop_event: asyncio.Event | None = attrs.field(
         default=None, repr=False)
 
@@ -760,6 +972,10 @@ class SeekrPipeline:
             ) -> None:
         for stage in self.model.stages:
             self.add_stage(stage)
+        by_name = {sw.stage.name: sw for sw in self.stage_workflows}
+        for sw in self.stage_workflows:
+            sw.peer_workflows = by_name
+        populate_fusion_map(self.stage_workflows, self.benchmark_stage)
         for sw in self.stage_workflows:
             if sw.stage.name in self.semaphore_overrides:
                 sw.semaphore = self.semaphore_overrides[sw.stage.name]
@@ -773,11 +989,11 @@ class SeekrPipeline:
         """
         self.stage_names.append(stage.name)
         try:
-            stage_resource = self.seekrflow.run_settings.get_stage_resource(
+            resolved = self.seekrflow.run_settings.resolve_stage_execution(
                 stage.name, self.seekrflow.workflow.procedure)
         except ValueError:
-            stage_resource = None
-        resource_name = "local" if stage_resource is None else stage_resource.name
+            resolved = None
+        resource_name = "local" if resolved is None else resolved.resource_name
         stage_workflow = StageWorkflow(
             self.model,
             self.seekrflow,
@@ -785,6 +1001,10 @@ class SeekrPipeline:
             self.workflow_engine,
             resource_name,
         )
+        if resolved is not None:
+            stage_workflow.resolved_execution = resolved
+            if resolved.resource is not None:
+                stage_workflow.resource = resolved.resource
         stage_workflow.force_overwrite = stage.name in self.force_rerun_stages
         stage_workflow.benchmark_mode = (stage.name == self.benchmark_stage)
         self.stage_workflows.append(stage_workflow)
@@ -826,23 +1046,56 @@ class SeekrPipeline:
 
     def _on_signal(self) -> None:
         """ Signal-safe callback: schedule async shutdown. """
+        if self._shutting_down:
+            print("[shutdown] forcing immediate exit")
+            os._exit(1)
+        if self._shutdown_task is not None and not self._shutdown_task.done():
+            print("[shutdown] forcing immediate exit")
+            os._exit(1)
         print("\n\n=== Received interrupt signal ===")
-        asyncio.create_task(self.shutdown())
+        self._shutdown_task = asyncio.create_task(self.shutdown())
+
+    def _cancel_all_stages(self) -> None:
+        """Synchronous remote/local cancellation for all stages."""
+        for stage_workflow in self.stage_workflows:
+            stage_workflow.kill()
 
     async def shutdown(self) -> None:
         """ Kill all stages and shut down the workflow engine. Idempotent. """
         if self._shutting_down:
             return
         self._shutting_down = True
-        for stage_workflow in self.stage_workflows:
-            stage_workflow.kill()
+        timed_out = False
+        loop = asyncio.get_running_loop()
+        try:
+            await asyncio.wait_for(
+                loop.run_in_executor(None, self._cancel_all_stages),
+                timeout=SHUTDOWN_CANCEL_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            timed_out = True
+            print(
+                f"[shutdown] remote job cancellation timed out after "
+                f"{SHUTDOWN_CANCEL_TIMEOUT}s (endpoint unreachable?); "
+                f"abandoning remote cancels and exiting")
         # Wake up background loops (status writer, keystroke watcher) so they
         # can exit promptly instead of waiting for the next tick.
         if self._stop_event is not None:
             self._stop_event.set()
         # Capture terminal state before tearing down the engine.
         self.write_status_snapshot()
-        await self.workflow_engine.shutdown()
+        try:
+            await asyncio.wait_for(
+                self.workflow_engine.shutdown(),
+                timeout=ENGINE_SHUTDOWN_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            timed_out = True
+            print(
+                f"[shutdown] workflow engine shutdown timed out after "
+                f"{ENGINE_SHUTDOWN_TIMEOUT}s; forcing exit")
+        if timed_out:
+            os._exit(1)
         return
 
     async def detach_shutdown(self) -> None:
@@ -1336,7 +1589,12 @@ class SeekrPipeline:
                         all_terminal = False
                         continue
 
-                    if not stage_dependencies_completed(stage_workflow):
+                    if stage_workflow.fusion_host is not None:
+                        deps_ok = fusion_dependencies_satisfied(
+                            stage_workflow, stage_by_name)
+                    else:
+                        deps_ok = stage_dependencies_completed(stage_workflow)
+                    if not deps_ok:
                         all_terminal = False
                         continue
 
@@ -1353,6 +1611,7 @@ class SeekrPipeline:
 
                     if stage_workflow.state in {"failed", "unstarted", "unknown"}:
                         # (Re)launch stage when permitted by semaphore and deps.
+                        prior_state = stage_workflow.state
                         stage_workflow.dependency_indices = []
                         stage_workflow.dependency_tasks = []
                         stage_workflow.task = None
@@ -1376,7 +1635,35 @@ class SeekrPipeline:
                                     != stage_workflow.resource_name):
                                 stage_workflow.transfer_from = \
                                     upstream_sw.resource_name
-                        await stage_workflow.create_task()
+                        if (prior_state in {"unstarted", "unknown"}
+                                and stage_workflow.resource_name != "local"
+                                and stage_workflow.fusion_host is None):
+                            probe_action, probe_status = (
+                                await stage_workflow.probe_remote_launch())
+                            if probe_action == "completed":
+                                stage_workflow.state = "completed"
+                                stage_workflow.progress = 1.0
+                                continue
+                            if probe_action == "reattach":
+                                manager_status = (
+                                    (probe_status or {})
+                                    .get("manager_status") or {})
+                                stage_workflow.state = "started"
+                                stage_workflow.manager_status = (
+                                    determine_stage_manager_status(
+                                        manager_status))
+                                for job in manager_status.get("jobs", []):
+                                    job_id = job.get("JobID")
+                                    if job_id:
+                                        stage_workflow.job_ids.add(str(job_id))
+                                await stage_workflow.create_monitor_only_task()
+                                if stage_workflow.task is not None:
+                                    launched_tasks.append(stage_workflow.task)
+                                    self.stage_tasks.append(
+                                        stage_workflow.task)
+                                all_terminal = False
+                                continue
+                        await stage_workflow.create_tasks()
                         if stage_workflow.task is not None:
                             launched_tasks.append(stage_workflow.task)
                             self.stage_tasks.append(stage_workflow.task)
@@ -1408,6 +1695,8 @@ class SeekrPipeline:
 
         if self._detached_requested:
             await self.detach_shutdown()
+        elif self._shutdown_task is not None:
+            await self._shutdown_task
         else:
             await self.shutdown()
         # NOTE: could summarize telemetry here.
@@ -1437,7 +1726,7 @@ def run_model(
         transfer_from_remote_only: str | None = None,
         force_rerun: list[str] | None = None,
         benchmark_stage: str | None = None,
-        procedure_resource_dict: dict[str, str] | None = None,
+        placement_resource_overrides: dict[str, str] | None = None,
         semaphore_dict: dict[str, str] | None = None,
         keystrokes_enabled: bool = True,
         ) -> None:
@@ -1454,6 +1743,7 @@ def run_model(
         root_directory = seekrflow.root_directory
     model_filename = os.path.join(root_directory, "model.json")
     model = seekr3_structures.load_model(model_filename)
+    structures.validate_run_settings(seekrflow, model)
     if benchmark_stage is not None:
         all_stage_names_for_bench = [s.name for s in model.stages]
         if benchmark_stage not in all_stage_names_for_bench:
@@ -1511,13 +1801,12 @@ def run_model(
     # 2 check cycles (60 seconds)
     MIN_RUNNING_TIME_BEFORE_IDLE = 2 * MAIN_LOOP_INTERVAL  
 
-    # Override resource names if provided (keyed by procedure name).
-    if procedure_resource_dict is not None:
-        for procedure_name in procedure_resource_dict:
-            resource_name = procedure_resource_dict[procedure_name]
+    # Override resource names if provided (dotted target paths).
+    if placement_resource_overrides is not None:
+        for dotted_target, resource_name in placement_resource_overrides.items():
             if resource_name is not None:
-                seekrflow.run_settings.set_procedure_resource(
-                    procedure_name, resource_name)
+                seekrflow.run_settings.set_placement_resource(
+                    dotted_target.split("."), resource_name)
     
     # Signal handling is installed by SeekrPipeline.run_workflows().
 

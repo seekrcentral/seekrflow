@@ -196,14 +196,6 @@ class Resource_remote_slurm(Resource_remote_base):
         default="",
         validator=validators.instance_of(str),
         )
-    remote_seekr2_directory: str = field(
-        default="$HOME/seekr2/seekr2/",
-        validator=validators.instance_of(str),
-        )
-    remote_seekrtools_directory: str = field(
-        default="$HOME/seekrtools/seekrtools/",
-        validator=validators.instance_of(str),
-        )
     remote_working_directory: str = field(
         default="",
         validator=validators.instance_of(str),
@@ -265,14 +257,6 @@ class Resource_remote_pbs(Resource_remote_base):
         default="",
         validator=validators.instance_of(str),
     )
-    remote_seekr2_directory: str = field(
-        default="$HOME/seekr2/seekr2/",
-        validator=validators.instance_of(str),
-    )
-    remote_seekrtools_directory: str = field(
-        default="$HOME/seekrtools/seekrtools/",
-        validator=validators.instance_of(str),
-    )
     remote_working_directory: str = field(
         default="",
         validator=validators.instance_of(str),
@@ -326,6 +310,136 @@ class Resource_remote_pbs(Resource_remote_base):
     )
 
 @define
+class Placement:
+    """
+    Deployment policy for stages whose address path begins with ``target``.
+    """
+    target: list[str] = field(
+        default=Factory(list),
+        validator=validators.deep_iterable(
+            member_validator=validators.instance_of(str),
+            iterable_validator=validators.instance_of(list),
+        ))
+    resource: str | None = field(
+        default=None,
+        validator=validators.optional(validators.instance_of(str)))
+    dispatch: stage_procedures_module.Dispatch | None = field(
+        default=None,
+        validator=validators.optional(validators.instance_of(
+            stage_procedures_module.Dispatch)))
+    co_schedule_with: str | None = field(
+        default=None,
+        validator=validators.optional(
+            validators.in_(["predecessor", "successor"])))
+    cpus_per_task: int | None = field(
+        default=None,
+        validator=validators.optional(validators.instance_of(int)))
+    memory_per_node: int | None = field(
+        default=None,
+        validator=validators.optional(validators.instance_of(int)))
+    time_limit: str | None = field(
+        default=None,
+        validator=validators.optional(validators.instance_of(str)))
+    mps: int | None = field(
+        default=None,
+        validator=validators.optional(validators.instance_of(int)))
+    # time_policy: reserved for Phase 8+ (adaptive walltime).
+
+
+@define
+class Resolved_execution:
+    """Fully-resolved, ready-to-run policy for one stage."""
+    stage_name: str
+    resource_name: str
+    resource: Resource_base | None
+    dispatch: stage_procedures_module.Dispatch
+    co_schedule_with: str | None
+    cpus_per_task: int | None
+    memory_per_node: int | None
+    time_limit: str | None
+    mps: int | None
+
+
+def resource_supports_arrays(resource: Resource_base | None) -> bool:
+    return isinstance(resource, (Resource_remote_slurm, Resource_remote_pbs))
+
+
+def _dispatch_uses_array_spread(dispatch: stage_procedures_module.Dispatch) -> bool:
+    return bool(dispatch.dimensions)
+
+
+def _co_schedule_host_name(
+        stage_name: str,
+        co_schedule_with: str,
+        stage_index: int,
+        model_stages: list,
+        stage_names: list[str],
+        ) -> str:
+    stage = model_stages[stage_index]
+    if co_schedule_with == "predecessor":
+        parent_one_based = getattr(stage, "input_stage_index", 0)
+        if parent_one_based <= 0:
+            raise ValueError(
+                f"Stage {stage_name!r} has co_schedule_with='predecessor' "
+                f"but has no predecessor in the model chain.")
+        return model_stages[parent_one_based - 1].name
+    for idx, other in enumerate(model_stages):
+        if getattr(other, "input_stage_index", 0) - 1 == stage_index:
+            return other.name
+    raise ValueError(
+        f"Stage {stage_name!r} has co_schedule_with='successor' "
+        f"but has no successor in the model chain.")
+
+
+def _placement_targets_match(address: list[str], target: list[str]) -> bool:
+    if len(target) > len(address):
+        return False
+    return address[:len(target)] == target
+
+
+def _collect_matching_placements(
+        address: list[str],
+        placements: list[Placement],
+        ) -> list[Placement]:
+    seen_targets: set[tuple[str, ...]] = set()
+    matching: list[Placement] = []
+    for placement in placements:
+        target_key = tuple(placement.target)
+        if target_key in seen_targets:
+            raise ValueError(
+                f"Duplicate placement target {list(target_key)!r}.")
+        seen_targets.add(target_key)
+        if _placement_targets_match(address, placement.target):
+            matching.append(placement)
+    # Broadest (shortest target) first so more specific placements override.
+    # An empty target ([]) is the broadest of all and acts as the default.
+    matching.sort(key=lambda p: len(p.target))
+    return matching
+
+
+def _apply_placement_fields(
+        accumulator: dict,
+        placement: Placement,
+        ) -> None:
+    if placement.resource is not None:
+        accumulator["resource"] = placement.resource
+    if placement.co_schedule_with is not None:
+        accumulator["co_schedule_with"] = placement.co_schedule_with
+    if placement.cpus_per_task is not None:
+        accumulator["cpus_per_task"] = placement.cpus_per_task
+    if placement.memory_per_node is not None:
+        accumulator["memory_per_node"] = placement.memory_per_node
+    if placement.time_limit is not None:
+        accumulator["time_limit"] = placement.time_limit
+    if placement.mps is not None:
+        accumulator["mps"] = placement.mps
+    if placement.dispatch is not None:
+        base = accumulator.get(
+            "dispatch", stage_procedures_module.Dispatch())
+        accumulator["dispatch"] = base.merged_with(placement.dispatch)
+
+
+@define
 class Run_settings:
     """
     Settings for seekrflow runs.
@@ -335,15 +449,14 @@ class Run_settings:
         Resource_remote_slurm | Resource_remote_pbs
     ] = field(
         default=Factory(list),)
-    # Maps a user-authored PROCEDURE name to the name of the resource that runs
-    #  it. Users author procedures (not stages) in the input, and each
-    #  procedure expands into one or more auto-named stages; resources are
-    #  therefore assigned per procedure and resolved to stages on demand via
-    #  the procedure's ``get_stage_names``.
-    procedure_resource_name: dict[str, str] = field(
-        default=Factory(dict),
-        validator=validators.instance_of(dict),
-        )
+    # A placement with an empty ``target`` ([]) matches every stage and acts
+    #  as the default; more specific (longer) targets override it.
+    placements: list[Placement] = field(
+        default=Factory(list),
+        validator=validators.deep_iterable(
+            member_validator=validators.instance_of(Placement),
+            iterable_validator=validators.instance_of(list),
+        ))
     
     
     def get_resource_by_name(
@@ -359,59 +472,93 @@ class Run_settings:
             if resource.name == resource_name:
                 return resource
         raise ValueError(
-            f"Resource with name '{resource_name}' not found in run_settings.resources.")
+            f"Resource with name '{resource_name}' not found in "
+            f"run_settings.resources.")
 
-    def get_procedure_resource(
+    def set_placement_resource(
             self,
-            procedure_name: str,
-            ) -> Resource_base | None:
-        """
-        Get the resource assigned to a given procedure (None means local).
-        """
-        if procedure_name not in self.procedure_resource_name:
-            raise ValueError(
-                f"No resource assigned to procedure '{procedure_name}'.")
-        resource_name = self.procedure_resource_name[procedure_name]
-        return self.get_resource_by_name(resource_name)
-
-    def set_procedure_resource(
-            self,
-            procedure_name: str,
+            target: list[str],
             resource_name: str,
             ) -> None:
         """
-        Assign a resource name to a procedure after validating that the
-        resource exists (or is local).
+        Assign a resource to a placement target, upserting an existing entry.
         """
-        # Validate resource name early for clearer CLI/runtime errors.
         self.get_resource_by_name(resource_name)
-        self.procedure_resource_name[procedure_name] = resource_name
-        return
+        for placement in self.placements:
+            if placement.target == target:
+                placement.resource = resource_name
+                return
+        self.placements.append(Placement(target=list(target), resource=resource_name))
 
-    def get_stage_resource_name(
+    def resolve_stage_execution(
             self,
             stage_name: str,
             procedure: stage_procedures_module.Stage_procedure_base,
-            ) -> str:
+            ) -> Resolved_execution:
         """
-        Resolve the resource name configured for a given stage by finding the
-        procedure that produces the stage and returning its assigned resource.
-
-        ``procedure`` is the workflow's top-level stage procedure (usually a
-        ``Composite_stage_procedure`` whose children are the user-authored
-        procedures).
+        Resolve the full execution policy for a stage from procedure defaults,
+        placements (longest-prefix wins), and resource defaults.
         """
-        stage_to_procedure = stage_procedures_module\
-            .build_stage_to_procedure_map(procedure)
-        if stage_name not in stage_to_procedure:
+        address_map = stage_procedures_module.build_stage_address_map(procedure)
+        if stage_name not in address_map:
             raise ValueError(
                 f"Stage '{stage_name}' is not produced by any procedure.")
-        procedure_name = stage_to_procedure[stage_name]
-        if procedure_name not in self.procedure_resource_name:
+        address, _role = address_map[stage_name]
+
+        accumulator: dict = {}
+        policy_map = stage_procedures_module.build_stage_policy_map(procedure)
+        emitted = policy_map[stage_name]
+        accumulator["dispatch"] = emitted.dispatch
+        if emitted.co_schedule_with is not None:
+            accumulator["co_schedule_with"] = emitted.co_schedule_with
+
+        for placement in _collect_matching_placements(
+                address, self.placements):
+            _apply_placement_fields(accumulator, placement)
+
+        resource_name = accumulator.get("resource", "local")
+        resource = self.get_resource_by_name(resource_name)
+
+        cpus_per_task = accumulator.get("cpus_per_task")
+        memory_per_node = accumulator.get("memory_per_node")
+        time_limit = accumulator.get("time_limit")
+        mps = accumulator.get("mps")
+        if resource is not None:
+            if cpus_per_task is None:
+                cpus_per_task = resource.cpus_per_task
+            if memory_per_node is None:
+                memory_per_node = resource.memory_per_node
+            if time_limit is None:
+                time_limit = resource.time_limit
+            if mps is None:
+                mps = resource.mps
+
+        dispatch = accumulator.get(
+            "dispatch", stage_procedures_module.Dispatch())
+        if resource is None or not resource_supports_arrays(resource):
+            dispatch = stage_procedures_module.Dispatch(
+                dimensions=dispatch.dimensions,
+                group_size=None,
+                concurrency=dispatch.concurrency,
+            )
+        max_concurrency = mps if mps is not None else 1
+        if dispatch.concurrency > max_concurrency:
             raise ValueError(
-                f"No resource assigned to procedure '{procedure_name}' "
-                f"(which produces stage '{stage_name}').")
-        return self.procedure_resource_name[procedure_name]
+                f"Stage '{stage_name}' has dispatch.concurrency={dispatch.concurrency} "
+                f"but resource '{resource_name}' has mps={max_concurrency}. "
+                f"Reduce dispatch.concurrency to <= {max_concurrency}.")
+
+        return Resolved_execution(
+            stage_name=stage_name,
+            resource_name=resource_name,
+            resource=resource,
+            dispatch=dispatch,
+            co_schedule_with=accumulator.get("co_schedule_with"),
+            cpus_per_task=cpus_per_task,
+            memory_per_node=memory_per_node,
+            time_limit=time_limit,
+            mps=mps,
+        )
 
     def get_stage_resource(
             self,
@@ -419,12 +566,86 @@ class Run_settings:
             procedure: stage_procedures_module.Stage_procedure_base,
             ) -> Resource_base | None:
         """
-        Get the resource for a given stage by resolving the procedure that
-        produces it (None means local).
+        Get the resource for a given stage (None means local).
         """
-        resource_name = self.get_stage_resource_name(stage_name, procedure)
-        return self.get_resource_by_name(resource_name)
+        return self.resolve_stage_execution(
+            stage_name, procedure).resource
 
+
+def validate_run_settings(
+        seekrflow: "Seekrflow",
+        model: typing.Any | None = None,
+        ) -> None:
+    """
+    Validate placement targets, resource references, and co-scheduling rules.
+    If model is None, it's merely a check placements and resources.
+    """
+    procedure = seekrflow.workflow.procedure
+    address_map = stage_procedures_module.build_stage_address_map(procedure)
+    all_addresses = [path for path, _role in address_map.values()]
+    def _target_is_valid(target: list[str]) -> bool:
+        return any(
+            _placement_targets_match(address, target)
+            for address in all_addresses)
+
+    seen_targets: set[tuple[str, ...]] = set()
+    for placement in seekrflow.run_settings.placements:
+        target_key = tuple(placement.target)
+        if target_key in seen_targets:
+            raise ValueError(
+                f"Duplicate placement target {list(target_key)!r}.")
+        seen_targets.add(target_key)
+        if len(placement.target) > 0 and not _target_is_valid(placement.target):
+            valid = sorted({tuple(p) for p in all_addresses})
+            raise ValueError(
+                f"Unknown placement target {placement.target!r}. "
+                f"Valid stage address paths include: "
+                f"{[list(p) for p in valid]}.")
+        if placement.resource is not None:
+            seekrflow.run_settings.get_resource_by_name(placement.resource)
+
+    if model is None:
+        return
+
+    stage_names = [stage.name for stage in model.stages]
+    for stage_name in stage_names:
+        resolved = seekrflow.run_settings.resolve_stage_execution(
+            stage_name, procedure)
+        if resolved.co_schedule_with is None:
+            continue
+        stage_index = stage_names.index(stage_name)
+        neighbor_name = _co_schedule_host_name(
+            stage_name,
+            resolved.co_schedule_with,
+            stage_index,
+            model.stages,
+            stage_names,
+        )
+        neighbor_resolved = seekrflow.run_settings.resolve_stage_execution(
+            neighbor_name, procedure)
+        if neighbor_resolved.resource_name != resolved.resource_name:
+            raise ValueError(
+                f"Stage {stage_name!r} co_schedule_with "
+                f"{resolved.co_schedule_with!r} requires the same resource "
+                f"as neighbor {neighbor_name!r}, but "
+                f"{resolved.resource_name!r} != "
+                f"{neighbor_resolved.resource_name!r}.")
+        if neighbor_resolved.co_schedule_with is not None:
+            raise ValueError(
+                f"Stage {neighbor_name!r} cannot host co-scheduled stage "
+                f"{stage_name!r} because it is itself co-scheduled into "
+                f"another stage.")
+        if _dispatch_uses_array_spread(resolved.dispatch):
+            raise ValueError(
+                f"Stage {stage_name!r} cannot be co-scheduled: "
+                f"dispatch.dimensions={resolved.dispatch.dimensions!r} requires "
+                f"array spreading and cannot be fused into a neighbor job.")
+        if _dispatch_uses_array_spread(neighbor_resolved.dispatch):
+            raise ValueError(
+                f"Host stage {neighbor_name!r} cannot co-schedule "
+                f"{stage_name!r}: dispatch.dimensions="
+                f"{neighbor_resolved.dispatch.dimensions!r} requires array "
+                f"spreading.")
 @define
 class Seekrflow:
     """

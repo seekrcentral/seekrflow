@@ -90,12 +90,16 @@ def create_example_seekrflow(ff="amber") -> structures.Seekrflow:
     delta_slurm_resource.transfer_settings.remote_collection_id = "MY_REMOTE_COLLECTION_ID"
     seekrflow.run_settings.resources = [delta_slurm_resource]
     #anvil_slurm_resource = structures.Slurm_resource()
-    seekrflow.run_settings.procedure_resource_name = {
-        "equilibration": "local",
-        "metadynamics": "delta",
-        "MMVT": "delta",
-        "bd": "local",
-    }
+    seekrflow.run_settings.placements = [
+        structures.Placement(target=[], resource="local"),
+        structures.Placement(target=["equilibration"], resource="local"),
+        structures.Placement(
+            target=["metadynamics", "sampling"], resource="delta"),
+        structures.Placement(
+            target=["metadynamics", "logistic"], resource="local"),
+        structures.Placement(target=["MMVT"], resource="delta"),
+        structures.Placement(target=["bd"], resource="local"),
+    ]
     
     return seekrflow
 
@@ -153,7 +157,7 @@ def create_host_guest_example_seekrflow(
     equilibration = stage_procedures_module.Explicit_stage_procedure(
         name="equilibration",
         items=[stage_procedures_module.MD_stage_item(
-            name="equilibration",
+            name="equilibration_sampling",
             run_minimization=True,
             ensemble="NVT",
             sampling=stage_procedures_module.Conventional_sampling_spec(
@@ -226,11 +230,24 @@ def create_host_guest_example_seekrflow(
     seekrflow.parameterize_workflow = None
     physical_attributes = base.Physical_attributes()
     physical_attributes.temperature = 298.15
-    physical_attributes.ionic_strength = 0.15
+    physical_attributes.ionic_strength = 0.0
     physical_attributes.random_seed = 111
     seekrflow.physical_attributes = physical_attributes
     seekrflow.work_directory = work_directory
     seekrflow.run_settings = structures.Run_settings()
+    mmvt_dispatch = stage_procedures_module.Dispatch(
+        dimensions=["anchor"], group_size=2, concurrency=2)
+    seekrflow.run_settings.placements = [
+        structures.Placement(target=[], resource="local"),
+        structures.Placement(target=["equilibration"], resource="local"),
+        structures.Placement(
+            target=["metadynamics", "sampling"], resource="panamint"),
+        structures.Placement(
+            target=["metadynamics", "logistic"], resource="panamint", 
+            co_schedule_with="predecessor"),
+        structures.Placement(target=["MMVT"], resource="panamint", dispatch=mmvt_dispatch),
+        structures.Placement(target=["bd"], resource="local"),
+    ]
     return seekrflow
 
 if __name__ == "__main__":

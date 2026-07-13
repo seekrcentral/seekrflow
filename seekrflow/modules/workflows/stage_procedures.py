@@ -437,6 +437,66 @@ DEFAULT_GLOBULAR_EQUIL_SCHEDULE: list[dict] = [
 #  determined by procedure order rather than set by the user.
 Resolved_stage_item = typing.Tuple[str, Stage_item_base]
 
+# (address path relative to the owning procedure, role for policy defaults)
+Stage_address_info = typing.Tuple[list[str], str | None]
+
+
+# TODO: move to structures?
+@define
+class Dispatch:
+    """
+    Define how anchors/swarms within a stage are 'dispatched' to a resource,
+    i.e. how the anchors or swarms are run in parallel or serially in an
+    array (group size) or concurrently in separate processes. The ``dimensions`` 
+    field defines whether parallelism is used across anchors or swarms or both.
+    Group size is the number of anchors/swarms to run within a single array job. 
+    Concurrency is the number of anchors/swarms to run in separate processes 
+    simultaneously. If group_size is larger than concurrency, then the anchors/
+    swarms will run serially within the same array job, only 'concurrency' at a 
+    time.
+    """
+    type: typing.Literal["dispatch"] = "dispatch"
+    dimensions: list[str] | None = field(
+        default=None,
+        validator=validators.optional(validators.deep_iterable(
+            member_validator=validators.in_(["anchor", "swarm"]),
+            iterable_validator=validators.instance_of(list),
+        )))
+    group_size: int | None = field(
+        default=None,
+        validator=validators.optional(
+            [validators.instance_of(int), validators.ge(1)]))
+    concurrency: int = field(
+        default=1,
+        validator=[validators.instance_of(int), validators.ge(1)])
+
+    def merged_with(self, override: "Dispatch") -> "Dispatch":
+        """
+        Field-wise merge: non-None ``dimensions`` / ``group_size`` on
+        ``override`` replace; ``concurrency`` is always taken from ``override``.
+        """
+        return Dispatch(
+            dimensions=(
+                override.dimensions
+                if override.dimensions is not None else self.dimensions),
+            group_size=(
+                override.group_size
+                if override.group_size is not None else self.group_size),
+            concurrency=override.concurrency,
+        )
+
+
+@define
+class Emitted_stage:
+    """One stage a procedure emits, with intrinsic execution defaults."""
+    name: str
+    role: str | None = field(default=None)
+    dispatch: Dispatch = field(default=Factory(Dispatch))
+    co_schedule_with: str | None = field(
+        default=None,
+        validator=validators.optional(
+            validators.in_(["predecessor", "successor"])))
+
 
 @define
 class Stage_procedure_base:
@@ -460,21 +520,17 @@ class Stage_procedure_base:
         """
         raise NotImplementedError
 
-    def get_stage_names(self) -> list[str]:
+    def get_emitted_stages(self) -> list[Emitted_stage]:
         """
-        Return, in order, the names of the stage items this procedure will
-        produce when expanded.
-
-        Unlike :meth:`expand`, this is a lightweight, ``ctx``-free lookup: it
-        must not load structures, write files, or otherwise require a prepared
-        system. It exists so that resource assignment (and any other tooling)
-        can map a stage name back to the user-authored procedure that creates
-        it WITHOUT performing a full, expensive expansion.
-
-        IMPORTANT: subclasses must keep the names returned here in sync with the
-        names assigned to the stage items created in :meth:`expand`.
+        Return, in order, each stage this procedure emits with its intrinsic
+        execution defaults. ``role`` is the trailing address segment; ``None``
+        means the procedure emits a single addressable stage (no sub-role
+        segment). ctx-free, like :meth:`expand`.
         """
         raise NotImplementedError
+
+    def get_stage_names(self) -> list[str]:
+        return [stage.name for stage in self.get_emitted_stages()]
 
 
 def _chain(items: list[Stage_item_base], input_stage_name: str
@@ -511,8 +567,11 @@ class Explicit_stage_procedure(Stage_procedure_base):
             ) -> list[Resolved_stage_item]:
         return _chain(list(self.items), input_stage_name)
 
-    def get_stage_names(self) -> list[str]:
-        return [item.name for item in self.items]
+    def get_emitted_stages(self) -> list[Emitted_stage]:
+        return [
+            Emitted_stage(name=item.name, role=item.name)
+            for item in self.items
+        ]
 
 
 @define
@@ -643,8 +702,14 @@ class Equilibration_globular_stage_procedure(Stage_procedure_base):
                 ))
         return _chain(items, input_stage_name)
 
-    def get_stage_names(self) -> list[str]:
-        return [row["name"] for row in self.schedule]
+    def get_emitted_stages(self) -> list[Emitted_stage]:
+        return [
+            Emitted_stage(
+                name=row["name"],
+                role=row["name"],
+            )
+            for row in self.schedule
+        ]
 
 #@define
 #class Seeding_method_input:
@@ -711,8 +776,14 @@ class Seeding_stage_procedure(Stage_procedure_base):
         default=100, validator=validators.instance_of(int))
     
 
-    def get_stage_names(self) -> list[str]:
-        return [f"{self.name}_seed", f"{self.name}_assign_structures"]
+    def get_emitted_stages(self) -> list[Emitted_stage]:
+        return [
+            Emitted_stage(name=f"{self.name}_seed", role="sampling"),
+            Emitted_stage(
+                name=f"{self.name}_assign_structures",
+                role="logistic",
+                co_schedule_with="predecessor"),
+        ]
 
     def expand(
             self,
@@ -768,8 +839,12 @@ class MMVT_stage_procedure(Stage_procedure_base):
     checkpoint_interval: int = field(
         default=5000, validator=validators.instance_of(int))
 
-    def get_stage_names(self) -> list[str]:
-        return [self.name]
+    def get_emitted_stages(self) -> list[Emitted_stage]:
+        return [
+            Emitted_stage(
+                name=self.name,
+                dispatch=Dispatch(dimensions=["anchor"], group_size=1)),
+        ]
 
     def expand(
             self,
@@ -802,8 +877,8 @@ class BD_stage_procedure(Stage_procedure_base):
     number_of_trajectories: int = field(
         default=10000, validator=validators.instance_of(int))
 
-    def get_stage_names(self) -> list[str]:
-        return [self.name]
+    def get_emitted_stages(self) -> list[Emitted_stage]:
+        return [Emitted_stage(name=self.name)]
 
     def expand(
             self,
@@ -855,9 +930,18 @@ class RAMD_stage_procedure(Stage_procedure_base):
         default="NVT", validator=validators.in_(
             ["NVT", "NPT", "NPT_membrane", "NVE"]))
 
-    def get_stage_names(self) -> list[str]:
-        return [f"{self.name}_sampling", f"{self.name}_assign_swarm",
-                f"{self.name}_ramd"]
+    def get_emitted_stages(self) -> list[Emitted_stage]:
+        return [
+            Emitted_stage(name=f"{self.name}_sampling", role="sampling"),
+            Emitted_stage(
+                name=f"{self.name}_assign_swarm",
+                role="logistic",
+                co_schedule_with="predecessor"),
+            Emitted_stage(
+                name=f"{self.name}_ramd",
+                role="ramd",
+                dispatch=Dispatch(dimensions=["swarm"], group_size=1)),
+        ]
 
     def expand(
             self,
@@ -939,48 +1023,126 @@ class Composite_stage_procedure(Stage_procedure_base):
                 previous_exit = items[-1][1].name
         return all_items
 
-    def get_stage_names(self) -> list[str]:
-        names: list[str] = []
+    def get_emitted_stages(self) -> list[Emitted_stage]:
+        stages: list[Emitted_stage] = []
         for procedure in self.procedures:
-            names.extend(procedure.get_stage_names())
-        return names
+            stages.extend(procedure.get_emitted_stages())
+        return stages
+
+
+def _insert_unique_stage_maps(
+        address_result: dict[str, Stage_address_info],
+        policy_result: dict[str, Emitted_stage],
+        stage_name: str,
+        address_info: Stage_address_info,
+        emitted: Emitted_stage,
+        ) -> None:
+    if stage_name in address_result:
+        raise ValueError(
+            f"Duplicate stage name {stage_name!r}. Stage names must be unique "
+            f"across all procedures.")
+    address_result[stage_name] = address_info
+    policy_result[stage_name] = emitted
+
+
+def _build_stage_maps(
+        procedure: Stage_procedure_base,
+        prefix_path: list[str],
+        ) -> tuple[dict[str, Stage_address_info], dict[str, Emitted_stage]]:
+    address_result: dict[str, Stage_address_info] = {}
+    policy_result: dict[str, Emitted_stage] = {}
+    if isinstance(procedure, Composite_stage_procedure):
+        for child in procedure.procedures:
+            child_address, child_policy = _build_stage_maps(
+                child, prefix_path + [child.name])
+            for stage_name in child_address:
+                _insert_unique_stage_maps(
+                    address_result,
+                    policy_result,
+                    stage_name,
+                    child_address[stage_name],
+                    child_policy[stage_name],
+                )
+    else:
+        for emitted in procedure.get_emitted_stages():
+            role_path = [] if emitted.role is None else [emitted.role]
+            _insert_unique_stage_maps(
+                address_result,
+                policy_result,
+                emitted.name,
+                (prefix_path + role_path, emitted.role),
+                emitted,
+            )
+    return address_result, policy_result
+
+
+def _initial_prefix_path(
+        procedure: Stage_procedure_base,
+        ) -> list[str]:
+    if isinstance(procedure, Composite_stage_procedure):
+        return []
+    return [procedure.name]
+
+
+def build_stage_address_map(
+        procedure: Stage_procedure_base,
+        ) -> dict[str, Stage_address_info]:
+    """
+    Map each produced stage name to ``(address_path, role)``.
+
+    ``address_path`` is ``[procedure_name, (child...)?, (role)?]``. The root
+    composite's own name is omitted; a lone non-composite top procedure is
+    prefixed with its name.
+    """
+    address_map, _policy_map = _build_stage_maps(
+        procedure, _initial_prefix_path(procedure))
+    return address_map
+
+
+def build_stage_policy_map(
+        procedure: Stage_procedure_base,
+        ) -> dict[str, Emitted_stage]:
+    """
+    Map each produced stage name to its intrinsic execution defaults as declared
+    by the emitting procedure.
+    """
+    _address_map, policy_map = _build_stage_maps(
+        procedure, _initial_prefix_path(procedure))
+    return policy_map
 
 
 def build_stage_to_procedure_map(
         top_procedure: Stage_procedure_base,
         ) -> dict[str, str]:
     """
-    Map each produced stage name to the name of the user-authored procedure
-    that creates it.
+    Map each generated stage name to the top-level procedure that authored it.
 
-    The user-authored procedures are the direct children of a top-level
-    ``Composite_stage_procedure`` (the procedures the user lists in the input).
-    If ``top_procedure`` is not a composite, it is treated as the single
-    authored procedure and owns all of its stages.
+    Thin wrapper over :func:`build_stage_address_map`: for a composite it takes
+    the first address segment (``path[0]``, i.e. the composite's direct child
+    procedure), and for a lone non-composite it uses that procedure's name.
 
-    Raises
-    ------
-    ValueError
-        If two procedures produce a stage with the same name (stage names must
-        be unique, since seekr chains stages by name).
+    Example (composite of ``equilibration``, ``metadynamics``, ``MMVT``, ``bd``)::
+
+        {"sampling": "equilibration",
+         "metadynamics_seed": "metadynamics",
+         "metadynamics_assign_structures": "metadynamics",
+         "MMVT": "MMVT",
+         "bd": "bd"}
+
+    Use it to answer "which authored procedure produced this stage?" without
+    caring about the full role-path (see ``build_stage_address_map`` for that).
     """
     if isinstance(top_procedure, Composite_stage_procedure):
-        owning_procedures: list[Stage_procedure_base] = list(
-            top_procedure.procedures)
-    else:
-        owning_procedures = [top_procedure]
-
-    stage_to_procedure: dict[str, str] = {}
-    for procedure in owning_procedures:
-        for stage_name in procedure.get_stage_names():
-            if stage_name in stage_to_procedure:
-                raise ValueError(
-                    f"Duplicate stage name {stage_name!r} produced by both "
-                    f"procedure {stage_to_procedure[stage_name]!r} and "
-                    f"procedure {procedure.name!r}. Stage names must be unique "
-                    f"across all procedures.")
-            stage_to_procedure[stage_name] = procedure.name
-    return stage_to_procedure
+        return {
+            name: path[0]
+            for name, (path, _role) in
+            build_stage_address_map(top_procedure).items()
+            if len(path) > 0
+        }
+    return {
+        name: top_procedure.name
+        for name in build_stage_address_map(top_procedure)
+    }
 
 
 Stage_procedure = (

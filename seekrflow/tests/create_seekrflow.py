@@ -55,7 +55,7 @@ def create_unparameterized_seekrflow(
         ]
     seekrflow.parameterizer = parameterizer
     seekrflow.run_settings = structures.Run_settings()
-    seekrflow.run_settings.procedure_resource_name = {}
+    seekrflow.run_settings.placements = []
     return seekrflow
 
 def create_parameterized_seekrflow(
