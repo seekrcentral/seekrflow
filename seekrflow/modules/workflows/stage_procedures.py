@@ -490,6 +490,8 @@ class Dispatch:
 class Emitted_stage:
     """One stage a procedure emits, with intrinsic execution defaults."""
     name: str
+    # NOTE: keep 'role's - we want informative stage names, but for the assignment 
+    # of Placements, the role simplifies this definition.
     role: str | None = field(default=None)
     dispatch: Dispatch = field(default=Factory(Dispatch))
     co_schedule_with: str | None = field(
@@ -703,13 +705,20 @@ class Equilibration_globular_stage_procedure(Stage_procedure_base):
         return _chain(items, input_stage_name)
 
     def get_emitted_stages(self) -> list[Emitted_stage]:
-        return [
-            Emitted_stage(
-                name=row["name"],
-                role=row["name"],
-            )
-            for row in self.schedule
-        ]
+        # TODO: co-schedule all stages of this together.
+        emitted_stages = []
+        for i, row in enumerate(self.schedule):
+            if i > 0:
+                co_schedule_with = "predecessor"
+            else:
+                co_schedule_with = None
+            emitted_stages.append(
+                Emitted_stage(
+                    name=row["name"],
+                    role=row["name"],
+                    co_schedule_with=co_schedule_with
+            ))
+        return emitted_stages
 
 #@define
 #class Seeding_method_input:
@@ -1049,6 +1058,11 @@ def _build_stage_maps(
         procedure: Stage_procedure_base,
         prefix_path: list[str],
         ) -> tuple[dict[str, Stage_address_info], dict[str, Emitted_stage]]:
+    """
+    Take the procedure as well as the default resource, and construct the 'address'
+    (the resource(s) where the procedure will be applied) and the 'policy' (details
+    about the submission, like array dimensions or lumped submissions).
+    """
     address_result: dict[str, Stage_address_info] = {}
     policy_result: dict[str, Emitted_stage] = {}
     if isinstance(procedure, Composite_stage_procedure):
@@ -1079,6 +1093,10 @@ def _build_stage_maps(
 def _initial_prefix_path(
         procedure: Stage_procedure_base,
         ) -> list[str]:
+    """
+    Insert the current procedure's address and policy into the overall
+    maps, checking to make sure there aren't duplicates.
+    """
     if isinstance(procedure, Composite_stage_procedure):
         return []
     return [procedure.name]

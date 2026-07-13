@@ -9,8 +9,6 @@ remote workload management.
 import os
 import typing
 
-import seekr2.modules.common_base as seekr2_base
-
 import seekrflow.modules.structures as structures
 import seekrflow.modules.workload_managers.slurm as workload_slurm
 import seekrflow.modules.workload_managers.pbs as workload_pbs
@@ -189,7 +187,7 @@ def submit_remote_workflow(
 def status_remote(
         seekrflow: structures.Seekrflow,
         stage_name: str,
-        model: seekr2_base.Model,
+        model: typing.Any,
         silent: bool = False,
         benchmark_mode: bool = False,
         ) -> dict:

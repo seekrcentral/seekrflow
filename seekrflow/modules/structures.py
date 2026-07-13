@@ -361,6 +361,7 @@ class Resolved_execution:
 
 
 def resource_supports_arrays(resource: Resource_base | None) -> bool:
+    # TODO: handle this for cloud resources.
     return isinstance(resource, (Resource_remote_slurm, Resource_remote_pbs))
 
 
@@ -582,8 +583,10 @@ def validate_run_settings(
     """
     procedure = seekrflow.workflow.procedure
     address_map = stage_procedures_module.build_stage_address_map(procedure)
-    all_addresses = [path for path, _role in address_map.values()]
+    all_addresses = [path for path, _name in address_map.values()]
     def _target_is_valid(target: list[str]) -> bool:
+        # Assert that the target procedure/child names in the placements
+        # have valid procedure/children among the stages.
         return any(
             _placement_targets_match(address, target)
             for address in all_addresses)
@@ -630,11 +633,14 @@ def validate_run_settings(
                 f"as neighbor {neighbor_name!r}, but "
                 f"{resolved.resource_name!r} != "
                 f"{neighbor_resolved.resource_name!r}.")
+        # TODO: this is a problem! We need to be able to chain co-scheduled
+        # stages into each other.
         if neighbor_resolved.co_schedule_with is not None:
-            raise ValueError(
-                f"Stage {neighbor_name!r} cannot host co-scheduled stage "
-                f"{stage_name!r} because it is itself co-scheduled into "
-                f"another stage.")
+            #raise ValueError(
+            #    f"Stage {neighbor_name!r} cannot host co-scheduled stage "
+            #    f"{stage_name!r} because it is itself co-scheduled into "
+            #    f"another stage.")
+            print("Chaining multiple co-scheduled stages together - I want this to work!")
         if _dispatch_uses_array_spread(resolved.dispatch):
             raise ValueError(
                 f"Stage {stage_name!r} cannot be co-scheduled: "

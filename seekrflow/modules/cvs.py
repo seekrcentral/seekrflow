@@ -11,7 +11,7 @@ import numpy as np
 import mdtraj
 import parmed
 
-import seekr2.modules.common_base as seekr2_base
+import seekr.modules.engines.structures as seekr_engines_structures
 
 import seekrflow.modules.base as base
 import seekrflow.modules.workflows.structures as workflow_structures
@@ -19,38 +19,38 @@ import seekrflow.modules.parameterize_workflow as parameterize_workflow_module
 
 # NOTE: These are valid for SEEKR2 - will need to change for SEEKR3
 # TODO: move these to base?
-def assign_amber_params(input_anchor, prmtop_filename, pdb_filename):
-    input_anchor.starting_amber_params = seekr2_base.Amber_params()
-    input_anchor.starting_amber_params.prmtop_filename = prmtop_filename
-    input_anchor.starting_amber_params.pdb_coordinates_filename = pdb_filename
-    return
+#def assign_amber_params(input_anchor, prmtop_filename, pdb_filename):
+#    input_anchor.starting_amber_params = seekr2_base.Amber_params()
+#    input_anchor.starting_amber_params.prmtop_filename = prmtop_filename
+#    input_anchor.starting_amber_params.pdb_coordinates_filename = pdb_filename
+#    return
 
-def assign_forcefield_params(input_anchor, built_in_ff_list, custom_ff_list, 
-                             pdb_filename):
-    input_anchor.starting_forcefield_params = seekr2_base.Forcefield_params()
-    input_anchor.starting_forcefield_params.built_in_forcefield_filenames \
-        = built_in_ff_list
-    input_anchor.starting_forcefield_params.custom_forcefield_filenames \
-        = custom_ff_list
-    input_anchor.starting_forcefield_params.pdb_coordinates_filename \
-        = pdb_filename
-    return
+#def assign_forcefield_params(input_anchor, built_in_ff_list, custom_ff_list, 
+#                             pdb_filename):
+#    input_anchor.starting_forcefield_params = seekr2_base.Forcefield_params()
+#    input_anchor.starting_forcefield_params.built_in_forcefield_filenames \
+#        = built_in_ff_list
+#    input_anchor.starting_forcefield_params.custom_forcefield_filenames \
+#        = custom_ff_list
+#    input_anchor.starting_forcefield_params.pdb_coordinates_filename \
+#        = pdb_filename
+#    return
 
-def assign_system_params(input_anchor, system_filename, pdb_filename):
-    input_anchor.starting_forcefield_params = seekr2_base.Forcefield_params()
-    input_anchor.starting_forcefield_params.system_filename \
-        = system_filename
-    input_anchor.starting_forcefield_params.pdb_coordinates_filename \
-        = pdb_filename
-    return
+#def assign_system_params(input_anchor, system_filename, pdb_filename):
+#    input_anchor.starting_forcefield_params = seekr2_base.Forcefield_params()
+#    input_anchor.starting_forcefield_params.system_filename \
+#        = system_filename
+#    input_anchor.starting_forcefield_params.pdb_coordinates_filename \
+#        = pdb_filename
+#    return
 
-def assign_charmm_params(input_anchor, psf_filename, charmm_ff_filenames, 
-                         pdb_filename):
-    input_anchor.starting_charmm_params = seekr2_base.Charmm_params()
-    input_anchor.starting_charmm_params.psf_filename = psf_filename
-    input_anchor.starting_charmm_params.charmm_ff_files = charmm_ff_filenames
-    input_anchor.starting_charmm_params.pdb_coordinates_filename = pdb_filename
-    return
+#def assign_charmm_params(input_anchor, psf_filename, charmm_ff_filenames, 
+#                         pdb_filename):
+#    input_anchor.starting_charmm_params = seekr2_base.Charmm_params()
+#    input_anchor.starting_charmm_params.psf_filename = psf_filename
+#    input_anchor.starting_charmm_params.charmm_ff_files = charmm_ff_filenames
+#    input_anchor.starting_charmm_params.pdb_coordinates_filename = pdb_filename
+#    return
 
 def alpha_carbon_selection_within_cutoff(
         traj: mdtraj.Trajectory, 

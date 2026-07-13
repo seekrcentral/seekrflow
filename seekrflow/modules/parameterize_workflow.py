@@ -19,7 +19,7 @@ import openmm
 import openmm.unit as unit
 import numpy as np
 
-import seekrtools.scripts.pqr_resid_for_each_atom as pqr_resid_for_each_atom
+#import seekrtools.scripts.pqr_resid_for_each_atom as pqr_resid_for_each_atom
 
 import seekrflow.modules.base as base
 import seekrflow.modules.workflows.structures as workflow_structures
@@ -264,8 +264,8 @@ class Parameterize_workflow:
         ligand.save(full_ligand_pqr_filename_one_resid, overwrite=True)
 
         full_ligand_pqr_filename = os.path.join(param_directory, "ligand.pqr")
-        pqr_resid_for_each_atom.pqr_resid_for_each_atom(
-            full_ligand_pqr_filename_one_resid, full_ligand_pqr_filename)
+        #pqr_resid_for_each_atom.pqr_resid_for_each_atom(
+        #    full_ligand_pqr_filename_one_resid, full_ligand_pqr_filename)
         receptor_pqr_basename = os.path.basename(full_receptor_pqr_filename)
         ligand_pqr_basename = os.path.basename(full_ligand_pqr_filename)
         self.receptor_pqr_filename_for_bd = os.path.join(

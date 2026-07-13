@@ -274,6 +274,7 @@ def _make_input_stage(
         item: typing.Any,
         ctx: Prepare_context,
         ) -> typing.Any:
+    print("item.name:", item.name, "input_stage_name:", input_stage_name)
     if isinstance(item, stage_procedures_module.MD_stage_item):
         return Input_stage_md(
             name=item.name,
