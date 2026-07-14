@@ -68,8 +68,14 @@ combine_fused_commands = co_schedule_fusion.combine_fused_commands
 populate_fusion_map = co_schedule_fusion.populate_fusion_map
 fusion_dependencies_satisfied = co_schedule_fusion.fusion_dependencies_satisfied
 skips_remote_submit = co_schedule_fusion.skips_remote_submit
+is_fusion_host = co_schedule_fusion.is_fusion_host
+fusion_host_name = co_schedule_fusion.fusion_host_name
+mark_fused_set_completed = co_schedule_fusion.mark_fused_set_completed
+classify_fused_probe_status = co_schedule_fusion.classify_fused_probe_status
 remote_scheduler_job_name = remote_stage_lifecycle.remote_scheduler_job_name
 classify_remote_probe_status = remote_stage_lifecycle.classify_remote_probe_status
+owns_scheduler_job = remote_stage_lifecycle.owns_scheduler_job
+remote_cancel_needed = remote_stage_lifecycle.remote_cancel_needed
 
 
 def build_remote_stage_command_string(
@@ -269,6 +275,24 @@ class StageWorkflow:
         """
         if self.resource_name == "local" or self.fusion_host is not None:
             return "submit", None
+        if is_fusion_host(self):
+            member_statuses: dict[str, dict | None] = {}
+            for stage_name in co_schedule_fusion.fused_set_members(self):
+                try:
+                    member_statuses[stage_name] = workload_remote.status_remote(
+                        self.seekrflow,
+                        stage_name,
+                        self.model,
+                        benchmark_mode=self.benchmark_mode,
+                    )
+                except Exception as e:
+                    print(
+                        f"[remote-probe] fused set member {stage_name}: "
+                        f"probe failed ({e}); will submit fresh")
+                    member_statuses[stage_name] = None
+            action = classify_fused_probe_status(
+                member_statuses, self.stage.name)
+            return action, member_statuses.get(self.stage.name)
         try:
             status = workload_remote.status_remote(
                 self.seekrflow,
@@ -585,6 +609,7 @@ class StageWorkflow:
                 break
             if self.semaphore == "stop":
                 break
+            fused_host_name = None
             if self.resource_name == "local":
                 process_alive = (
                     self.process is not None and self.process.is_alive())
@@ -622,9 +647,12 @@ class StageWorkflow:
                         for job in manager_status["jobs"]:
                             self.job_ids.add(job["JobID"])
             else:
+                fused_host_name = fusion_host_name(self)
                 host_sw = None
                 if self.fusion_host is not None:
                     host_sw = self.peer_workflows.get(self.fusion_host)
+                fused_host_name = fusion_host_name(self)
+
                 status = None
                 try:
                     status = workload_remote.status_remote(
@@ -688,46 +716,70 @@ class StageWorkflow:
                         self.state = stage_status.get("state", self.state)
                         self.progress = stage_status.get(
                             "progress", self.progress)
-                        if (self.fusion_host is None
-                                and self.state != "completed"
-                                and not scheduler_active):
-                            idle_incomplete_checks += 1
-                            if (idle_incomplete_checks
-                                    >= IDLE_INCOMPLETE_CHECKS_BEFORE_RESUBMIT):
-                                if self.progress > self.last_progress:
-                                    self.last_progress = self.progress
-                                    self.subsequent_noncompleted_runs = 0
+                        # Only submit-capable remote stages may resubmit.
+                        if self.fusion_host is None:
+                            if fused_host_name is not None:
+                                set_incomplete = not (
+                                    co_schedule_fusion.fused_set_completed(
+                                        fused_host_name,
+                                        self.peer_workflows))
+                                progress_for_resubmit = (
+                                    co_schedule_fusion.fused_set_progress(
+                                        fused_host_name,
+                                        self.peer_workflows))
+                            else:
+                                set_incomplete = self.state != "completed"
+                                progress_for_resubmit = self.progress
+                            if set_incomplete and not scheduler_active:
+                                idle_incomplete_checks += 1
+                                if (idle_incomplete_checks
+                                        >= IDLE_INCOMPLETE_CHECKS_BEFORE_RESUBMIT):
+                                    if (progress_for_resubmit
+                                            > self.last_progress):
+                                        self.last_progress = (
+                                            progress_for_resubmit)
+                                        self.subsequent_noncompleted_runs = 0
+                                        print(
+                                            f"[remote-resubmit] stage "
+                                            f"{self.stage.name}: job gone "
+                                            f"with progress advance "
+                                            f"({progress_for_resubmit:.1%}); "
+                                            f"resubmitting")
+                                        self.state = "unstarted"
+                                        break
+                                    self.subsequent_noncompleted_runs += 1
+                                    if (self.subsequent_noncompleted_runs
+                                            > MAX_SUBSEQUENT_NONCOMPLETED_RUNS):
+                                        print(
+                                            f"[remote-resubmit] stage "
+                                            f"{self.stage.name}: no progress "
+                                            f"after "
+                                            f"{self.subsequent_noncompleted_runs} "
+                                            f"idle resubmits; giving up")
+                                        self.state = "failed"
+                                        self.semaphore = "wait"
+                                        break
                                     print(
                                         f"[remote-resubmit] stage "
-                                        f"{self.stage.name}: job gone with "
-                                        f"progress advance "
-                                        f"({self.progress:.1%}); resubmitting")
+                                        f"{self.stage.name}: job gone without "
+                                        f"progress "
+                                        f"({self.subsequent_noncompleted_runs}/"
+                                        f"{MAX_SUBSEQUENT_NONCOMPLETED_RUNS}); "
+                                        f"resubmitting")
                                     self.state = "unstarted"
                                     break
-                                self.subsequent_noncompleted_runs += 1
-                                if (self.subsequent_noncompleted_runs
-                                        > MAX_SUBSEQUENT_NONCOMPLETED_RUNS):
-                                    print(
-                                        f"[remote-resubmit] stage "
-                                        f"{self.stage.name}: no progress after "
-                                        f"{self.subsequent_noncompleted_runs} "
-                                        f"idle resubmits; giving up")
-                                    self.state = "failed"
-                                    self.semaphore = "wait"
-                                    break
-                                print(
-                                    f"[remote-resubmit] stage "
-                                    f"{self.stage.name}: job gone without "
-                                    f"progress "
-                                    f"({self.subsequent_noncompleted_runs}/"
-                                    f"{MAX_SUBSEQUENT_NONCOMPLETED_RUNS}); "
-                                    f"resubmitting")
-                                self.state = "unstarted"
-                                break
-                        else:
-                            idle_incomplete_checks = 0
+                            else:
+                                idle_incomplete_checks = 0
 
-            if self.state == "completed":
+            if self.resource_name == "local":
+                terminal_completed = self.state == "completed"
+            elif fused_host_name is not None:
+                terminal_completed = co_schedule_fusion.fused_set_completed(
+                    fused_host_name, self.peer_workflows)
+            else:
+                terminal_completed = self.state == "completed"
+
+            if terminal_completed:
                 if (self.resource_name != "local"
                         and remote_scheduler_active):
                     completed_drain_checks += 1
@@ -813,6 +865,14 @@ class StageWorkflow:
         if self.resource_name != "local":
             if self.resource is None:
                 return
+            if not owns_scheduler_job(self.fusion_host):
+                self.manager_status = "idle"
+                return
+            if (is_fusion_host(self)
+                    and co_schedule_fusion.fused_set_completed(
+                        self.stage.name, self.peer_workflows)):
+                self.manager_status = "idle"
+                return
             try:
                 status = workload_remote.status_remote(
                     self.seekrflow,
@@ -823,6 +883,15 @@ class StageWorkflow:
             except Exception as e:
                 print(f"Warning: failed to query remote jobs for cancel: {e}")
                 status = None
+            if not remote_cancel_needed(
+                    status,
+                    local_state=self.state,
+                    tracked_job_ids=self.job_ids):
+                print(
+                    f"[shutdown] skipping cancel for {self.stage.name}: "
+                    f"no active scheduler jobs")
+                self.manager_status = "idle"
+                return
             manager_status = (status or {}).get("manager_status") or {}
             for job in manager_status.get("jobs", []):
                 job_id = job.get("JobID")
@@ -1641,8 +1710,12 @@ class SeekrPipeline:
                             probe_action, probe_status = (
                                 await stage_workflow.probe_remote_launch())
                             if probe_action == "completed":
-                                stage_workflow.state = "completed"
-                                stage_workflow.progress = 1.0
+                                if is_fusion_host(stage_workflow):
+                                    mark_fused_set_completed(
+                                        stage_workflow, stage_by_name)
+                                else:
+                                    stage_workflow.state = "completed"
+                                    stage_workflow.progress = 1.0
                                 continue
                             if probe_action == "reattach":
                                 manager_status = (

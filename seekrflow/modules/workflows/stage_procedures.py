@@ -585,6 +585,8 @@ class Equilibration_globular_stage_procedure(Stage_procedure_base):
     type: typing.Literal["equilibration_globular"] = "equilibration_globular"
     reference_structure_filename: str | None = field(
         default=None, validator=validators.optional(validators.instance_of(str)))
+    align_selection_str: str = field(    
+        default="protein and not type H")
     schedule: list[dict] = field(
         default=Factory(lambda: [dict(row) for row in DEFAULT_GLOBULAR_EQUIL_SCHEDULE]),
         validator=validators.instance_of(list))
@@ -618,7 +620,8 @@ class Equilibration_globular_stage_procedure(Stage_procedure_base):
                 ref_mdtraj = mdtraj.load(ctx.md_structure_filename)
             md_mdtraj = mdtraj.load(ctx.md_structure_filename)
             ref_atom_indices, md_atom_indices = utilities_module\
-                .obtain_md_ref_structure_map(ref_mdtraj, md_mdtraj)
+                .obtain_md_ref_structure_map(ref_mdtraj, md_mdtraj, 
+                                             self.align_selection_str)
             restraints: list[Restraint_spec] = []
             
             # Backbone restraints
@@ -894,6 +897,11 @@ class BD_stage_procedure(Stage_procedure_base):
             ctx: typing.Any,
             input_stage_name: str = INITIAL,
             ) -> list[Resolved_stage_item]:
+
+        # NOTE: explicitly setting BD stages to have no input stage for now
+        # IDEA: Make a different sort of procedure for a BD stage that depends on input stage(s)
+        input_stage_name = INITIAL
+
         bd_stage = BD_stage_item(
             name=self.name,
             scope="unpartitioned",

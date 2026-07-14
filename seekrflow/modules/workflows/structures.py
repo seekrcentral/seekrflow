@@ -80,13 +80,6 @@ class BD_settings:
         validator=validators.instance_of(int),
         )
     
-#@define
-#class Workflow_base:
-#    """
-#    Base class for workflows.
-#    """
-#    type: typing.Literal["workflow_base"] = "workflow_base"
-
 @define
 class Solvated_system_for_md:
     """

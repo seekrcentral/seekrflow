@@ -274,7 +274,6 @@ def _make_input_stage(
         item: typing.Any,
         ctx: Prepare_context,
         ) -> typing.Any:
-    print("item.name:", item.name, "input_stage_name:", input_stage_name)
     if isinstance(item, stage_procedures_module.MD_stage_item):
         return Input_stage_md(
             name=item.name,
@@ -324,11 +323,11 @@ def flatten_procedure(
     Expand a stage procedure into a flat list of seekr3 input stages.
     """
     resolved_items = procedure.expand(ctx)
-    return [
-        _make_input_stage(input_stage_name, item, ctx)
-        for input_stage_name, item in resolved_items
-    ]
-
+    input_stage_list = []
+    for input_stage_name, item in resolved_items:
+        input_stage = _make_input_stage(input_stage_name, item, ctx)
+        input_stage_list.append(input_stage)
+    return input_stage_list
 
 # ======================================================================
 #  Collective variables, anchors, and partitions.

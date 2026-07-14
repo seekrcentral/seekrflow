@@ -154,6 +154,7 @@ def create_host_guest_example_seekrflow(
     anchor_spec = anchor_specs_module.Uniform_anchor_spec(n_anchors=14)
 
     # Procedure: equilibrate -> seed anchors by metadynamics -> MMVT -> BD.
+    """
     equilibration = stage_procedures_module.Explicit_stage_procedure(
         name="equilibration",
         items=[stage_procedures_module.MD_stage_item(
@@ -166,6 +167,12 @@ def create_host_guest_example_seekrflow(
             completion=stage_procedures_module
                 .Number_of_steps_completion_spec(number_of_steps=100000),
         )])
+    """
+    equilibration = stage_procedures_module.Equilibration_globular_stage_procedure(
+        name="equilibration",
+        reference_structure_filename=solvated_pdb_filename,
+        align_selection_str="resname MGO and not type H"
+    )
     metad_method_input = stage_procedures_module.Metadynamics_seeding_method_input(
         bias_factor=10.0,
         gaussian_height=0.1,
@@ -236,10 +243,10 @@ def create_host_guest_example_seekrflow(
     seekrflow.work_directory = work_directory
     seekrflow.run_settings = structures.Run_settings()
     mmvt_dispatch = stage_procedures_module.Dispatch(
-        dimensions=["anchor"], group_size=2, concurrency=2)
+        dimensions=["anchor"], group_size=1, concurrency=1)
     seekrflow.run_settings.placements = [
         structures.Placement(target=[], resource="local"),
-        structures.Placement(target=["equilibration"], resource="local"),
+        structures.Placement(target=["equilibration"], resource="panamint"),
         structures.Placement(
             target=["metadynamics", "sampling"], resource="panamint"),
         structures.Placement(

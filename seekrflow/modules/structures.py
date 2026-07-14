@@ -635,12 +635,12 @@ def validate_run_settings(
                 f"{neighbor_resolved.resource_name!r}.")
         # TODO: this is a problem! We need to be able to chain co-scheduled
         # stages into each other.
-        if neighbor_resolved.co_schedule_with is not None:
-            #raise ValueError(
-            #    f"Stage {neighbor_name!r} cannot host co-scheduled stage "
-            #    f"{stage_name!r} because it is itself co-scheduled into "
-            #    f"another stage.")
-            print("Chaining multiple co-scheduled stages together - I want this to work!")
+        #if neighbor_resolved.co_schedule_with is not None:
+        #    #raise ValueError(
+        #    #    f"Stage {neighbor_name!r} cannot host co-scheduled stage "
+        #    #    f"{stage_name!r} because it is itself co-scheduled into "
+        #    #    f"another stage.")
+        #    print("Chaining multiple co-scheduled stages together - I want this to work!")
         if _dispatch_uses_array_spread(resolved.dispatch):
             raise ValueError(
                 f"Stage {stage_name!r} cannot be co-scheduled: "

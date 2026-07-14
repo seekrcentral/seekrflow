@@ -23,7 +23,6 @@ EXTEND_GAP_SCORE = -0.5
 END_OPEN_GAP_SCORE = 0.0
 END_EXTEND_GAP_SCORE = 0.0
 
-# TODO: figure out a way to pass a more robust atom_selection
 def align_sequence_from_mdtraj(
         traj1: typing.Any, 
         traj2: typing.Any, 
@@ -40,8 +39,8 @@ def align_sequence_from_mdtraj(
     traj1_atom_info_list = []
     traj1_resids_in_selection = []
     for residue in traj1.topology.residues:
-        if not residue.is_protein:
-            continue
+        #if not residue.is_protein:
+        #    continue
         traj1_resids.append(residue_counter)
         traj1_resnames.append(residue.name)
         for atom in residue.atoms:
@@ -70,8 +69,8 @@ def align_sequence_from_mdtraj(
     traj2_atom_info_list = []
     traj2_resids_in_selection = []
     for residue in traj2.topology.residues:
-        if not residue.is_protein:
-            continue
+        #if not residue.is_protein:
+        #    continue
         traj2_resids.append(residue_counter)
         traj2_resnames.append(residue.name)
         for atom in residue.atoms:
@@ -145,6 +144,7 @@ def align_sequence_from_mdtraj(
 def obtain_md_ref_structure_map(
         ref_mdtraj: typing.Any,
         md_mdtraj: typing.Any,
+        align_selection_str: str = "protein and not type H"
         ) -> tuple[typing.List[int], typing.List[int]]:
     """
     Since the ref structure is assumed to have been used to construct
@@ -160,7 +160,7 @@ def obtain_md_ref_structure_map(
     
     # These indices need to be chosen by sequence alignment of protein
     align_indices_solvated, align_indices_unsolvated = align_sequence_from_mdtraj(
-        md_mdtraj, ref_mdtraj)
+        md_mdtraj, ref_mdtraj, align_selection_str)
     
     assert len(align_indices_solvated) == len(align_indices_unsolvated), \
         "Number of alignment atoms should be the same in solvated and unsolvated "\
