@@ -34,6 +34,7 @@ WORK = "work"
 PARAMETERIZE = "parameterize"
 ROOT = "root"
 RUN = "run"
+INPUT_TARBALL_NAME = "model_input.tar.gz" # For Cloud transfers
 
 
 def _register_workflow_subclasses(converter: cattrs.Converter) -> None:
@@ -163,6 +164,27 @@ class Transfer_settings_rsync(Transfer_settings_base):
         default=None,
         validator=validators.optional(validators.instance_of(str)),
         )
+
+@define
+class Transfer_settings_aws_s3(Transfer_settings_base):
+    """
+    Amazon web services cloud file transfer utility.
+    """
+    type: typing.Literal["aws_s3"] = "aws_s3"
+    bucket: str = field(
+        default="",
+        validator=validators.instance_of(str),
+        )
+    prefix: str = field(
+        default="",
+        validator=validators.instance_of(str),
+        )
+
+    def get_uri(self):
+        return f"s3://{self.bucket}/{self.prefix}"
+
+    def get_input_tarball_name(self):
+        return INPUT_TARBALL_NAME
 
 @define
 class Resource_base:
@@ -308,6 +330,72 @@ class Resource_remote_pbs(Resource_remote_base):
     transfer_settings: Transfer_settings_rsync | Transfer_settings_globus = field(
         default=Factory(Transfer_settings_globus),
     )
+
+@define
+class Resource_cloud_base(Resource_base):
+    """
+    Base class for cloud resources.
+    """
+    pass
+
+@define
+class Resource_cloud_aws(Resource_cloud_base):
+    """
+    AWS resource for running the protocol.
+    """
+    type: typing.Literal["aws_cloud"] = "aws_cloud"
+    name: str = field(
+        default="",
+        validator=validators.instance_of(str),
+        )
+    # AWS region: such as 'us-west-2'
+    region: str = field(
+        default="",
+        validator=validators.instance_of(str),
+        )
+    # Your AWS account id
+    account_id: str = field(
+        default="",
+        validator=validators.instance_of(str),
+        )
+    # The name of your compute environment
+    compute_env_name: str = field(
+        default="",
+        validator=validators.instance_of(str),
+        )
+    # The name of your job queue
+    job_queue_name: str = field(
+        default="",
+        validator=validators.instance_of(str),
+        )
+    # Job definition name
+    # TODO: Is this chosen automatically?
+    job_def_generic: str = field(
+        default="",
+        validator=validators.instance_of(str),
+        )
+
+    n_gpus: int = field(
+        default=1,
+        validator=[validators.instance_of(int),
+                   validators.ge(0)]
+        )
+    n_vcpus: int = field(
+        default=4,
+        validator=[validators.instance_of(int),
+                   validators.ge(0)]
+        )
+    memory_mb: int = field(
+        default=14000,
+        validator=[validators.instance_of(int),
+                   validators.ge(0)]
+        )
+    transfer_settings: Transfer_settings_aws_s3 = field(
+        default=Factory(Transfer_settings_aws_s3),
+        )
+
+    def get_seekr_image_uri(self):
+        return f"{self.account_id}.dkr.ecr.{self.region}.amazonaws.com/seekr-engines-bd:latest"
 
 @define
 class Placement:

@@ -1578,6 +1578,7 @@ class SeekrPipeline:
         launched_tasks: list[typing.Any] = []
 
         def stage_dependencies_completed(stage_workflow: StageWorkflow) -> bool:
+            """Are a stage_workflow's dependencies all complete?"""
             dep_index = getattr(stage_workflow.stage, "input_stage_index", 0)
             if dep_index <= 0:
                 return True
@@ -1804,7 +1805,7 @@ def run_model(
         keystrokes_enabled: bool = True,
         ) -> None:
     """
-    Run the SEEKR calculation using remote and local resources.
+    Run the SEEKR calculation using remote, cloud, or local resources.
     """
     curdir = os.getcwd()
     if seekrflow.work_directory is not None:

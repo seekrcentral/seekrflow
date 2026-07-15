@@ -220,6 +220,8 @@ def status_remote(
         status_workflow = workload_slurm.slurm_remote_status_workflow
     elif resource.type == "pbs_remote":
         status_workflow = workload_pbs.pbs_remote_status_workflow
+    elif resource.type == "aws_cloud":
+        status_workflow = workload_aws.aws_remote_status_workflow
     else:
         raise NotImplementedError(
             f"Resource type {resource.type} not implemented"

@@ -105,7 +105,8 @@ def create_example_seekrflow(ff="amber") -> structures.Seekrflow:
 
 def create_host_guest_example_seekrflow(
         work_directory: str,
-        provide_pqr_filenames: bool = True
+        provide_pqr_filenames: bool = True,
+        cloud_inputs: bool = True,
         ) -> structures.Seekrflow:
     """
     Build a complete, runnable seekrflow input for the beta-cyclodextrin /
@@ -244,17 +245,30 @@ def create_host_guest_example_seekrflow(
     seekrflow.run_settings = structures.Run_settings()
     mmvt_dispatch = stage_procedures_module.Dispatch(
         dimensions=["anchor"], group_size=1, concurrency=1)
-    seekrflow.run_settings.placements = [
-        structures.Placement(target=[], resource="local"),
-        structures.Placement(target=["equilibration"], resource="panamint"),
-        structures.Placement(
-            target=["metadynamics", "sampling"], resource="panamint"),
-        structures.Placement(
-            target=["metadynamics", "logistic"], resource="panamint", 
-            co_schedule_with="predecessor"),
-        structures.Placement(target=["MMVT"], resource="panamint", dispatch=mmvt_dispatch),
-        structures.Placement(target=["bd"], resource="local"),
-    ]
+    if cloud_inputs:
+        seekrflow.run_settings.placements = [
+            structures.Placement(target=[], resource="local"),
+            structures.Placement(target=["equilibration"], resource="aws_gpu"),
+            structures.Placement(
+                target=["metadynamics", "sampling"], resource="aws_gpu"),
+            structures.Placement(
+                target=["metadynamics", "logistic"], resource="aws_gpu", 
+                co_schedule_with="predecessor"),
+            structures.Placement(target=["MMVT"], resource="aws_gpu", dispatch=mmvt_dispatch),
+            structures.Placement(target=["bd"], resource="local"),
+        ]
+    else:
+        seekrflow.run_settings.placements = [
+            structures.Placement(target=[], resource="local"),
+            structures.Placement(target=["equilibration"], resource="panamint"),
+            structures.Placement(
+                target=["metadynamics", "sampling"], resource="panamint"),
+            structures.Placement(
+                target=["metadynamics", "logistic"], resource="panamint", 
+                co_schedule_with="predecessor"),
+            structures.Placement(target=["MMVT"], resource="panamint", dispatch=mmvt_dispatch),
+            structures.Placement(target=["bd"], resource="local"),
+        ]
     return seekrflow
 
 if __name__ == "__main__":
@@ -268,15 +282,21 @@ if __name__ == "__main__":
         help="Which example input to generate: 'parameterize' (default) for "
              "the parameterize-side example, or 'hostguest' for the complete "
              "prepared host-guest workflow.")
+    argparser.add_argument(
+        "-c", "--cloud_inputs", dest="cloud_inputs", default=False, 
+        help="Generate inputs to use Cloud resources.", 
+        action="store_true")
     argspace = argparser.parse_args()
     args = vars(argspace)
     json_filename = args["input_file"]
+    cloud_inputs = args["cloud_inputs"]
     if args["system"] == "hostguest":
         provide_pqr_filenames = False
         work_directory = "~/tmp/seekrflow_hostguest_example/"
         seekrflow = create_host_guest_example_seekrflow(
             provide_pqr_filenames=provide_pqr_filenames,
-            work_directory=work_directory)
+            work_directory=work_directory,
+            cloud_inputs=cloud_inputs)
     else:
         seekrflow = create_example_seekrflow()
     seekrflow.save(json_filename)
