@@ -216,10 +216,10 @@ def status_local(
         swarm_id: int | None = None,
         ) -> dict: 
     """
-    Check if the BD stage has finished locally. This is done by:
+    Check if the stage has finished locally. This is done by:
     1. Checking the process state file
     2. Checking if the process is still alive
-    3. Reading the results XML files to see how many BD steps have elapsed
+    3. Reading the results XML files to see how many steps have elapsed
     """
     import os
     import sys

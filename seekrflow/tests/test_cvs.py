@@ -133,119 +133,82 @@ class TestAlphaCarbonSelectionWithinCutoff:
 
 class TestGetReceptorLigandComComSelections:
     """Test the get_receptor_ligand_com_com_selections function"""
-    
+
     def test_com_com_selections_with_ligand_resname(self):
-        """Test COM-COM selections when ligand_resname is provided"""
+        """Test COM-COM selections when ligand is selected by resname"""
         pdb_file = os.path.join(TEST_DIRECTORY, "data", "trypsin_benzamidine.pdb")
-        
-        # Create a basic seekrflow object
         seekrflow = create_seekrflow.create_unparameterized_seekrflow(
             pdb_file, "BEN", [0.5, 1.0]
         )
-        seekrflow.workflow.ligand_indices = []  # Force it to use ligand_resname
-        
         receptor_sel, ligand_sel = cvs.get_receptor_ligand_com_com_selections(
             seekrflow.workflow, pdb_file
         )
-        
         assert len(receptor_sel) > 0
         assert len(ligand_sel) > 0
-        
-        # Verify ligand indices were populated
-        assert len(seekrflow.workflow.ligand_indices) > 0
-    
+
     def test_com_com_selections_with_predefined_ligand_indices(self):
-        """Test COM-COM selections when ligand_indices are predefined"""
+        """Test COM-COM selections when ligand uses an indices selector"""
+        import seekrflow.modules.workflows.components as components_module
         pdb_file = os.path.join(TEST_DIRECTORY, "data", "trypsin_benzamidine.pdb")
         traj = mdtraj.load(pdb_file)
-        
-        # Pre-define ligand indices
-        ligand_indices = list(traj.topology.select("resname BEN"))
-        
+        ligand_indices = [int(i) for i in traj.topology.select("resname BEN")]
         seekrflow = create_seekrflow.create_unparameterized_seekrflow(
             pdb_file, "BEN", [0.5, 1.0]
         )
-        seekrflow.workflow.ligand_indices = ligand_indices
-        
+        ligand = seekrflow.workflow.components.get_member("ligand")
+        ligand.selector = components_module.Selector_by_indices(
+            indices=ligand_indices)
         receptor_sel, ligand_sel = cvs.get_receptor_ligand_com_com_selections(
             seekrflow.workflow, pdb_file
         )
-        
         assert receptor_sel != ligand_sel
         assert ligand_sel == ligand_indices
-    
+
     def test_com_com_selections_different_thresholds(self):
         """Test COM-COM selections with different alpha carbon thresholds"""
         pdb_file = os.path.join(TEST_DIRECTORY, "data", "trypsin_benzamidine.pdb")
-        
         seekrflow = create_seekrflow.create_unparameterized_seekrflow(
             pdb_file, "BEN", [0.5, 1.0]
         )
-        seekrflow.workflow.ligand_indices = []
-        
-        # Test with smaller threshold
         receptor_sel_small, _ = cvs.get_receptor_ligand_com_com_selections(
             seekrflow.workflow, pdb_file, alpha_carbon_ligand_threshold=0.3
         )
-        
-        # Reset ligand_indices for second test
-        seekrflow.workflow.ligand_indices = []
-        
-        # Test with larger threshold
         receptor_sel_large, _ = cvs.get_receptor_ligand_com_com_selections(
             seekrflow.workflow, pdb_file, alpha_carbon_ligand_threshold=0.8
         )
-        
-        # Larger threshold should include more or equal receptor atoms
         assert len(receptor_sel_large) >= len(receptor_sel_small)
-    
+
     def test_com_com_selections_empty_ligand_resname_assertion(self):
-        """Test assertion when ligand_resname is empty and ligand_indices is empty"""
+        """Test assertion when ligand selector cannot resolve atoms"""
         pdb_file = os.path.join(TEST_DIRECTORY, "data", "trypsin_benzamidine.pdb")
-        
         seekrflow = create_seekrflow.create_unparameterized_seekrflow(
-            pdb_file, "", [0.5, 1.0]  # Empty ligand_resname
+            pdb_file, "XXX", [0.5, 1.0]
         )
-        seekrflow.workflow.ligand_indices = []  # Empty ligand_indices
-        
-        with pytest.raises(AssertionError, match="ligand_resname must be set"):
+        with pytest.raises(AssertionError, match="resolved to no atoms"):
             cvs.get_receptor_ligand_com_com_selections(seekrflow.workflow, pdb_file)
-    
+
     def test_com_com_selections_zero_threshold(self):
         """Test COM-COM selections with zero threshold"""
         pdb_file = os.path.join(TEST_DIRECTORY, "data", "trypsin_benzamidine.pdb")
-        
         seekrflow = create_seekrflow.create_unparameterized_seekrflow(
             pdb_file, "BEN", [0.5, 1.0]
         )
-        seekrflow.workflow.ligand_indices = []
-        
         receptor_sel, ligand_sel = cvs.get_receptor_ligand_com_com_selections(
             seekrflow.workflow, pdb_file, alpha_carbon_ligand_threshold=0.0
         )
-        
-        # Zero threshold should result in empty or minimal receptor selection
-        assert len(ligand_sel) > 0  # Ligand should still be found
-    
+        assert len(ligand_sel) > 0
+
     def test_com_com_selections_large_threshold(self):
         """Test COM-COM selections with very large threshold"""
         pdb_file = os.path.join(TEST_DIRECTORY, "data", "trypsin_benzamidine.pdb")
-        
         seekrflow = create_seekrflow.create_unparameterized_seekrflow(
             pdb_file, "BEN", [0.5, 1.0]
         )
-        seekrflow.workflow.ligand_indices = []
-        
         receptor_sel, ligand_sel = cvs.get_receptor_ligand_com_com_selections(
             seekrflow.workflow, pdb_file, alpha_carbon_ligand_threshold=10.0
         )
-        
-        # Large threshold should include many receptor atoms
         assert len(receptor_sel) > 0
         assert len(ligand_sel) > 0
-        
-        # Should include more atoms than a smaller threshold
-        seekrflow.workflow.ligand_indices = []
         receptor_sel_small, _ = cvs.get_receptor_ligand_com_com_selections(
             seekrflow.workflow, pdb_file, alpha_carbon_ligand_threshold=0.3
         )
@@ -265,21 +228,12 @@ class TestGetBdReceptorLigandSelections:
         if not (os.path.exists(pdb_file) and os.path.exists(receptor_pqr) and os.path.exists(ligand_pqr)):
             pytest.skip("Required PDB/PQR files not available for BD test")
         
-        # Create seekrflow object with BD settings
-        seekrflow = create_seekrflow.create_unparameterized_seekrflow(
-            pdb_file, "BEN", [0.5, 1.0]
-        )
-        seekrflow.workflow.receptor_pqr_filename_for_bd = receptor_pqr
-        seekrflow.workflow.ligand_pqr_filename_for_bd = ligand_pqr
-        
-        # Create mock MD selections (simplified for testing)
         traj = mdtraj.load(pdb_file)
-        md_receptor_selection = list(traj.topology.select("protein and name CA"))[:5]  # First 5 CA atoms
-        md_ligand_selection = list(traj.topology.select("resname BEN"))[:3]  # First 3 ligand atoms
+        md_receptor_selection = list(traj.topology.select("protein and name CA"))[:5]
+        md_ligand_selection = list(traj.topology.select("resname BEN"))[:3]
         
         bd_receptor_sel, bd_ligand_sel = cvs.get_bd_receptor_ligand_selections(
-            seekrflow.workflow.receptor_pqr_filename_for_bd,
-            seekrflow.workflow.ligand_pqr_filename_for_bd,
+            receptor_pqr, ligand_pqr,
             pdb_file, md_receptor_selection, md_ligand_selection
         )
         
@@ -295,32 +249,21 @@ class TestGetBdReceptorLigandSelections:
         if not (os.path.exists(pdb_file) and os.path.exists(receptor_pqr) and os.path.exists(ligand_pqr)):
             pytest.skip("Required PDB/PQR files not available for BD test")
         
-        seekrflow = create_seekrflow.create_unparameterized_seekrflow(
-            pdb_file, "BEN", [0.5, 1.0]
-        )
-        seekrflow.workflow.receptor_pqr_filename_for_bd = receptor_pqr
-        seekrflow.workflow.ligand_pqr_filename_for_bd = ligand_pqr
-        
-        # Test with basic selections that should work
         traj = mdtraj.load(pdb_file)
-        md_receptor_selection = [0, 1]  # Use first two atoms
+        md_receptor_selection = [0, 1]
         md_ligand_selection = list(traj.topology.select("resname BEN"))[:2]
         
         try:
             result = cvs.get_bd_receptor_ligand_selections(
-                seekrflow.workflow.receptor_pqr_filename_for_bd,
-                seekrflow.workflow.ligand_pqr_filename_for_bd,
+                receptor_pqr, ligand_pqr,
                 pdb_file, md_receptor_selection, md_ligand_selection
             )
-            # If it works, verify the result is correct
             assert len(result) == 2
-        except AssertionError as e:
-            # If matching fails due to structure differences, that's also valid behavior
-            if "do not match" in str(e):
-                # This is the expected assertion error we want to test
+        except (AssertionError, RuntimeError) as e:
+            if "do not match" in str(e) or "No match found" in str(e):
                 assert True
             else:
-                raise  # Re-raise if it's a different assertion error
+                raise
     
     def test_bd_selections_assertion_ligand_mismatch(self):
         """Test assertion when BD ligand indices don't match MD selection"""
@@ -331,21 +274,13 @@ class TestGetBdReceptorLigandSelections:
         if not (os.path.exists(pdb_file) and os.path.exists(receptor_pqr) and os.path.exists(ligand_pqr)):
             pytest.skip("Required PDB/PQR files not available for BD test")
         
-        seekrflow = create_seekrflow.create_unparameterized_seekrflow(
-            pdb_file, "BEN", [0.5, 1.0]
-        )
-        seekrflow.workflow.receptor_pqr_filename_for_bd = receptor_pqr
-        seekrflow.workflow.ligand_pqr_filename_for_bd = ligand_pqr
-        
         traj = mdtraj.load(pdb_file)
         md_receptor_selection = list(traj.topology.select("protein and name CA"))[:2]
-        # Use indices that exist but atom names unlikely to be in PQR file
-        md_ligand_selection = [0, 1]  # Use first two atoms which are likely not ligand
+        md_ligand_selection = [0, 1]
         
-        with pytest.raises(AssertionError, match="No match found for ligand atom with name N in the PQR file."):
+        with pytest.raises(AssertionError, match="No match found for ligand atom"):
             cvs.get_bd_receptor_ligand_selections(
-                seekrflow.workflow.receptor_pqr_filename_for_bd,
-                seekrflow.workflow.ligand_pqr_filename_for_bd,
+                receptor_pqr, ligand_pqr,
                 pdb_file, md_receptor_selection, md_ligand_selection
             )
     
@@ -358,17 +293,8 @@ class TestGetBdReceptorLigandSelections:
         if not (os.path.exists(pdb_file) and os.path.exists(receptor_pqr) and os.path.exists(ligand_pqr)):
             pytest.skip("Required PDB/PQR files not available for BD test")
         
-        seekrflow = create_seekrflow.create_unparameterized_seekrflow(
-            pdb_file, "BEN", [0.5, 1.0]
-        )
-        seekrflow.workflow.receptor_pqr_filename_for_bd = receptor_pqr
-        seekrflow.workflow.ligand_pqr_filename_for_bd = ligand_pqr
-        
-        # Test with empty selections
         bd_receptor_sel, bd_ligand_sel = cvs.get_bd_receptor_ligand_selections(
-            seekrflow.workflow.receptor_pqr_filename_for_bd,
-            seekrflow.workflow.ligand_pqr_filename_for_bd,
-            pdb_file, [], []
+            receptor_pqr, ligand_pqr, pdb_file, [], []
         )
         
         assert len(bd_receptor_sel) == 0
@@ -381,21 +307,13 @@ class TestGetBdReceptorLigandSelections:
         if not os.path.exists(pdb_file):
             pytest.skip("Required PDB file not available for BD test")
         
-        seekrflow = create_seekrflow.create_unparameterized_seekrflow(
-            pdb_file, "BEN", [0.5, 1.0]
-        )
-        seekrflow.workflow.receptor_pqr_filename_for_bd = "nonexistent_receptor.pqr"
-        seekrflow.workflow.ligand_pqr_filename_for_bd = "nonexistent_ligand.pqr"
-        
         traj = mdtraj.load(pdb_file)
-        md_receptor_selection = [0]  # Single atom
-        md_ligand_selection = [1]   # Single atom
+        md_receptor_selection = [0]
+        md_ligand_selection = [1]
         
-        # Should raise an error when trying to load non-existent PQR files
-        with pytest.raises(Exception):  # parmed will raise an exception
+        with pytest.raises(Exception):
             cvs.get_bd_receptor_ligand_selections(
-                seekrflow.workflow.receptor_pqr_filename_for_bd,
-                seekrflow.workflow.ligand_pqr_filename_for_bd,
+                "nonexistent_receptor.pqr", "nonexistent_ligand.pqr",
                 pdb_file, md_receptor_selection, md_ligand_selection
             )
     
@@ -408,30 +326,22 @@ class TestGetBdReceptorLigandSelections:
         if not (os.path.exists(pdb_file) and os.path.exists(receptor_pqr) and os.path.exists(ligand_pqr)):
             pytest.skip("Required PDB/PQR files not available for BD test")
         
-        seekrflow = create_seekrflow.create_unparameterized_seekrflow(
-            pdb_file, "BEN", [0.5, 1.0]
-        )
-        seekrflow.workflow.receptor_pqr_filename_for_bd = receptor_pqr
-        seekrflow.workflow.ligand_pqr_filename_for_bd = ligand_pqr
-        
-        # Use proper selections that should match between PDB and PQR files
         traj = mdtraj.load(pdb_file)
-        md_receptor_selection = list(traj.topology.select("protein and name CA"))[:1]  # Single CA atom
-        md_ligand_selection = list(traj.topology.select("resname BEN"))[:1]  # Single ligand atom
+        md_receptor_selection = list(traj.topology.select("protein and name CA"))[:1]
+        md_ligand_selection = list(traj.topology.select("resname BEN"))[:1]
         
         try:
             result = cvs.get_bd_receptor_ligand_selections(
-                seekrflow.workflow.receptor_pqr_filename_for_bd,
-                seekrflow.workflow.ligand_pqr_filename_for_bd,
+                receptor_pqr, ligand_pqr,
                 pdb_file, md_receptor_selection, md_ligand_selection
             )
             
             assert len(result) == 2
             bd_receptor_sel, bd_ligand_sel = result
-        except AssertionError as e:
-            # If the assertion about matching fails, it's expected behavior for this test data
+        except (AssertionError, RuntimeError) as e:
             if "do not match" in str(e):
                 pytest.skip("PDB and PQR structures don't match as expected for this test data")
+            raise
 
 
 class TestCvsModuleEdgeCases:

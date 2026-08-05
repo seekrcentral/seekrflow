@@ -19,6 +19,7 @@ Key seekr contracts honored here:
 """
 
 import os
+import glob
 import typing
 
 import mdtraj
@@ -40,6 +41,8 @@ from seekr.modules.engines.openmm.preparer import Openmm_settings_input
 from seekr.modules.engines.preparer import MD_unpartitioned_settings_input
 from seekr.modules.engines.browndye.preparer import (
     Browndye_settings_input, Browndye_molecule_input)
+from seekr.modules.engines.sda.preparer import (
+    SDA_settings_input, SDA_molecule_input)
 from seekr.modules.engines.structures import (
     Selection, Ion, Amber_parameters_topology, Charmm_parameters_topology,
     Openmm_system)
@@ -59,8 +62,8 @@ from seekr.modules.collective_variables.rmsd_cv import RMSD_cv_input
 from seekr.modules.anchor_schemes.preparer import (
     Anchors_as_voronoi_cells_anchor_scheme, Voronoi_cell)
 from seekr.modules.restraints.preparer import (
-    Positional_restraint_input, Pairwise_restraint_input,
-    Proximity_restraint_input)
+    Positional_restraint_input, Z_restraint_input, Torsion_restraint_input,
+    Pairwise_restraint_input, Proximity_restraint_input)
 from seekr.modules.reporters.preparer import (
     State_reporter_input, Position_reporter_input, Anchor_reporter_input)
 from seekr.modules.base import (
@@ -113,9 +116,19 @@ def _map_parameters_topology(
         new_pt = Amber_parameters_topology(prmtop_filename=pt.prmtop_filename)
         return new_pt
     if isinstance(pt, parameters_topology_structures.Charmm_parameters_topology):
+        full_param_list = []
+        for param_filename in pt.param_filename_list:
+            expanded = os.path.expanduser(param_filename)
+            matches = sorted(glob.glob(expanded))
+            if matches:
+                full_param_list.extend(matches)
+            else:
+                # literal path, or a glob that matched nothing — keep as-is -
+                # Let seekr handle the error.
+                full_param_list.append(expanded)
         return Charmm_parameters_topology(
             psf_filename=pt.psf_filename,
-            param_filename_list=list(pt.param_filename_list))
+            param_filename_list=full_param_list)
     if isinstance(pt, parameters_topology_structures.Openmm_system):
         return Openmm_system(system_filename=pt.system_filename)
     raise NotImplementedError(
@@ -148,29 +161,21 @@ def _map_sampling(
             heat_ramp_temperatures=heat_ramp,
             heat_ramp_step_interval=interval)
     if isinstance(sampling, stage_procedures_module.Metadynamics_sampling_spec):
-        # Make sure that cv_names are in the model
-        for cv_name in sampling.cv_names:
-            if cv_name not in [cv_spec.name for cv_spec in cv_specs]:
-                raise ValueError(
-                    f"Sampling method references CV '{cv_name}' that is not "
-                    "defined in the workflow's CV specs.")
+        cv_names = cv_specs_module.resolve_cv_names(sampling.cv_names, cv_specs)
         return Metadynamics_md_input(
             number_of_points=sampling.number_of_points,
             bias_factor=sampling.bias_factor,
             gaussian_height=sampling.gaussian_height,
             gaussian_width=sampling.gaussian_width,
             steps_per_update=sampling.steps_per_update,
-            cv_names=list(sampling.cv_names))
+            cv_names=cv_names,
+            write_biases=sampling.write_biases)
     if isinstance(sampling, stage_procedures_module.Steered_sampling_spec):
-        for cv_name in sampling.cv_names:
-            if cv_name not in [cv_spec.name for cv_spec in cv_specs]:
-                raise ValueError(
-                    f"Sampling method references CV '{cv_name}' that is not "
-                    "defined in the workflow's CV specs.")
+        cv_names = cv_specs_module.resolve_cv_names(sampling.cv_names, cv_specs)
         return Steered_md_input(
             force_constant=sampling.force_constant,
             velocity=sampling.velocity,
-            cv_names=list(sampling.cv_names))
+            cv_names=cv_names)
     if isinstance(sampling, stage_procedures_module.MMVT_sampling_spec):
         return MMVT_md_input()
     if isinstance(sampling, stage_procedures_module.NAM_sampling_spec):
@@ -178,10 +183,12 @@ def _map_sampling(
     if isinstance(sampling, stage_procedures_module.RAMD_sampling_spec):
         import seekrsamplingmethodsplugin.modules.sampling_methods.preparer \
             as sampling_methods_preparer
-        if sampling.escape_cv_name not in [cv_spec.name for cv_spec in cv_specs]:
+        escape_cvs = cv_specs_module.resolve_cv_names(
+            [sampling.escape_cv_name], cv_specs)
+        if len(escape_cvs) != 1:
             raise ValueError(
-                f"Sampling method references CV '{sampling.escape_cv_name}' that is not "
-                "defined in the workflow's CV specs.")
+                f"RAMD escape_cv_name '{sampling.escape_cv_name}' resolves to "
+                f"{len(escape_cvs)} CVs; use a single-CV spec or 'spec.role'.")
         return sampling_methods_preparer.Random_accelerated_md_sampling_method_input(
             ligand_selection_name = sampling.ligand_selection_name,
             receptor_selection_name = sampling.receptor_selection_name,
@@ -201,6 +208,16 @@ def _map_restraint(restraint: typing.Any) -> typing.Any:
             selection_name=restraint.selection_name,
             force_constant=restraint.force_constant,
             coordinates_filename=restraint.coordinates_filename)
+    if isinstance(restraint, stage_procedures_module.Z_restraint_spec):
+        return Z_restraint_input(
+            selection_name=restraint.selection_name,
+            force_constant=restraint.force_constant,
+            coordinates_filename=restraint.coordinates_filename)
+    if isinstance(restraint, stage_procedures_module.Torsion_restraint_spec):
+        return Torsion_restraint_input(
+            torsion_indices=list(restraint.torsion_indices),
+            torsion_values=list(restraint.torsion_values),
+            force_constant=restraint.force_constant)
     if isinstance(restraint, stage_procedures_module.Pairwise_restraint_spec):
         return Pairwise_restraint_input(
             selection1_name=restraint.selection1_name,
@@ -231,7 +248,8 @@ def _map_completion(completion: typing.Any) -> typing.Any:
             stage_procedures_module.Reporter_progress_completion_spec):
         return Reporter_progress_completion_criteria(
             reporter_name=completion.reporter_name,
-            interval=completion.interval)
+            interval=completion.interval,
+            max_number_of_steps=completion.max_steps)
     if isinstance(
             completion,
             stage_procedures_module.CV_value_attained_completion_spec):
@@ -337,9 +355,10 @@ def _make_cv_inputs(cv_specs: list) -> list:
     cv_inputs: list = []
     index = 0
     for cv_spec in cv_specs:
+        role_names = dict(cv_spec.generated_cvs())
         if isinstance(cv_spec, cv_specs_module.Com_com_distance_CV_spec):
             cv = Distance_cv_input(
-                name=cv_spec.name,
+                name=role_names["distance"],
                 group1_name=cv_spec.group1_selection_name,
                 group2_name=cv_spec.group2_selection_name,
                 min_value=cv_spec.min_value,
@@ -350,7 +369,7 @@ def _make_cv_inputs(cv_specs: list) -> list:
         elif isinstance(
                 cv_spec, cv_specs_module.Com_com_distance_rmsd_CV_spec):
             distance_cv = Distance_cv_input(
-                name=f"{cv_spec.name}_distance",
+                name=role_names["distance"],
                 group1_name=cv_spec.group1_selection_name,
                 group2_name=cv_spec.group2_selection_name,
                 min_value=cv_spec.min_value,
@@ -358,7 +377,7 @@ def _make_cv_inputs(cv_specs: list) -> list:
             distance_cv._index = index
             index += 1
             rmsd_cv = RMSD_cv_input(
-                name=f"{cv_spec.name}_rmsd",
+                name=role_names["rmsd"],
                 group_rmsd_name=cv_spec.rmsd_group_selection_name,
                 group_align_name=cv_spec.rmsd_align_selection_name,
                 ref_structure=cv_spec.rmsd_ref_structure,
@@ -592,10 +611,23 @@ def _make_bd_engine_settings(
         selections = [
             Selection(name=name, atom_indices=list(indices))
             for name, indices in local_selections.items()]
-        molecules.append(Browndye_molecule_input(
-            name=molecule.name,
-            pqr_filename=pqr_paths[molecule.name],
-            selections=selections))
+        if bd_settings.engine == "browndye":
+            molecules.append(Browndye_molecule_input(
+                name=molecule.name,
+                pqr_filename=pqr_paths[molecule.name],
+                selections=selections))
+        elif bd_settings.engine == "sda":
+            # TODO: this might need to be more carefully constructed
+            # if, say, non-protein/ligand calculations are being run.
+            if molecule.role == "ligand":
+                molecule_type = "non_protein"
+            else:
+                molecule_type = "protein"
+            molecules.append(SDA_molecule_input(
+                name=molecule.name,
+                type=molecule_type,
+                pqr_filename=pqr_paths[molecule.name],
+                selections=selections))
     # TODO: handle more complex ion setups (e.g. divalent ions, 
     # asymmetric concentrations, etc.)
     ionic_strength = float(
@@ -604,11 +636,20 @@ def _make_bd_engine_settings(
         Ion(name="Cl-", radius=1.67, charge=-1.0, concentration=ionic_strength),
         Ion(name="Na+", radius=0.9, charge=1.0, concentration=ionic_strength),
     ]
-    return Browndye_settings_input(
-        binary_directory=bd_settings.binary_directory,
-        molecules=molecules,
-        ions=ions)
-
+    if bd_settings.engine == "browndye":
+        assert bd_settings.geometry == "sphere"
+        return Browndye_settings_input(
+            binary_directory=bd_settings.binary_directory,
+            molecules=molecules,
+            ions=ions)
+    elif bd_settings.engine == "sda":
+        assert bd_settings.auxiliary_directory != ""
+        return SDA_settings_input(
+            geometry=bd_settings.geometry,
+            binary_directory=bd_settings.binary_directory,
+            aux_directory=bd_settings.auxiliary_directory,
+            molecules=molecules,
+            ions=ions)
 
 def _make_engine_settings_list(ctx: Prepare_context) -> list:
     engine_settings_list = [_make_md_engine_settings(ctx)]

@@ -15,10 +15,10 @@ def combine_fused_commands(command_strings: list[str]) -> str:
 
 
 def _resource_supports_fusion(
-        resource: "Resource_remote_base | None",
+        resource: typing.Any,
         ) -> bool:
     return resource is not None and resource.type in (
-        "slurm_remote", "pbs_remote")
+        "slurm_remote", "pbs_remote", "aws_cloud")
 
 
 def populate_fusion_map(

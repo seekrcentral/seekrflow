@@ -28,6 +28,16 @@ def classify_remote_probe_status(status: dict | None) -> str:
     return "submit"
 
 
+def force_overwrite_skips_launch_probe(force_overwrite: bool) -> bool:
+    """
+    When True, skip remote/cloud launch probing so a force-rerun can submit.
+
+    Probe would otherwise treat a prior completed status as skip-submit and
+    never reach cancel/reset + seekr ``force_overwrite``.
+    """
+    return bool(force_overwrite)
+
+
 def owns_scheduler_job(fusion_host: str | None) -> bool:
     """True when this stage may own a scheduler submission (not a fused member)."""
     return fusion_host is None

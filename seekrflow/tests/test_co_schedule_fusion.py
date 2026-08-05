@@ -99,8 +99,8 @@ class TestPopulateFusionMap:
             resource=resource,
             dispatch=stage_procedures.Dispatch(),
             co_schedule_with=co_schedule_with,
-            cpus_per_task=None,
-            memory_per_node=None,
+            cpus=None,
+            memory_mb=None,
             time_limit=None,
             mps=None,
         )

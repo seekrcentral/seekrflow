@@ -95,8 +95,8 @@ def align_sequence_from_mdtraj(
     aligner = Align.PairwiseAligner()
     aligner.open_gap_score = OPEN_GAP_SCORE
     aligner.extend_gap_score = EXTEND_GAP_SCORE
-    aligner.end_open_gap_score = END_OPEN_GAP_SCORE
-    aligner.end_extend_gap_score = END_EXTEND_GAP_SCORE
+    aligner.open_end_gap_score = END_OPEN_GAP_SCORE
+    aligner.extend_end_gap_score = END_EXTEND_GAP_SCORE
     alignments = aligner.align(traj1_sequence, traj2_sequence)
     #print("alignments[0][0,:]:", alignments[0][0,:])
     #print("alignments[0][1,:]:", alignments[0][1,:])
@@ -105,7 +105,6 @@ def align_sequence_from_mdtraj(
     traj2_resid = 0
     traj1_selected_indices = []
     traj2_selected_indices = []
-
     for i, (charA, charB) in enumerate(zip(alignments[0][0,:], alignments[0][1,:])):
         if (charA != "-") and (charB != "-"):
             traj1_atom_name_to_index = {}
@@ -113,18 +112,19 @@ def align_sequence_from_mdtraj(
                 if atom.index in traj1_indices:
                     traj1_atom_name_to_index[atom.name] = atom.index
 
+            
             traj2_atom_name_to_index = {}
             for atom in traj2.topology.residue(traj2_resid).atoms:
                 if atom.index in traj2_indices:
                     traj2_atom_name_to_index[atom.name] = atom.index
 
+            
             # Now find common atom names in both residues
             common_atom_names = set(traj1_atom_name_to_index.keys()).intersection(
                 set(traj2_atom_name_to_index.keys()))
             for atom_name in common_atom_names:
                 traj1_selected_indices.append(traj1_atom_name_to_index[atom_name])
                 traj2_selected_indices.append(traj2_atom_name_to_index[atom_name])
-            
         if charA != "-":
             traj1_resid += 1
             if traj1_resid >= len(traj1_seq_list):
@@ -161,10 +161,11 @@ def obtain_md_ref_structure_map(
     # These indices need to be chosen by sequence alignment of protein
     align_indices_solvated, align_indices_unsolvated = align_sequence_from_mdtraj(
         md_mdtraj, ref_mdtraj, align_selection_str)
-    
     assert len(align_indices_solvated) == len(align_indices_unsolvated), \
         "Number of alignment atoms should be the same in solvated and unsolvated "\
         "structures."
+    assert len(align_indices_solvated) > 0, \
+        "No alignment atoms found between solvated and unsolvated structures."
     
     # Align the solvated structure using the unsolvated as a reference
     ref_mdtraj.superpose(

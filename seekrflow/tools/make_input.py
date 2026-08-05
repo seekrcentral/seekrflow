@@ -9,9 +9,8 @@ import argparse
 
 import seekrflow.modules.base as base
 import seekrflow.modules.structures as structures
-import seekrflow.modules.workflows.structures as workflow_structures
 import seekrflow.modules.parameters_topology_structures as parameters_topology_structures
-import seekrflow.modules.parameterize_workflow as parameterize_workflow_module
+import seekrflow.modules.parameterize_structures as parameterize_structures
 import seekrflow.modules.workflows.workflow as workflow_module
 import seekrflow.modules.workflows.components as components_module
 import seekrflow.modules.workflows.cv_specs as cv_specs_module
@@ -30,43 +29,71 @@ def _hostguest_data_directory() -> str:
         os.path.dirname(seekr.__file__), "data", "hostguest_files")
 
 def create_example_seekrflow(ff="amber") -> structures.Seekrflow:
+    """
+    Example seekrflow JSON shaped for parameterization (blank MD system +
+    Parameterizer + protein/ligand components).
+    """
     seekrflow = structures.Seekrflow()
     seekrflow.name = "example_seekrflow"
-    workflow = parameterize_workflow_module.Parameterize_workflow()
-    workflow.solvated_system_for_md = workflow_structures.Solvated_system_for_md()
+    components = components_module.Components(members=[
+        components_module.Protein_component(
+            name="receptor",
+            selector=components_module.Selector_mdtraj(
+                selection_string="protein"),
+        ),
+        components_module.Small_molecule_component(
+            name="ligand",
+            selector=components_module.Selector_by_resname(
+                resname="LIG", include_hydrogens=True),
+            sdf_file="",
+            resname="LIG",
+        ),
+    ])
+    md_scale = scale_settings_module.Molecular_dynamics_scale_settings()
+    md_scale.system = None
+    md_scale.hydrogen_mass = 3.0
+    bd_scale = scale_settings_module.Brownian_dynamics_scale_settings()
+    bd_scale.system.molecules = [
+        scale_settings_module.BD_molecule(
+            name="receptor", component_name="receptor", role="receptor"),
+        scale_settings_module.BD_molecule(
+            name="ligand", component_name="ligand", role="ligand"),
+    ]
+    workflow = workflow_module.Workflow(
+        components=components,
+        cv_specs=[
+            cv_specs_module.Com_com_distance_CV_spec(
+                name="distance_receptor_ligand",
+                group1_selection_name="receptor",
+                group2_selection_name="ligand",
+                min_value=0.5,
+                max_value=1.6,
+            ),
+        ],
+        anchor_spec=anchor_specs_module.Uniform_anchor_spec(n_anchors=12),
+        procedure=stage_procedures_module.Composite_stage_procedure(),
+        scale_settings=[md_scale, bd_scale],
+    )
+    seekrflow.workflow = workflow
+    parameterizer = parameterize_structures.Parameterizer()
+    parameterizer.complex_pdb_filename = "protein_ligand.pdb"
     if ff == "amber":
-        workflow.solvated_system_for_md.parameters_topology = parameters_topology_structures.Amber_parameters_topology()
-        workflow.solvated_system_for_md.parameters_topology.prmtop_filename = ""
-    elif ff == "gromacs":
-        workflow.solvated_system_for_md.parameters_topology = parameters_topology_structures.Gromacs_parameters_topology()
-        workflow.solvated_system_for_md.parameters_topology.gro_filename = ""
-        workflow.solvated_system_for_md.parameters_topology.top_filename = ""
-    elif ff == "charmm":
-        workflow.solvated_system_for_md.parameters_topology = parameters_topology_structures.Charmm_parameters_topology()
-        workflow.solvated_system_for_md.parameters_topology.psf_filename = ""
-        workflow.solvated_system_for_md.parameters_topology.param_filename_list = []
-    elif ff == "forcefield":
-        workflow.solvated_system_for_md.parameters_topology = parameters_topology_structures.Forcefield_parameters()
-        workflow.solvated_system_for_md.parameters_topology.built_in_forcefield_filenames = []
-        workflow.solvated_system_for_md.parameters_topology.custom_forcefield_filenames = []
-    elif ff == "openmm":
-        workflow.solvated_system_for_md.parameters_topology = parameters_topology_structures.Openmm_system()
-        workflow.solvated_system_for_md.parameters_topology.system_filename = ""
+        parameterizer.small_molecule_forcefield = "gaff-2.11"
+        parameterizer.forcefields = [
+            "amber/ff14SB.xml",
+            "amber/tip3p_standard.xml",
+            "amber/tip3p_HFE_multivalent.xml",
+        ]
     else:
-        raise ValueError(f"Unrecognized forcefield type: {ff}")
-
-    workflow.solvated_system_for_md.solvated_pdb = ""
-    workflow.ligand_indices = []
-    workflow.receptor_indices = []
-    workflow.receptor_pqr_filename_for_bd = ""
-    workflow.ligand_pqr_filename_for_bd = ""
-    workflow.parameterizer_information = parameterize_workflow_module.Parameterizer_information()
-    workflow.md_settings = workflow_structures.MD_settings()
-    workflow.bd_settings = workflow_structures.BD_settings()
-    seekrflow.parameterize_workflow = workflow
+        parameterizer.small_molecule_forcefield = ff
+        parameterizer.forcefields = [
+            "amber/ff14SB.xml",
+            "amber/tip3p_standard.xml",
+            "amber/tip3p_HFE_multivalent.xml",
+        ]
+    seekrflow.parameterizer = parameterizer
     physical_attributes = base.Physical_attributes()
     physical_attributes.temperature = 298.15
-    physical_attributes.hydrogen_mass = 3.0
     seekrflow.physical_attributes = physical_attributes
     seekrflow.run_settings = structures.Run_settings()
     delta_slurm_resource = structures.Resource_remote_slurm()
@@ -89,7 +116,6 @@ def create_example_seekrflow(ff="amber") -> structures.Seekrflow:
     delta_slurm_resource.transfer_settings.local_collection_id = "MY_LOCAL_COLLECTION_ID"
     delta_slurm_resource.transfer_settings.remote_collection_id = "MY_REMOTE_COLLECTION_ID"
     seekrflow.run_settings.resources = [delta_slurm_resource]
-    #anvil_slurm_resource = structures.Slurm_resource()
     seekrflow.run_settings.placements = [
         structures.Placement(target=[], resource="local"),
         structures.Placement(target=["equilibration"], resource="local"),
@@ -235,7 +261,7 @@ def create_host_guest_example_seekrflow(
     seekrflow.name = "host_guest_example"
     seekrflow.workflow = workflow
     # The host-guest system is pre-parameterized, so no parameterize step.
-    seekrflow.parameterize_workflow = None
+    seekrflow.parameterizer = None
     physical_attributes = base.Physical_attributes()
     physical_attributes.temperature = 298.15
     physical_attributes.ionic_strength = 0.0
@@ -245,28 +271,40 @@ def create_host_guest_example_seekrflow(
     seekrflow.run_settings = structures.Run_settings()
     mmvt_dispatch = stage_procedures_module.Dispatch(
         dimensions=["anchor"], group_size=1, concurrency=1)
+    adaptive_time_policy_md = structures.Time_policy_adaptive()
+    adaptive_time_policy_md.estimated_performance = 900.0
     if cloud_inputs:
         seekrflow.run_settings.placements = [
             structures.Placement(target=[], resource="local"),
-            structures.Placement(target=["equilibration"], resource="aws_gpu"),
             structures.Placement(
-                target=["metadynamics", "sampling"], resource="aws_gpu"),
+                target=["equilibration"], resource="aws_gpu", 
+                time_policy=adaptive_time_policy_md),
+            structures.Placement(
+                target=["metadynamics", "sampling"], resource="aws_gpu",
+                time_policy=adaptive_time_policy_md),
             structures.Placement(
                 target=["metadynamics", "logistic"], resource="aws_gpu", 
                 co_schedule_with="predecessor"),
-            structures.Placement(target=["MMVT"], resource="aws_gpu", dispatch=mmvt_dispatch),
+            structures.Placement(
+                target=["MMVT"], resource="aws_gpu", dispatch=mmvt_dispatch,
+                time_policy=adaptive_time_policy_md),
             structures.Placement(target=["bd"], resource="local"),
         ]
     else:
         seekrflow.run_settings.placements = [
             structures.Placement(target=[], resource="local"),
-            structures.Placement(target=["equilibration"], resource="panamint"),
             structures.Placement(
-                target=["metadynamics", "sampling"], resource="panamint"),
+                target=["equilibration"], resource="panamint",
+                time_policy=adaptive_time_policy_md),
+            structures.Placement(
+                target=["metadynamics", "sampling"], resource="panamint",
+                time_policy=adaptive_time_policy_md),
             structures.Placement(
                 target=["metadynamics", "logistic"], resource="panamint", 
                 co_schedule_with="predecessor"),
-            structures.Placement(target=["MMVT"], resource="panamint", dispatch=mmvt_dispatch),
+            structures.Placement(
+                target=["MMVT"], resource="panamint", dispatch=mmvt_dispatch,
+                time_policy=adaptive_time_policy_md),
             structures.Placement(target=["bd"], resource="local"),
         ]
     return seekrflow

@@ -12,10 +12,21 @@ import typing
 import seekrflow.modules.structures as structures
 import seekrflow.modules.workload_managers.slurm as workload_slurm
 import seekrflow.modules.workload_managers.pbs as workload_pbs
+import seekrflow.modules.workload_managers.aws as workload_aws
 import seekrflow.modules.workload_managers.dispatch_lowering as dispatch_lowering
 import seekrflow.modules.remote_interfaces.globus_compute_sdk as remote_globus
 import seekrflow.modules.remote_interfaces.ssh as remote_ssh
 
+
+def resource_kind(resource: structures.Resource_base | None) -> str:
+    """Return ``local``, ``remote``, or ``cloud`` for a resource object."""
+    if resource is None:
+        return "local"
+    if resource.type in ("slurm_remote", "pbs_remote"):
+        return "remote"
+    if resource.type == "aws_cloud":
+        return "cloud"
+    return "local"
 
 def _get_stage_resource_name(
         seekrflow: structures.Seekrflow,
@@ -89,48 +100,14 @@ def calculate_optimal_time_limit(
         job_status_filename: str
 ) -> str:
     """
-    Calculate optimal time limit for a stage based on workload manager type.
+    Deprecated legacy entry point.
 
-    This function dispatches to the appropriate workload manager's optimization
-    function based on the resource type. Currently supports SLURM with extensibility
-    for future workload managers (PBS, LSF, etc.).
-
-    Args:
-        seekrflow: Seekrflow object containing configuration
-        stage_name: Name of the stage (e.g., "seekr", "hidr", "bd")
-        resource: Remote resource configuration object
-        incomplete_anchors: List of anchor indices that need more simulation
-        job_status_filename: Path to .seekrflow_job_status.json file
-
-    Returns:
-        Optimized time limit string in HH:MM:SS format, or original time limit
-        if optimization is not available/applicable for this workload manager
+    Dynamic walltime now lives in ``walltime.estimate_submit_time_limit`` and
+    is applied at submit via ``Resolved_execution.time_policy``. This wrapper
+    returns the Resource ``time_limit`` unchanged.
     """
-    if resource.type == "slurm_remote":
-        # SLURM-specific time limit optimization
-        if stage_name == "seekr":
-            return workload_slurm.calculate_optimal_seekr_time_limit(
-                job_status_filename,
-                incomplete_anchors,
-                resource.time_limit
-            )
-        else:
-            # Currently only SEEKR stage is optimized
-            return resource.time_limit
-    elif resource.type == "pbs_remote":
-        # PBS-specific time limit optimization
-        if stage_name == "seekr":
-            return workload_pbs.calculate_optimal_seekr_time_limit(
-                job_status_filename,
-                incomplete_anchors,
-                resource.time_limit
-            )
-        else:
-            # Currently only SEEKR stage is optimized
-            return resource.time_limit
-    else:
-        # Unknown or unsupported workload manager type
-        return resource.time_limit
+    del seekrflow, stage_name, incomplete_anchors, job_status_filename
+    return resource.time_limit
 
 
 def submit_remote_workflow(
@@ -190,10 +167,19 @@ def status_remote(
         model: typing.Any,
         silent: bool = False,
         benchmark_mode: bool = False,
+        host_stage_name: str | None = None,
+        announce_failure: bool = True,
         ) -> dict:
     """
-    Generalized remote stage status query for any stage whose producing
+    Generalized remote/cloud stage status query for any stage whose producing
     procedure is configured in run_settings.placements.
+
+    For fused AWS members, pass ``host_stage_name`` so Batch liveness is read
+    from the host job while Seekr progress still comes from this stage's
+    S3 status object.
+
+    ``announce_failure=False`` suppresses console Batch failure dumps (used by
+    quiet pre-submit probes that may still see a stale FAILED job id).
     """
     resource_name = _get_stage_resource_name(seekrflow, stage_name)
     if resource_name == "local":
@@ -203,43 +189,52 @@ def status_remote(
         )
 
     resource = seekrflow.run_settings.get_resource_by_name(resource_name)
+    kind = resource_kind(resource)
 
-    # Note: positional args slot — the SLURM status workflow expects
-    # args[0]=working_dir, [1]=stage_name, [2]=benchmark_mode, [3]=anchor,
-    # [4]=swarm_id, [5]=worker_init.  worker_init is shelled into a bash -lc
-    # invocation inside the workflow so it can activate the env that has seekr.
-    extra_args: list[typing.Any] = [
-        stage_name,
-        benchmark_mode,
-        "any",
-        None,
-        getattr(resource, "worker_init", "") or "",
-    ]
-
-    if resource.type == "slurm_remote":
-        status_workflow = workload_slurm.slurm_remote_status_workflow
-    elif resource.type == "pbs_remote":
-        status_workflow = workload_pbs.pbs_remote_status_workflow
-    elif resource.type == "aws_cloud":
-        status_workflow = workload_aws.aws_remote_status_workflow
+    if kind == "cloud":
+        model_directory = getattr(model, "directory", None) or "."
+        result = workload_aws.status_aws(
+            seekrflow,
+            stage_name,
+            resource,
+            model_directory,
+            host_stage_name=host_stage_name,
+            benchmark_mode=benchmark_mode,
+            announce_failure=announce_failure,
+        )
+    elif kind == "remote":
+        # Note: positional args slot — the SLURM status workflow expects
+        # args[0]=working_dir, [1]=stage_name, [2]=benchmark_mode, [3]=anchor,
+        # [4]=swarm_id, [5]=worker_init.  worker_init is shelled into a bash -lc
+        # invocation inside the workflow so it can activate the env that has seekr.
+        extra_args: list[typing.Any] = [
+            stage_name,
+            benchmark_mode,
+            "any",
+            None,
+            getattr(resource, "worker_init", "") or "",
+        ]
+        if resource.type == "slurm_remote":
+            status_workflow = workload_slurm.slurm_remote_status_workflow
+        else:
+            status_workflow = workload_pbs.pbs_remote_status_workflow
+        result = submit_remote_workflow(
+            seekrflow,
+            resource_name,
+            status_workflow,
+            extra_args=extra_args,
+            silent=silent,
+        )
     else:
         raise NotImplementedError(
             f"Resource type {resource.type} not implemented"
         )
 
-    result = submit_remote_workflow(
-        seekrflow,
-        resource_name,
-        status_workflow,
-        extra_args=extra_args,
-        silent=silent,
-    )
     # Normalize stage_status regardless of success so callers always have
     # manager_status / job list available (e.g. for display while seekr module
     # is unavailable in the status-check environment).
     result["stage_status"] = _normalize_stage_status(result)
     return result
-
 
 def remote_run_python_snippet_workflow(args):
     """Run a python snippet on the remote worker; return raw stdout/stderr.
@@ -305,7 +300,7 @@ def submit_remote_run_workflow(
         seekrflow: structures.Seekrflow,
         stage_name: str,
         destination_path: str,
-        resource: structures.Resource_remote_base,
+        resource: structures.Resource_base,
         command_string: str,
         model_filename: str,
         workflow_type: str,
@@ -313,22 +308,78 @@ def submit_remote_run_workflow(
         silent: bool = False,
         anchor_times: dict | None = None,
         time_limit_override: str | None = None,
-    ) -> list:
+        stage_specs: list[dict] | None = None,
+        model_directory: str | None = None,
+        resolved_execution: structures.Resolved_execution | None = None,
+    ) -> dict:
     """
-    Run the stage remotely. Submit a Globus Compute or SSH workflow to 
-    do this.
+    Run the stage on a remote or cloud resource.
 
-    Parameters
-    ----------
-    time_limit_override : str or None
-        If provided, this walltime (HH:MM:SS) is submitted to the workload
-        manager in place of ``resource.time_limit``.  Used for benchmark-mode
-        runs and for dynamic time-limit optimization on subsequent SEEKR
-        submissions.  ``resource.time_limit`` is never mutated.
+    Compute sizing prefers ``resolved_execution`` (Placement overrides +
+    Resource defaults). ``time_limit_override`` still wins for walltime
+    (benchmark / adaptive optimizer).
+
+    For ``aws_cloud``, ``stage_specs`` and ``model_directory`` are required and
+    ``command_string`` is ignored (the container command is built in aws.py).
     """
+    kind = resource_kind(resource)
+    if kind == "cloud":
+        if not stage_specs:
+            raise ValueError(
+                "stage_specs is required for aws_cloud submit")
+        if model_directory is None:
+            raise ValueError(
+                "model_directory is required for aws_cloud submit")
+        timeout_seconds = None
+        if time_limit_override is not None:
+            timeout_seconds = structures.time_limit_to_seconds(
+                time_limit_override)
+        elif (resolved_execution is not None
+                and resolved_execution.time_limit is not None):
+            timeout_seconds = structures.time_limit_to_seconds(
+                resolved_execution.time_limit)
+        cpus = (
+            resolved_execution.cpus
+            if resolved_execution is not None else None)
+        memory_mb = (
+            resolved_execution.memory_mb
+            if resolved_execution is not None else None)
+        array_size = None
+        if indices is not None and len(indices) > 1:
+            array_size = len(indices)
+        return workload_aws.submit_aws_job(
+            seekrflow,
+            stage_name,
+            resource,
+            stage_specs,
+            model_directory,
+            timeout_seconds=timeout_seconds,
+            cpus=cpus,
+            memory_mb=memory_mb,
+            array_size=array_size,
+        )
+
+    if resolved_execution is not None:
+        cpus = (
+            resolved_execution.cpus
+            if resolved_execution.cpus is not None
+            else resource.cpus_per_task)
+        memory_mb = (
+            resolved_execution.memory_mb
+            if resolved_execution.memory_mb is not None
+            else resource.memory_per_node)
+        time_limit = (
+            resolved_execution.time_limit
+            if resolved_execution.time_limit is not None
+            else resource.time_limit)
+    else:
+        cpus = resource.cpus_per_task
+        memory_mb = resource.memory_per_node
+        time_limit = resource.time_limit
+
     log_directory = os.path.join(destination_path, "logs")
     name = seekrflow.name + "_" + stage_name
-    effective_time_limit = time_limit_override or resource.time_limit
+    effective_time_limit = time_limit_override or time_limit
     if resource.type == "slurm_remote":
         args = [
             stage_name,
@@ -337,8 +388,8 @@ def submit_remote_run_workflow(
             resource.account,
             resource.constraint,
             name,
-            resource.cpus_per_task,
-            resource.memory_per_node,
+            cpus,
+            memory_mb,
             effective_time_limit,
             resource.scheduler_options,
             resource.worker_init,
@@ -357,8 +408,8 @@ def submit_remote_run_workflow(
             resource.account,
             resource.resource_list,      # PBS equivalent of constraint
             name,
-            resource.cpus_per_task,
-            resource.memory_per_node,
+            cpus,
+            memory_mb,
             effective_time_limit,
             resource.scheduler_options,
             resource.worker_init,
@@ -377,6 +428,7 @@ def submit_remote_run_workflow(
         seekrflow, resource.name, run_workflow, extra_args=args, silent=silent)
     return result
 
+
 def submit_remote_cancel_workflow(
         seekrflow: structures.Seekrflow,
         resource_name: str,
@@ -385,13 +437,19 @@ def submit_remote_cancel_workflow(
         silent: bool = False
     ) -> None:
     """
-    Cancel the remote stage. Submit a Globus Compute or SSH workflow to
-    signal the cancellation.
+    Cancel a remote or cloud stage job.
 
     Cancel by ``job_id``, by scheduler ``job_name``, or both when provided.
     """
     if job_id is None and job_name is None:
         raise ValueError("job_id or job_name is required for remote cancel")
+    resource = seekrflow.run_settings.get_resource_by_name(resource_name)
+    kind = resource_kind(resource)
+    if kind == "cloud":
+        workload_aws.cancel_aws_job(
+            resource, job_id=job_id, job_name=job_name)
+        return
+
     extra_args: list[str] = []
     if job_id is not None:
         extra_args.append(job_id)
@@ -400,7 +458,6 @@ def submit_remote_cancel_workflow(
             extra_args = ["", job_name]
         else:
             extra_args.append(job_name)
-    resource = seekrflow.run_settings.get_resource_by_name(resource_name)
 
     if resource.type == "slurm_remote":
         cancel_workflow = workload_slurm.slurm_remote_cancel_workflow
@@ -413,27 +470,24 @@ def submit_remote_cancel_workflow(
                            cancel_workflow, extra_args=extra_args, silent=silent)
     return
 
+
 def cancel_and_reset_remote_stage(
         seekrflow: structures.Seekrflow,
         stage_name: str,
-        silent: bool = False
+        silent: bool = False,
+        model_directory: str | None = None,
+        monitor_stage_names: list[str] | None = None,
         ) -> None:
     """
-    Cancel a stage's remote job and reset its scheduler/runner bookkeeping.
+    Cancel a stage's remote/cloud job and reset its scheduler/runner bookkeeping.
 
     Cancels any running job for the stage, waits until it is fully gone, and
     clears the workload-manager runner state so the stage resubmits fresh.
     Stage output cleanup is handled separately by seekr's own
-    ``force_overwrite`` in the run command, so this does not delete data files.
-
-    Parameters
-    ----------
-    seekrflow : structures.Seekrflow
-        The seekrflow configuration
-    stage_name : str
-        Name of the stage to reset
-    silent : bool
-        Whether to suppress output
+    ``force_overwrite`` in the run command, so this does not delete trajectory
+    data. For ``aws_cloud``, S3 monitor JSON (``*_status.json`` /
+    ``*_dispatch.json``) is removed so a force-rerun is not treated as already
+    completed; pass ``monitor_stage_names`` to clear fused members too.
     """
     resource_name = _get_stage_resource_name(seekrflow, stage_name)
     
@@ -443,6 +497,26 @@ def cancel_and_reset_remote_stage(
     print(f"Canceling and resetting remote stage: {stage_name} on resource {resource_name}")
 
     resource = seekrflow.run_settings.get_resource_by_name(resource_name)
+    kind = resource_kind(resource)
+
+    if kind == "cloud":
+        if model_directory is None:
+            raise ValueError(
+                "model_directory is required to reset an aws_cloud stage")
+        result = workload_aws.cancel_and_reset_aws_stage(
+            seekrflow,
+            stage_name,
+            resource,
+            model_directory,
+            monitor_stage_names=monitor_stage_names,
+        )
+        if result.get("canceled_job"):
+            print(f"  Canceled job: {result['canceled_job']}")
+        cleared = result.get("cleared_s3_keys") or []
+        if cleared:
+            print(f"  Cleared {len(cleared)} S3 monitor object(s) for force-rerun")
+        print(f"  Cleared runner state for {stage_name} stage")
+        return
 
     if resource.type == "slurm_remote":
         cancel_reset_workflow = workload_slurm.slurm_remote_force_rerun_workflow

@@ -25,6 +25,9 @@ def prepare_model(
         os.path.expanduser(seekrflow.work_directory))
     curdir = os.getcwd()
     os.chdir(seekrflow.work_directory)
+    # If MD system was left blank for parameterization, load canonical outputs.
+    import seekrflow.parameterize as parameterize_module
+    parameterize_module.fill_md_system_from_parameterize(seekrflow)
     root_directory = str(seekrflow.get_root_directory())
 
     model, model_json_path = prepare.prepare_workflow(

@@ -87,9 +87,9 @@ class Selector_by_resname(Selector_base):
     def resolve(self, traj: mdtraj.Trajectory) -> list[int]:
         assert self.resname != "", "resname must be defined."
         if self.include_hydrogens:
-            indices = traj.topology.select(f"resname {self.resname}")
+            indices = traj.topology.select(f"resname '{self.resname}'")
         else:
-            indices = traj.topology.select(f"resname {self.resname} and not element H")
+            indices = traj.topology.select(f"resname '{self.resname}' and not element H")
         self.resolved_indices = [int(i) for i in indices]
         return self.resolved_indices
 
@@ -200,12 +200,39 @@ class Small_molecule_component(Component_base):
     A small molecule, e.g. a drug-like ligand or a small-molecule host such as
     a cyclodextrin. Needs special parameterization (GAFF/OpenFF/Espaloma) and a
     per-atom-resid PQR for Brownian dynamics.
+
+    Optional parameterize inputs (ignored when Seekrflow.parameterizer is None):
+      * ``sdf_file`` — path to an SDF used for OpenFF/GAFF/Espaloma. If empty,
+        parameterize may convert the split PDB via
+        ``Parameterizer.pdb_to_sdf_settings`` (RDKit by default). If you already
+        have an SDF, set this path and optionally set
+        ``pdb_to_sdf_settings`` to ``None``.
+      * ``resname`` — residue name to assign when building the OpenFF molecule;
+        if empty, falls back to the selector's resname (when applicable) or ``LIG``.
     """
     type: typing.Literal["small_molecule"] = "small_molecule"
+    sdf_file: str = field(
+        default="",
+        validator=validators.instance_of(str),
+        )
+    resname: str = field(
+        default="",
+        validator=validators.instance_of(str),
+        )
 
     @property
     def one_resid_per_atom_pqr(self) -> bool:
         return True
+
+    def parameterize_resname(self) -> str:
+        """
+        Residue name to use when building OpenFF/topology for parameterization.
+        """
+        if self.resname:
+            return self.resname
+        if isinstance(self.selector, Selector_by_resname) and self.selector.resname:
+            return self.selector.resname
+        return "LIG"
 
 
 @define
@@ -430,6 +457,11 @@ class Components:
                 break
         assert md_settings is not None, \
             "A molecular_dynamics scale is required to resolve selections."
+        assert md_settings.system is not None, \
+            "molecular_dynamics.system must be set (or filled from "\
+            "parameterize outputs) before resolving selections."
+        assert md_settings.system.solvated_pdb, \
+            "molecular_dynamics.system.solvated_pdb must be set."
         result: dict[str, dict[str, list[int]]] = {}
         md_selections = self._resolve_md_selections(
             md_settings.system.solvated_pdb)

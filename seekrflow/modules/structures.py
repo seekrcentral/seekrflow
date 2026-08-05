@@ -16,18 +16,13 @@ import cattrs
 from cattrs.strategies import include_subclasses
 
 import seekrflow.modules.base as base
-import seekrflow.modules.workflows.structures as workflow_structures
 import seekrflow.modules.workflows.workflow as workflow_module
 import seekrflow.modules.workflows.components as components_module
 import seekrflow.modules.workflows.cv_specs as cv_specs_module
 import seekrflow.modules.workflows.anchor_specs as anchor_specs_module
 import seekrflow.modules.workflows.scale_settings as scale_settings_module
 import seekrflow.modules.workflows.stage_procedures as stage_procedures_module
-import seekrflow.modules.parameterize_workflow as parameterize_workflow_module
 import seekrflow.modules.parameterize_structures as parameterizer_structures
-import seekrflow.modules.parameters_topology_structures \
-    as parameters_topology_structures
-import seekrflow.modules.site_finder as site_finder
 
 
 WORK = "work"
@@ -368,11 +363,11 @@ class Resource_cloud_aws(Resource_cloud_base):
         default="",
         validator=validators.instance_of(str),
         )
-    # Job definition name
-    # TODO: Is this chosen automatically?
-    job_def_generic: str = field(
-        default="",
-        validator=validators.instance_of(str),
+    # Maximum Batch wall-clock (seconds). Upper bound for this resource;
+    # may later be tightened dynamically from benchmarks.
+    job_timeout_seconds: int = field(
+        default=86400,
+        validator=[validators.instance_of(int), validators.gt(0)],
         )
 
     n_gpus: int = field(
@@ -390,6 +385,11 @@ class Resource_cloud_aws(Resource_cloud_base):
         validator=[validators.instance_of(int),
                    validators.ge(0)]
         )
+    # Max concurrent GPU-sharing processes per Batch task (Placement clamp).
+    mps: int = field(
+        default=1,
+        validator=[validators.instance_of(int), validators.ge(1)],
+        )
     transfer_settings: Transfer_settings_aws_s3 = field(
         default=Factory(Transfer_settings_aws_s3),
         )
@@ -398,9 +398,62 @@ class Resource_cloud_aws(Resource_cloud_base):
         return f"{self.account_id}.dkr.ecr.{self.region}.amazonaws.com/seekr-engines-bd:latest"
 
 @define
+class Time_policy_base:
+    """
+    Base class for Placement walltime policies.
+    """
+    type: typing.Literal["base"] = "base"
+
+
+@define
+class Time_policy_fixed(Time_policy_base):
+    """
+    Always request a fixed walltime.
+
+    If ``time_limit`` is unset, resolve uses the Placement ``time_limit``
+    override if present, otherwise the Resource cap.
+    """
+    type: typing.Literal["fixed"] = "fixed"
+    time_limit: str | None = field(
+        default=None,
+        validator=validators.optional(validators.instance_of(str)))
+
+
+@define
+class Time_policy_adaptive(Time_policy_base):
+    """
+    Estimate walltime from remaining work and a performance rate.
+
+    ``estimated_performance`` units depend on stage scale (docstring only):
+    molecular dynamics → ns/day; Brownian dynamics → trajectories/day.
+    Unset ``min_time_limit`` / ``max_time_limit`` fall back to backend
+    defaults (1 h remote / 10 min AWS) and the Resource cap, respectively.
+    """
+    type: typing.Literal["adaptive"] = "adaptive"
+    estimated_performance: float | None = field(
+        default=None,
+        validator=validators.optional(validators.instance_of(float)))
+    safety_factor: float = field(
+        default=0.2,
+        validator=validators.instance_of(float))
+    min_time_limit: str | None = field(
+        default=None,
+        validator=validators.optional(validators.instance_of(str)))
+    max_time_limit: str | None = field(
+        default=None,
+        validator=validators.optional(validators.instance_of(str)))
+
+
+@define
 class Placement:
     """
     Deployment policy for stages whose address path begins with ``target``.
+
+    Compute fields (``cpus``, ``memory_mb``, ``time_limit``, ``mps``) are
+    backend-agnostic overrides. When unset, ``resolve_stage_execution`` fills
+    them from the selected Resource's native defaults.
+
+    Unset ``time_policy`` is treated as adaptive at resolve time.
     """
     target: list[str] = field(
         default=Factory(list),
@@ -419,10 +472,10 @@ class Placement:
         default=None,
         validator=validators.optional(
             validators.in_(["predecessor", "successor"])))
-    cpus_per_task: int | None = field(
+    cpus: int | None = field(
         default=None,
         validator=validators.optional(validators.instance_of(int)))
-    memory_per_node: int | None = field(
+    memory_mb: int | None = field(
         default=None,
         validator=validators.optional(validators.instance_of(int)))
     time_limit: str | None = field(
@@ -431,7 +484,9 @@ class Placement:
     mps: int | None = field(
         default=None,
         validator=validators.optional(validators.instance_of(int)))
-    # time_policy: reserved for Phase 8+ (adaptive walltime).
+    time_policy: Time_policy_base | None = field(
+        default=None,
+        validator=validators.optional(validators.instance_of(Time_policy_base)))
 
 
 @define
@@ -442,15 +497,81 @@ class Resolved_execution:
     resource: Resource_base | None
     dispatch: stage_procedures_module.Dispatch
     co_schedule_with: str | None
-    cpus_per_task: int | None
-    memory_per_node: int | None
-    time_limit: str | None
+    cpus: int | None
+    memory_mb: int | None
+    time_limit: str | None  # HH:MM:SS; None when adaptive
     mps: int | None
+    time_policy: Time_policy_base = field(
+        default=Factory(Time_policy_adaptive),
+        validator=validators.instance_of(Time_policy_base))
+
+
+def time_limit_to_seconds(time_limit: str) -> int:
+    """Parse ``HH:MM:SS`` (optional ``D-`` day prefix) to integer seconds."""
+    time_str = (time_limit or "").strip()
+    if not time_str:
+        raise ValueError("time_limit must be a non-empty HH:MM:SS string")
+    days = 0
+    if "-" in time_str:
+        day_part, time_str = time_str.split("-", 1)
+        days = int(day_part)
+    parts = time_str.split(":")
+    if len(parts) != 3:
+        raise ValueError(
+            f"time_limit must be HH:MM:SS, got {time_limit!r}")
+    hours, minutes, seconds = (int(p) for p in parts)
+    return days * 86400 + hours * 3600 + minutes * 60 + seconds
+
+
+def seconds_to_time_limit(seconds: int) -> str:
+    """Format non-negative seconds as ``HH:MM:SS`` (hours may exceed 24)."""
+    if seconds < 0:
+        raise ValueError(f"seconds must be >= 0, got {seconds}")
+    hours, rem = divmod(int(seconds), 3600)
+    minutes, secs = divmod(rem, 60)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+
+def _resource_compute_defaults(
+        resource: Resource_base | None,
+        ) -> dict:
+    """
+    Backend-native Resource fields → agnostic compute defaults for resolve.
+    """
+    if resource is None:
+        return {
+            "cpus": None,
+            "memory_mb": None,
+            "time_limit": None,
+            "mps": 1,
+        }
+    if isinstance(resource, (Resource_remote_slurm, Resource_remote_pbs)):
+        return {
+            "cpus": resource.cpus_per_task,
+            "memory_mb": resource.memory_per_node,
+            "time_limit": resource.time_limit,
+            "mps": resource.mps,
+        }
+    if isinstance(resource, Resource_cloud_aws):
+        return {
+            "cpus": resource.n_vcpus,
+            "memory_mb": resource.memory_mb,
+            "time_limit": seconds_to_time_limit(resource.job_timeout_seconds),
+            "mps": resource.mps,
+        }
+    return {
+        "cpus": None,
+        "memory_mb": None,
+        "time_limit": None,
+        "mps": 1,
+    }
 
 
 def resource_supports_arrays(resource: Resource_base | None) -> bool:
-    # TODO: handle this for cloud resources.
-    return isinstance(resource, (Resource_remote_slurm, Resource_remote_pbs))
+    return isinstance(
+        resource,
+        (Resource_remote_slurm, Resource_remote_pbs, Resource_cloud_aws),
+    )
 
 
 def _dispatch_uses_array_spread(dispatch: stage_procedures_module.Dispatch) -> bool:
@@ -514,18 +635,117 @@ def _apply_placement_fields(
         accumulator["resource"] = placement.resource
     if placement.co_schedule_with is not None:
         accumulator["co_schedule_with"] = placement.co_schedule_with
-    if placement.cpus_per_task is not None:
-        accumulator["cpus_per_task"] = placement.cpus_per_task
-    if placement.memory_per_node is not None:
-        accumulator["memory_per_node"] = placement.memory_per_node
+    if placement.cpus is not None:
+        accumulator["cpus"] = placement.cpus
+    if placement.memory_mb is not None:
+        accumulator["memory_mb"] = placement.memory_mb
     if placement.time_limit is not None:
         accumulator["time_limit"] = placement.time_limit
     if placement.mps is not None:
         accumulator["mps"] = placement.mps
+    if placement.time_policy is not None:
+        accumulator["time_policy"] = placement.time_policy
     if placement.dispatch is not None:
         base = accumulator.get(
             "dispatch", stage_procedures_module.Dispatch())
         accumulator["dispatch"] = base.merged_with(placement.dispatch)
+
+
+def _resource_cap_time_limit(resource: Resource_base | None) -> str | None:
+    """Resource walltime cap as HH:MM:SS, or None for local/unknown."""
+    return _resource_compute_defaults(resource).get("time_limit")
+
+
+def _ensure_time_limit_within_cap(
+        label: str,
+        time_limit: str | None,
+        resource_cap: str | None,
+        resource_name: str,
+        ) -> None:
+    if time_limit is None or resource_cap is None:
+        return
+    if time_limit_to_seconds(time_limit) > time_limit_to_seconds(resource_cap):
+        raise ValueError(
+            f"{label} time_limit {time_limit!r} exceeds resource "
+            f"{resource_name!r} cap {resource_cap!r}.")
+
+
+def _resolve_time_policy_fields(
+        *,
+        stage_name: str,
+        resource_name: str,
+        resource: Resource_base | None,
+        placement_time_limit: str | None,
+        time_policy: Time_policy_base | None,
+        ) -> tuple[str | None, Time_policy_base]:
+    """
+    Resolve Placement time_policy + time_limit against the Resource cap.
+
+    Returns ``(resolved_time_limit, concrete_policy)``. For adaptive policies
+    ``resolved_time_limit`` is None (submit estimates walltime).
+    """
+    policy: Time_policy_base = (
+        time_policy if time_policy is not None else Time_policy_adaptive())
+    resource_cap = _resource_cap_time_limit(resource)
+    _ensure_time_limit_within_cap(
+        f"Placement for stage {stage_name!r}",
+        placement_time_limit,
+        resource_cap,
+        resource_name,
+    )
+
+    if isinstance(policy, Time_policy_fixed):
+        _ensure_time_limit_within_cap(
+            f"Time_policy_fixed for stage {stage_name!r}",
+            policy.time_limit,
+            resource_cap,
+            resource_name,
+        )
+        effective = policy.time_limit or placement_time_limit or resource_cap
+        _ensure_time_limit_within_cap(
+            f"Resolved fixed walltime for stage {stage_name!r}",
+            effective,
+            resource_cap,
+            resource_name,
+        )
+        return effective, policy
+
+    if isinstance(policy, Time_policy_adaptive):
+        _ensure_time_limit_within_cap(
+            f"Time_policy_adaptive.max_time_limit for stage {stage_name!r}",
+            policy.max_time_limit,
+            resource_cap,
+            resource_name,
+        )
+        _ensure_time_limit_within_cap(
+            f"Time_policy_adaptive.min_time_limit for stage {stage_name!r}",
+            policy.min_time_limit,
+            resource_cap,
+            resource_name,
+        )
+        max_tl = policy.max_time_limit or placement_time_limit
+        _ensure_time_limit_within_cap(
+            f"Adaptive max walltime for stage {stage_name!r}",
+            max_tl,
+            resource_cap,
+            resource_name,
+        )
+        if (policy.min_time_limit is not None and max_tl is not None
+                and time_limit_to_seconds(policy.min_time_limit)
+                > time_limit_to_seconds(max_tl)):
+            raise ValueError(
+                f"Stage {stage_name!r} adaptive min_time_limit "
+                f"{policy.min_time_limit!r} exceeds max {max_tl!r}.")
+        normalized = Time_policy_adaptive(
+            estimated_performance=policy.estimated_performance,
+            safety_factor=policy.safety_factor,
+            min_time_limit=policy.min_time_limit,
+            max_time_limit=max_tl,
+        )
+        return None, normalized
+
+    # Unknown / base policy: treat as adaptive defaults.
+    return None, Time_policy_adaptive(max_time_limit=placement_time_limit)
 
 
 @define
@@ -535,7 +755,7 @@ class Run_settings:
     resource: the machine that a protocol will run on
     """
     resources: typing.List[
-        Resource_remote_slurm | Resource_remote_pbs
+        Resource_remote_slurm | Resource_remote_pbs | Resource_cloud_aws
     ] = field(
         default=Factory(list),)
     # A placement with an empty ``target`` ([]) matches every stage and acts
@@ -607,20 +827,18 @@ class Run_settings:
 
         resource_name = accumulator.get("resource", "local")
         resource = self.get_resource_by_name(resource_name)
+        defaults = _resource_compute_defaults(resource)
 
-        cpus_per_task = accumulator.get("cpus_per_task")
-        memory_per_node = accumulator.get("memory_per_node")
-        time_limit = accumulator.get("time_limit")
-        mps = accumulator.get("mps")
-        if resource is not None:
-            if cpus_per_task is None:
-                cpus_per_task = resource.cpus_per_task
-            if memory_per_node is None:
-                memory_per_node = resource.memory_per_node
-            if time_limit is None:
-                time_limit = resource.time_limit
-            if mps is None:
-                mps = resource.mps
+        cpus = accumulator.get("cpus", defaults["cpus"])
+        memory_mb = accumulator.get("memory_mb", defaults["memory_mb"])
+        mps = accumulator.get("mps", defaults["mps"])
+        time_limit, time_policy = _resolve_time_policy_fields(
+            stage_name=stage_name,
+            resource_name=resource_name,
+            resource=resource,
+            placement_time_limit=accumulator.get("time_limit"),
+            time_policy=accumulator.get("time_policy"),
+        )
 
         dispatch = accumulator.get(
             "dispatch", stage_procedures_module.Dispatch())
@@ -643,10 +861,11 @@ class Run_settings:
             resource=resource,
             dispatch=dispatch,
             co_schedule_with=accumulator.get("co_schedule_with"),
-            cpus_per_task=cpus_per_task,
-            memory_per_node=memory_per_node,
+            cpus=cpus,
+            memory_mb=memory_mb,
             time_limit=time_limit,
             mps=mps,
+            time_policy=time_policy,
         )
 
     def get_stage_resource(
@@ -693,7 +912,38 @@ def validate_run_settings(
                 f"Valid stage address paths include: "
                 f"{[list(p) for p in valid]}.")
         if placement.resource is not None:
-            seekrflow.run_settings.get_resource_by_name(placement.resource)
+            resource = seekrflow.run_settings.get_resource_by_name(
+                placement.resource)
+            resource_cap = _resource_cap_time_limit(resource)
+            _ensure_time_limit_within_cap(
+                f"Placement target {placement.target!r}",
+                placement.time_limit,
+                resource_cap,
+                placement.resource,
+            )
+            if isinstance(placement.time_policy, Time_policy_fixed):
+                _ensure_time_limit_within_cap(
+                    f"Time_policy_fixed for target {placement.target!r}",
+                    placement.time_policy.time_limit,
+                    resource_cap,
+                    placement.resource,
+                )
+            elif isinstance(placement.time_policy, Time_policy_adaptive):
+                _ensure_time_limit_within_cap(
+                    f"Time_policy_adaptive.max for target {placement.target!r}",
+                    placement.time_policy.max_time_limit,
+                    resource_cap,
+                    placement.resource,
+                )
+                _ensure_time_limit_within_cap(
+                    f"Time_policy_adaptive.min for target {placement.target!r}",
+                    placement.time_policy.min_time_limit,
+                    resource_cap,
+                    placement.resource,
+                )
+                if placement.time_policy.estimated_performance is not None:
+                    _validate_estimated_performance_scope(
+                        placement, address_map, model)
 
     if model is None:
         return
@@ -740,6 +990,48 @@ def validate_run_settings(
                 f"{stage_name!r}: dispatch.dimensions="
                 f"{neighbor_resolved.dispatch.dimensions!r} requires array "
                 f"spreading.")
+
+
+def _stage_scale_kind_from_model(
+        stage: typing.Any,
+        ) -> str | None:
+    """Return ``\"md\"``, ``\"bd\"``, or None for non-countable scales."""
+    scale_type = getattr(stage, "scale_type", None)
+    if scale_type == "molecular_dynamics":
+        return "md"
+    if scale_type == "brownian_dynamics":
+        return "bd"
+    return None
+
+
+def _validate_estimated_performance_scope(
+        placement: Placement,
+        address_map: dict,
+        model: typing.Any | None,
+        ) -> None:
+    """
+    Refuse estimated_performance when one Placement matches both MD and BD.
+    """
+    if model is None:
+        return
+    kinds: set[str] = set()
+    for stage in model.stages:
+        address_info = address_map.get(stage.name)
+        if address_info is None:
+            continue
+        address, _role = address_info
+        if not _placement_targets_match(address, placement.target):
+            continue
+        kind = _stage_scale_kind_from_model(stage)
+        if kind is not None:
+            kinds.add(kind)
+    if "md" in kinds and "bd" in kinds:
+        raise ValueError(
+            f"Placement target {placement.target!r} sets "
+            f"estimated_performance but matches both MD and BD stages. "
+            f"Narrow the target or omit estimated_performance.")
+
+
 @define
 class Seekrflow:
     """
@@ -769,7 +1061,12 @@ class Seekrflow:
     #  parameterize_workflow object. Added random_seed to physical_attributes.
     # Backwards compatibility to earlier versions was not implemented because 
     # not needed.
-    structure_version: str = field(default="1.4",
+    # NOTE: structure version 1.5 collapses parameterization into a single
+    #  Parameterizer (removed parameterize_workflow), adds optional
+    #  per-component param inputs (e.g. sdf_file), and allows blank MD
+    #  scale_settings.system when parameterizing (prepare auto-fills from
+    #  work/parameterize/). Backwards compatibility not implemented.
+    structure_version: str = field(default="1.5",
                                  validator=validators.instance_of(str))
     workflow: workflow_module.Workflow = field(
         default=Factory(workflow_module.Workflow),
@@ -783,20 +1080,17 @@ class Seekrflow:
         default="work",
         validator=validators.optional(validators.instance_of(str))
     )
+    # Basename of the SEEKR model directory under work_directory.
+    # Default (None or empty) resolves to structures.ROOT ("root").
+    # Example: "root_1D" -> work/root_1D. Not a full path.
     root_directory: str | None = field(
         default=None,
         validator=validators.optional(validators.instance_of(str))
     )
-    # TODO: resolve these two
-    parameterize_workflow: \
-        parameterize_workflow_module.Parameterize_workflow | None = field(
-        default=Factory(parameterize_workflow_module.Parameterize_workflow),
-        validator=validators.optional(validators.instance_of(
-            parameterize_workflow_module.Parameterize_workflow)),
-        )
     parameterizer: parameterizer_structures.Parameterizer | None = field(
         default=None,
-        validator=validators.optional(validators.instance_of(parameterizer_structures.Parameterizer)),
+        validator=validators.optional(validators.instance_of(
+            parameterizer_structures.Parameterizer)),
     )
     run_settings: Run_settings = field(
         default=Factory(Run_settings),
@@ -816,6 +1110,7 @@ class Seekrflow:
         _register_workflow_subclasses(converter)
         include_subclasses(Transfer_settings_base, converter)
         include_subclasses(Resource_base, converter)
+        include_subclasses(Time_policy_base, converter)
         seekrflow_dict: dict = converter.unstructure(self)
         json_dump: str = json.dumps(seekrflow_dict, indent=4)
         with open(filename, "w") as file:
@@ -852,9 +1147,21 @@ class Seekrflow:
 
     def get_root_directory(self) -> pathlib.Path:
         """
-        Get the root directory where the Seekrflow files are stored.
+        Get the SEEKR model root directory under the work directory.
+
+        Uses ``root_directory`` as a subdirectory name within ``work_directory``
+        when set; otherwise defaults to ``structures.ROOT`` (``"root"``).
+        Must be a single leaf name under work — not an absolute or nested path.
         """
-        root_dir = pathlib.Path(self.work_directory) / ROOT
+        name = self.root_directory if self.root_directory else ROOT
+        name = str(name).rstrip("/\\")
+        assert name and not os.path.isabs(name), \
+            f"root_directory must be a subdirectory name under work, "\
+            f"not an absolute path: {name!r}"
+        assert os.path.basename(name) == name, \
+            f"root_directory must be a single subdirectory name under work, "\
+            f"not a nested path: {name!r}"
+        root_dir = pathlib.Path(self.work_directory) / name
         os.makedirs(root_dir, exist_ok=True)
         return root_dir
     
@@ -866,122 +1173,6 @@ class Seekrflow:
         os.makedirs(run_dir, exist_ok=True)
         return run_dir
     
-    def handle_ligand_indices(
-            self,
-            ligand_indices: str,
-            ligand_resname: str,
-            pdb_filename: str
-            ) -> None:
-        """
-        Handle the ligand indices string and set the ligand_indices attribute.
-        """
-        if self.parameterize_workflow.has_small_molecule_ligand():
-            # If the ligand resname is not provided, use the one from the seekrflow input
-            if ligand_resname == "":
-                ligand_resname = self.parameterize_workflow.parameterizer_information.ligand_resname
-            else:
-                self.parameterize_workflow.parameterizer_information.ligand_resname = ligand_resname
-            
-            # if the ligand indices are provided, use them preferentially
-            if ligand_indices != "":
-                ligand_indices = base.initialize_ref_indices(ligand_indices)
-            else:
-                if len(self.parameterize_workflow.ligand_indices) > 0:
-                    ligand_indices = self.parameterize_workflow.ligand_indices
-                elif ligand_resname != "":
-                    ligand_indices = base.get_ligand_indices(pdb_filename, ligand_resname)
-                else:
-                    # TODO: implement some automated way to identify the ligand molecule
-                    # in a molecular complex?
-                    ligand_indices = []
-            if len(ligand_indices) > 0:
-                self.parameterize_workflow.ligand_indices = ligand_indices
-            else:
-                if len(self.parameterize_workflow.ligand_indices) == 0:
-                    if self.parameterize_workflow.parameterizer_information.ligand_resname != "":
-                        self.parameterize_workflow.ligand_indices = base.get_ligand_indices(
-                            self.parameterize_workflow.parameterizer_information\
-                                .receptor_ligand_pdb_filename, 
-                            self.parameterize_workflow.parameterizer_information.ligand_resname)
-                    else:
-                        raise Exception("No ligand indices provided and no ligand "
-                                        "residue name specified.")
-        return
-    
-    def handle_receptor_indices(
-            self,
-            pdb_filename: str
-            ) -> None:
-        """
-        Handle the receptor indices string and set the receptor_indices attribute.
-        """
-        if self.parameterize_workflow.has_small_molecule_ligand():
-            ligand_indices = self.parameterize_workflow.ligand_indices
-            assert len(ligand_indices) > 0, \
-                "Cannot determine receptor indices without ligand " \
-                "indices."
-            receptor_indices = site_finder.site_finder_monte_carlo(
-                pdb_filename,
-                ligand_indices
-            )
-            self.parameterize_workflow.receptor_indices = receptor_indices
-
-        return
-    
-    def assign_seekrflow_parameter_topology_files(
-            self,
-            parameter_topology_files: list[str]
-            ) -> None:
-        """
-        Assign parameter and topology files to seekrflow structure.
-        """
-        assert parameter_topology_files is not None
-        # First, we must try to discern the types of parameter files provided
-        file_extensions = [os.path.splitext(f)[-1].lower() for f in parameter_topology_files]
-        if ".prmtop" in file_extensions or ".parm7" in file_extensions:
-            # Then assume AMBER - find the prmtop or parm7 file and assign it
-            for f in parameter_topology_files:
-                ext = os.path.splitext(f)[-1].lower()
-                if ext == ".prmtop" or ext == ".parm7":
-                    self.parameterize_workflow.solvated_system_for_md.parameters_topology \
-                        = parameters_topology_structures.Amber_parameters_topology()
-                    self.parameterize_workflow.solvated_system_for_md.parameters_topology\
-                        .prmtop_filename = f
-                    break
-        elif ".psf" in file_extensions:
-            # Then assume CHARMM - find the psf file and assign it
-            other_parameter_files = []
-            for f in parameter_topology_files:
-                ext = os.path.splitext(f)[-1].lower()
-                if ext == ".psf":
-                    self.parameterize_workflow.solvated_system_for_md.parameters_topology \
-                        = parameters_topology_structures.Charmm_parameters_topology()
-                    self.parameterize_workflow.solvated_system_for_md.parameters_topology\
-                        .psf_filename = f
-                else:
-                    other_parameter_files.append(f)
-            self.parameterize_workflow.solvated_system_for_md.parameters_topology\
-                .param_filename_list = other_parameter_files
-        elif ".top" in file_extensions or ".gro" in file_extensions:
-            raise NotImplementedError(
-                "GROMACS parameter and topology files are not yet supported.")
-        elif ".xml" in file_extensions:
-            # Then assume OpenMM XML file
-            for f in parameter_topology_files:
-                ext = os.path.splitext(f)[-1].lower()
-                if ext == ".xml":
-                    self.parameterize_workflow.solvated_system_for_md.parameters_topology \
-                        = parameters_topology_structures.Openmm_system()
-                    self.parameterize_workflow.solvated_system_for_md.parameters_topology\
-                        .system_filename = f
-                    break
-        else:
-            raise ValueError(
-                "Could not discern parameter and topology file types from "
-                "provided files. Supported types include AMBER (.prmtop, .parm7), "
-                "CHARMM (.psf), GROMACS (.top, .itp), and OpenMM (.xml).")
-        return
-
 def try_to_load_resources_json(
         seekrflow: "Seekrflow",
         ) -> None:
@@ -1044,6 +1235,7 @@ def load_seekrflow(
     _register_workflow_subclasses(converter)
     include_subclasses(Transfer_settings_base, converter)
     include_subclasses(Resource_base, converter)
+    include_subclasses(Time_policy_base, converter)
     seekrflow_obj: Seekrflow = converter.structure(json_string, Seekrflow)
     try_to_load_resources_json(seekrflow_obj)
     return seekrflow_obj
@@ -1074,19 +1266,12 @@ def save_new_seekrflow(
     seekrflow.save(model_path)
     return
 
-def assign_default_prepare_settings(
+def assign_default_parameterizer_settings(
         seekrflow: Seekrflow
         ) -> None:
     """
-    Assign default parameterize-side settings to the seekrflow structure.
+    Assign a default Parameterizer to the seekrflow structure.
     """
-    seekrflow.parameterize_workflow = \
-        parameterize_workflow_module.Parameterize_workflow()
-    seekrflow.parameterize_workflow.parameterizer_information = \
-        parameterize_workflow_module.Parameterizer_information()
-    seekrflow.parameterize_workflow.md_settings = \
-        workflow_structures.MD_settings()
-    seekrflow.parameterize_workflow.bd_settings = \
-        workflow_structures.BD_settings()
+    seekrflow.parameterizer = parameterizer_structures.Parameterizer()
     seekrflow.physical_attributes = base.Physical_attributes()
     return

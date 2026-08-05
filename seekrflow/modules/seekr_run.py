@@ -45,9 +45,11 @@ import seekrflow.modules.structures as structures
 import seekrflow.modules.transfer.base as transfer_base
 import seekrflow.modules.workload_managers.local_multiprocessing as workload_local_mp
 import seekrflow.modules.workload_managers.remote as workload_remote
+import seekrflow.modules.workload_managers.aws as workload_aws
 import seekrflow.modules.workload_managers.co_schedule_fusion as co_schedule_fusion
 import seekrflow.modules.workload_managers.dispatch_lowering as dispatch_lowering
 import seekrflow.modules.workload_managers.remote_stage_lifecycle as remote_stage_lifecycle
+import seekrflow.modules.workload_managers.walltime as walltime
 
 _RICH_CONSOLE = Console()
 
@@ -76,6 +78,174 @@ remote_scheduler_job_name = remote_stage_lifecycle.remote_scheduler_job_name
 classify_remote_probe_status = remote_stage_lifecycle.classify_remote_probe_status
 owns_scheduler_job = remote_stage_lifecycle.owns_scheduler_job
 remote_cancel_needed = remote_stage_lifecycle.remote_cancel_needed
+force_overwrite_skips_launch_probe = (
+    remote_stage_lifecycle.force_overwrite_skips_launch_probe)
+
+
+def _local_partition_progress(model, stage_name: str) -> dict | None:
+    """Best-effort local seekr progress map for walltime estimation."""
+    try:
+        payload = seekr_status.status(
+            model, "progress", print_json=True)
+    except Exception:
+        return None
+    return walltime.partition_progress_from_status_payload(
+        payload if isinstance(payload, dict) else None,
+        stage_name,
+    )
+
+
+def _walltime_stage_input(
+        stage_workflow: "StageWorkflow",
+        *,
+        partition_progress: dict | None = None,
+        ) -> dict:
+    """Build one ``estimate_submit_time_limit`` stage_inputs entry."""
+    resolved = stage_workflow.resolved_execution
+    if resolved is None:
+        raise RuntimeError(
+            f"Stage {stage_workflow.stage.name!r} has no resolved_execution")
+    progress = partition_progress
+    if not progress:
+        progress = _local_partition_progress(
+            stage_workflow.model, stage_workflow.stage.name)
+    state = walltime.load_runner_walltime_state(
+        stage_workflow.model.directory, stage_workflow.stage.name)
+    if not state:
+        pending = os.path.join(
+            stage_workflow.model.directory,
+            ".seekrflow_walltime",
+            f"{stage_workflow.stage.name}.json",
+        )
+        if os.path.isfile(pending):
+            try:
+                with open(pending, "r") as handle:
+                    state = json.load(handle)
+            except Exception:
+                state = {}
+    if not isinstance(state, dict):
+        state = {}
+    baseline = state.get("work_at_submission")
+    if not isinstance(baseline, dict):
+        baseline = None
+    elapsed = walltime.parse_elapsed_to_seconds(
+        state.get("last_known_elapsed_seconds", state.get("last_known_elapsed")))
+    dt = None
+    scale = getattr(stage_workflow.stage, "scale_type", None)
+    if scale == "molecular_dynamics":
+        dt = walltime.molecular_dynamics_timestep_ps(stage_workflow.model)
+    fallback_steps, fallback_trajs, criteria_type = (
+        walltime.fallback_targets_from_stage(stage_workflow.stage))
+    return {
+        "resolved": resolved,
+        "partition_progress": progress,
+        "elapsed_seconds": elapsed,
+        "work_baseline": baseline,
+        "timestep_ps": dt,
+        "scale_type": scale,
+        "fallback_total_steps": fallback_steps,
+        "fallback_trajectories_needed": fallback_trajs,
+        "completion_criteria_type": criteria_type,
+    }
+
+
+def compute_submit_time_limit_override(
+        host: "StageWorkflow",
+        stages_in_job: list[str],
+        *,
+        progress_by_stage: dict[str, dict | None] | None = None,
+        ) -> str | None:
+    """
+    Client-side walltime for remote/cloud submit.
+
+    Returns None only when the host policy is fixed and
+    ``Resolved_execution.time_limit`` is already set (submit uses that).
+    Benchmark mode is handled by the caller.
+    """
+    if host.resolved_execution is None:
+        return None
+    policy = host.resolved_execution.time_policy
+    if isinstance(policy, structures.Time_policy_fixed):
+        if host.resolved_execution.time_limit is not None:
+            return None
+    progress_by_stage = progress_by_stage or {}
+    stage_inputs = []
+    for stage_name in stages_in_job:
+        sw = (
+            host if stage_name == host.stage.name
+            else host.peer_workflows[stage_name])
+        stage_inputs.append(
+            _walltime_stage_input(
+                sw,
+                partition_progress=progress_by_stage.get(stage_name),
+            ))
+    return walltime.estimate_submit_time_limit(
+        host_resolved=host.resolved_execution,
+        stage_inputs=stage_inputs,
+    )
+
+
+def persist_work_baselines_for_submit(
+        host: "StageWorkflow",
+        stages_in_job: list[str],
+        *,
+        progress_by_stage: dict[str, dict | None] | None = None,
+        ) -> None:
+    """Record per-stage work snapshots at submit for the next measured rate."""
+    progress_by_stage = progress_by_stage or {}
+    for stage_name in stages_in_job:
+        sw = (
+            host if stage_name == host.stage.name
+            else host.peer_workflows[stage_name])
+        progress = progress_by_stage.get(stage_name)
+        if not progress:
+            progress = _local_partition_progress(sw.model, stage_name)
+        snapshot = walltime.extract_work_snapshot(progress)
+        amounts = snapshot[1] if snapshot is not None else {}
+        _merge_runner_walltime_fields(
+            sw.model.directory,
+            stage_name,
+            {"work_at_submission": amounts},
+        )
+
+
+def _merge_runner_walltime_fields(
+        model_directory: str,
+        stage_name: str,
+        fields: dict,
+        ) -> None:
+    """Update walltime fields on the latest runner state file if it exists."""
+    for dirname in (".aws_runner", ".slurm_runner", ".pbs_runner"):
+        path = os.path.join(
+            model_directory, dirname, f"{stage_name}_latest.json")
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, "r") as handle:
+                data = json.load(handle)
+            if not isinstance(data, dict):
+                data = {}
+            data.update(fields)
+            with open(path, "w") as handle:
+                json.dump(data, indent=2, fp=handle)
+            return
+        except Exception:
+            continue
+    pending_dir = os.path.join(model_directory, ".seekrflow_walltime")
+    os.makedirs(pending_dir, exist_ok=True)
+    path = os.path.join(pending_dir, f"{stage_name}.json")
+    try:
+        existing = {}
+        if os.path.isfile(path):
+            with open(path, "r") as handle:
+                existing = json.load(handle)
+        if not isinstance(existing, dict):
+            existing = {}
+        existing.update(fields)
+        with open(path, "w") as handle:
+            json.dump(existing, indent=2, fp=handle)
+    except Exception:
+        pass
 
 
 def build_remote_stage_command_string(
@@ -132,6 +302,92 @@ def build_remote_stage_command_string(
     return command_string, None
 
 
+def build_cloud_stage_spec(
+        model: typing.Any,
+        stage: scales_base.Base_stage,
+        resolved_execution: structures.Resolved_execution | None,
+        *,
+        force_overwrite: bool,
+        benchmark_mode: bool,
+        resource: structures.Resource_cloud_aws | None = None,
+        seekrflow_name: str | None = None,
+        ) -> tuple[dict, int]:
+    """
+    Build one AWS ``stage_specs`` entry and its array member count.
+
+    Unit counts come from the upstream stage's S3 ``*_dispatch.json`` artifact
+    (published by the container). Incomplete-unit filtering uses this stage's
+    dispatch progress snapshot when present.
+
+    Returns ``(spec, array_size)`` where ``array_size`` is 1 unless this stage
+    lowers to a multi-member array. ``array_size == 0`` means every unit is
+    already attained — caller should skip Batch submit.
+    """
+    dispatch = (
+        resolved_execution.dispatch
+        if resolved_execution is not None else None)
+    dimensions = dispatch.dimensions if dispatch is not None else None
+    group_size = dispatch.group_size if dispatch is not None else None
+    concurrency = dispatch.concurrency if dispatch is not None else 1
+    output_filename = f"{stage.name}_run.out"
+    array_size = 1
+
+    if dispatch_lowering.needs_unit_enumeration(dimensions):
+        if resource is None or not seekrflow_name:
+            raise ValueError(
+                "resource and seekrflow_name are required for cloud unit "
+                "enumeration.")
+        unit_counts = workload_aws.fetch_unit_counts_cloud(
+            resource, seekrflow_name, model, stage)
+        units = dispatch_lowering.build_run_units(dimensions, unit_counts)
+        if not force_overwrite:
+            stage_finished, progress_map = (
+                workload_aws.fetch_stage_progress_cloud(
+                    resource, seekrflow_name, stage.name))
+            units = dispatch_lowering.filter_incomplete_units(
+                units,
+                progress_map,
+                stage_finished=stage_finished,
+                force_overwrite=False,
+            )
+        if not units:
+            return {
+                "name": stage.name,
+                "force_overwrite": force_overwrite,
+                "benchmark_mode": benchmark_mode,
+                "seekr_command": None,
+                "skip": True,
+            }, 0
+        lowered = dispatch_lowering.lower_dispatch_from_units(
+            units,
+            group_size,
+            concurrency,
+        )
+        seekr_command = dispatch_lowering.build_remote_command_string(
+            stage.name,
+            lowered,
+            force_overwrite=force_overwrite,
+            benchmark=benchmark_mode,
+            output_filename=output_filename,
+        )
+        if lowered.use_array:
+            array_size = lowered.n_members
+    else:
+        seekr_command = workload_aws.build_seekr_stage_python_command(
+            stage.name,
+            force_overwrite=force_overwrite,
+            benchmark_mode=benchmark_mode,
+        )
+
+    spec = {
+        "name": stage.name,
+        "force_overwrite": force_overwrite,
+        "benchmark_mode": benchmark_mode,
+        "seekr_command": seekr_command,
+    }
+    return spec, array_size
+
+
 def load_job_status(root_directory: str) -> dict:
     """
     Read the most recent job status snapshot for a pipeline root directory.
@@ -179,7 +435,7 @@ class StageWorkflow:
     stage: scales_base.Base_stage = attrs.field(repr=False)
     workflow_engine: WorkflowEngine = attrs.field(repr=False)
     resource_name: str = attrs.field(default="local")
-    resource: structures.Resource_remote_base | None = attrs.field(
+    resource: structures.Resource_base | None = attrs.field(
         default=None, repr=False)
     resolved_execution: structures.Resolved_execution | None = attrs.field(
         default=None, repr=False)
@@ -284,6 +540,8 @@ class StageWorkflow:
                         stage_name,
                         self.model,
                         benchmark_mode=self.benchmark_mode,
+                        host_stage_name=self.stage.name,
+                        announce_failure=False,
                     )
                 except Exception as e:
                     print(
@@ -299,6 +557,7 @@ class StageWorkflow:
                 self.stage.name,
                 self.model,
                 benchmark_mode=self.benchmark_mode,
+                announce_failure=False,
             )
         except Exception as e:
             print(
@@ -419,15 +678,25 @@ class StageWorkflow:
                     raise Exception(
                         f"Remote resource config missing for {self.resource_name!r}")
                 try:
-                    destination_path = os.path.join(
-                        self.resource.remote_working_directory, self.seekrflow.name)
-                    destination_model_filename = os.path.join(
-                        destination_path, "model.json")
+                    remote_or_cloud = workload_remote.resource_kind(
+                        self.resource)
+                    if remote_or_cloud not in ("remote", "cloud"):
+                        raise ValueError(
+                            f"Invalid resource type: {self.resource.type!r}")
+
+                    destination_path = None
+                    destination_model_filename = None
+                    if remote_or_cloud == "remote":
+                        destination_path = os.path.join(
+                            self.resource.remote_working_directory,
+                            self.seekrflow.name)
+                        destination_model_filename = os.path.join(
+                            destination_path, "model.json")
 
                     # Capture and apply each stage's one-shot force_overwrite.
-                    # For remote stages this both (a) cancels any running job
-                    # and clears runner state via cancel_and_reset_remote_stage and
-                    # (b) threads the flag into the seekr run command so seekr
+                    # For remote/cloud stages this both (a) cancels any running
+                    # job and clears runner state via cancel_and_reset_remote_stage
+                    # and (b) threads the flag into the seekr run command so seekr
                     # wipes the stage output, mirroring the local path.
                     stages_in_job = (
                         list(self.fused_before)
@@ -438,117 +707,244 @@ class StageWorkflow:
                         target_sw = (
                             self if stage_name == self.stage.name
                             else self.peer_workflows[stage_name])
-                        force_now = target_sw.force_overwrite
-                        force_map[stage_name] = force_now
-                        if force_now:
+                        force_map[stage_name] = target_sw.force_overwrite
+
+                    if any(force_map.values()):
+                        if remote_or_cloud == "cloud":
+                            # Host owns the single Batch job for the fused set.
+                            # Clear S3 status/dispatch for every stage in the
+                            # job so stale "completed" monitor JSON cannot
+                            # short-circuit the force-rerun.
                             workload_remote.cancel_and_reset_remote_stage(
-                                self.seekrflow, stage_name)
-                            target_sw.force_overwrite = False
-
-                    stage_commands: list[str] = []
-                    indices = None
-                    for fused_name in self.fused_before:
-                        fused_sw = self.peer_workflows[fused_name]
-                        fused_cmd, _ = build_remote_stage_command_string(
-                            self.seekrflow,
-                            fused_sw.stage,
-                            self.resource,
-                            fused_sw.resolved_execution,
-                            destination_path,
-                            force_overwrite=force_map[fused_name],
-                            benchmark_mode=fused_sw.benchmark_mode,
-                        )
-                        stage_commands.append(fused_cmd)
-
-                    host_cmd, host_indices = build_remote_stage_command_string(
-                        self.seekrflow,
-                        self.stage,
-                        self.resource,
-                        self.resolved_execution,
-                        destination_path,
-                        force_overwrite=force_map[self.stage.name],
-                        benchmark_mode=self.benchmark_mode,
-                    )
-                    stage_commands.append(host_cmd)
-                    indices = host_indices
-
-                    for fused_name in self.fused_after:
-                        fused_sw = self.peer_workflows[fused_name]
-                        fused_cmd, _ = build_remote_stage_command_string(
-                            self.seekrflow,
-                            fused_sw.stage,
-                            self.resource,
-                            fused_sw.resolved_execution,
-                            destination_path,
-                            force_overwrite=force_map[fused_name],
-                            benchmark_mode=fused_sw.benchmark_mode,
-                        )
-                        stage_commands.append(fused_cmd)
-
-                    if len(stage_commands) == 1:
-                        command_string = host_cmd
-                    else:
-                        command_string = combine_fused_commands(stage_commands)
-
-                    # Determine effective walltime:
-                    #   - benchmark mode: short fixed cap
-                    #   - SEEKR stage with prior progress: dynamic optimizer
-                    #   - otherwise: resource default (via override=None)
-                    time_limit_override = None
-                    anchor_times_for_submit = None
-                    if self.benchmark_mode:
-                        time_limit_override = base.BENCHMARK_REMOTE_TIME_LIMIT
-                        print(
-                            f"[seekr-time] stage {self.stage.name}: benchmark mode "
-                            f"-> requesting {time_limit_override}"
-                        )
-                    elif self.stage.name == "seekr":
-                        job_status_filename = os.path.join(
-                            self.model.directory, STATUS_FILE_NAME)
-                        incomplete_anchors: list[int] = []
-                        try:
-                            with open(job_status_filename, "r") as _f:
-                                _status_data = json.load(_f)
-                            _stage_status = (
-                                _status_data.get(self.stage.name, {})
-                                .get("stage_status", {})
-                            )
-                            incomplete_anchors = list(
-                                _stage_status.get("incomplete_anchors") or []
-                            )
-                            anchor_times_for_submit = (
-                                _stage_status.get("anchor_times") or None
-                            )
-                        except Exception:
-                            pass
-                        if incomplete_anchors:
-                            optimized = workload_remote.calculate_optimal_time_limit(
                                 self.seekrflow,
                                 self.stage.name,
-                                self.resource,
-                                incomplete_anchors,
-                                job_status_filename,
+                                model_directory=self.model.directory,
+                                monitor_stage_names=stages_in_job,
                             )
-                            if optimized and optimized != self.resource.time_limit:
-                                time_limit_override = optimized
+                        else:
+                            for stage_name, force_now in force_map.items():
+                                if force_now:
+                                    workload_remote.cancel_and_reset_remote_stage(
+                                        self.seekrflow,
+                                        stage_name,
+                                        model_directory=self.model.directory,
+                                    )
+                        for stage_name in stages_in_job:
+                            target_sw = (
+                                self if stage_name == self.stage.name
+                                else self.peer_workflows[stage_name])
+                            if force_map[stage_name]:
+                                target_sw.force_overwrite = False
+
+                    if remote_or_cloud == "cloud":
+                        stage_specs = []
+                        array_size = 1
+                        skip_batch_submit = False
+                        for stage_name in stages_in_job:
+                            target_sw = (
+                                self if stage_name == self.stage.name
+                                else self.peer_workflows[stage_name])
+                            spec, stage_array = build_cloud_stage_spec(
+                                self.model,
+                                target_sw.stage,
+                                target_sw.resolved_execution,
+                                force_overwrite=force_map[stage_name],
+                                benchmark_mode=target_sw.benchmark_mode,
+                                resource=self.resource,
+                                seekrflow_name=self.seekrflow.name,
+                            )
+                            if stage_array == 0:
+                                if len(stages_in_job) > 1:
+                                    raise RuntimeError(
+                                        f"Stage {stage_name!r} has no incomplete "
+                                        f"units but is fused with other stages; "
+                                        f"cannot skip a fused Batch submit."
+                                    )
+                                skip_batch_submit = True
+                                break
+                            stage_specs.append(spec)
+                            if stage_array > 1:
+                                if len(stages_in_job) > 1:
+                                    raise RuntimeError(
+                                        f"Stage {stage_name!r} requires a Batch "
+                                        f"array (size={stage_array}) but is "
+                                        f"fused with other stages; array "
+                                        f"stages cannot be co-scheduled."
+                                    )
+                                if stage_name != self.stage.name:
+                                    raise RuntimeError(
+                                        f"Fused member {stage_name!r} cannot "
+                                        f"own a Batch array job."
+                                    )
+                                array_size = stage_array
+                        if skip_batch_submit:
+                            print(
+                                f"[cloud-submit] stage {self.stage.name}: "
+                                f"all dispatch units already attained; "
+                                f"skipping Batch submit"
+                            )
+                            workload_aws.publish_stage_completed_status(
+                                self.resource,
+                                self.seekrflow.name,
+                                self.stage.name,
+                            )
+                            workload_aws.clear_job_state(
+                                self.model.directory, self.stage.name)
+                            self.state = "completed"
+                            self.progress = 1.0
+                            self.manager_status = "idle"
+                            self.last_raw_status = {
+                                "success": True,
+                                "job_id": None,
+                                "stage_status": {
+                                    "finished": True,
+                                    "state": "completed",
+                                    "progress": 1.0,
+                                    "notes": (
+                                        "all dispatch units already attained; "
+                                        "skipped Batch submit"
+                                    ),
+                                },
+                            }
+                            return
+                        time_limit_override = None
+                        if self.benchmark_mode:
+                            time_limit_override = (
+                                base.BENCHMARK_REMOTE_TIME_LIMIT)
+                            print(
+                                f"[seekr-time] stage {self.stage.name}: "
+                                f"benchmark mode -> requesting "
+                                f"{time_limit_override}"
+                            )
+                        else:
+                            progress_by_stage: dict[str, dict | None] = {}
+                            for stage_name in stages_in_job:
+                                try:
+                                    _finished, part_map = (
+                                        workload_aws.fetch_stage_progress_cloud(
+                                            self.resource,
+                                            self.seekrflow.name,
+                                            stage_name))
+                                    progress_by_stage[stage_name] = part_map
+                                except Exception:
+                                    progress_by_stage[stage_name] = None
+                            time_limit_override = (
+                                compute_submit_time_limit_override(
+                                    self,
+                                    stages_in_job,
+                                    progress_by_stage=progress_by_stage,
+                                ))
+                            if time_limit_override is not None:
                                 print(
                                     f"[seekr-time] stage {self.stage.name}: "
-                                    f"requesting {optimized} (cap: "
-                                    f"{self.resource.time_limit})"
+                                    f"requesting {time_limit_override}"
                                 )
+                            persist_work_baselines_for_submit(
+                                self,
+                                stages_in_job,
+                                progress_by_stage=progress_by_stage,
+                            )
+                        run_result = workload_remote.submit_remote_run_workflow(
+                            self.seekrflow,
+                            self.stage.name,
+                            destination_path or "",
+                            self.resource,
+                            command_string="",
+                            model_filename="",
+                            workflow_type=self.stage.name,
+                            stage_specs=stage_specs,
+                            model_directory=self.model.directory,
+                            resolved_execution=self.resolved_execution,
+                            time_limit_override=time_limit_override,
+                            indices=(
+                                list(range(array_size))
+                                if array_size > 1 else None
+                            ),
+                        )
+                    else:
+                        stage_commands: list[str] = []
+                        indices = None
+                        for fused_name in self.fused_before:
+                            fused_sw = self.peer_workflows[fused_name]
+                            fused_cmd, _ = build_remote_stage_command_string(
+                                self.seekrflow,
+                                fused_sw.stage,
+                                self.resource,
+                                fused_sw.resolved_execution,
+                                destination_path,
+                                force_overwrite=force_map[fused_name],
+                                benchmark_mode=fused_sw.benchmark_mode,
+                            )
+                            stage_commands.append(fused_cmd)
 
-                    run_result = workload_remote.submit_remote_run_workflow(
-                        self.seekrflow,
-                        self.stage.name,
-                        destination_path,
-                        self.resource,
-                        command_string,
-                        destination_model_filename,
-                        workflow_type=self.stage.name,
-                        indices=indices,
-                        anchor_times=anchor_times_for_submit,
-                        time_limit_override=time_limit_override,
-                    )
+                        host_cmd, host_indices = build_remote_stage_command_string(
+                            self.seekrflow,
+                            self.stage,
+                            self.resource,
+                            self.resolved_execution,
+                            destination_path,
+                            force_overwrite=force_map[self.stage.name],
+                            benchmark_mode=self.benchmark_mode,
+                        )
+                        stage_commands.append(host_cmd)
+                        indices = host_indices
+
+                        for fused_name in self.fused_after:
+                            fused_sw = self.peer_workflows[fused_name]
+                            fused_cmd, _ = build_remote_stage_command_string(
+                                self.seekrflow,
+                                fused_sw.stage,
+                                self.resource,
+                                fused_sw.resolved_execution,
+                                destination_path,
+                                force_overwrite=force_map[fused_name],
+                                benchmark_mode=fused_sw.benchmark_mode,
+                            )
+                            stage_commands.append(fused_cmd)
+
+                        if len(stage_commands) == 1:
+                            command_string = host_cmd
+                        else:
+                            command_string = combine_fused_commands(
+                                stage_commands)
+
+                        # Determine effective walltime:
+                        #   - benchmark mode: short fixed cap
+                        #   - else: adaptive/fixed time_policy estimate
+                        time_limit_override = None
+                        anchor_times_for_submit = None
+                        if self.benchmark_mode:
+                            time_limit_override = (
+                                base.BENCHMARK_REMOTE_TIME_LIMIT)
+                            print(
+                                f"[seekr-time] stage {self.stage.name}: "
+                                f"benchmark mode -> requesting "
+                                f"{time_limit_override}"
+                            )
+                        else:
+                            time_limit_override = (
+                                compute_submit_time_limit_override(
+                                    self, stages_in_job))
+                            if time_limit_override is not None:
+                                print(
+                                    f"[seekr-time] stage {self.stage.name}: "
+                                    f"requesting {time_limit_override}"
+                                )
+                            persist_work_baselines_for_submit(
+                                self, stages_in_job)
+                        run_result = workload_remote.submit_remote_run_workflow(
+                            self.seekrflow,
+                            self.stage.name,
+                            destination_path,
+                            self.resource,
+                            command_string,
+                            destination_model_filename,
+                            workflow_type=self.stage.name,
+                            indices=indices,
+                            anchor_times=anchor_times_for_submit,
+                            time_limit_override=time_limit_override,
+                            resolved_execution=self.resolved_execution,
+                        )
                     self.last_raw_status = run_result
 
                     if not isinstance(run_result, dict):
@@ -651,7 +1047,6 @@ class StageWorkflow:
                 host_sw = None
                 if self.fusion_host is not None:
                     host_sw = self.peer_workflows.get(self.fusion_host)
-                fused_host_name = fusion_host_name(self)
 
                 status = None
                 try:
@@ -660,6 +1055,7 @@ class StageWorkflow:
                         self.stage.name,
                         self.model,
                         benchmark_mode=self.benchmark_mode,
+                        host_stage_name=self.fusion_host,
                     )
                 except Exception as e:
                     print(
@@ -1262,7 +1658,7 @@ class SeekrPipeline:
             "    s [STAGE]  - (s)top semaphore for STAGE or all\n"
             "    g [STAGE]  - (g)o semaphore for STAGE or all\n"
             "    w [STAGE]  - (w)ait semaphore for STAGE or all\n"
-            "    t [STAGE]  - (t)ransfer remote files back for STAGE or all (not yet implemented)\n"
+            "    t [STAGE]  - (t)ransfer remote files back for STAGE or all\n"
             "    q          - (q)uit / detach (leave running jobs active)\n"
             "    h | ?      - (h)elp: reprint this message"
         )
@@ -1708,35 +2104,49 @@ class SeekrPipeline:
                         if (prior_state in {"unstarted", "unknown"}
                                 and stage_workflow.resource_name != "local"
                                 and stage_workflow.fusion_host is None):
-                            probe_action, probe_status = (
-                                await stage_workflow.probe_remote_launch())
-                            if probe_action == "completed":
-                                if is_fusion_host(stage_workflow):
-                                    mark_fused_set_completed(
-                                        stage_workflow, stage_by_name)
-                                else:
-                                    stage_workflow.state = "completed"
-                                    stage_workflow.progress = 1.0
-                                continue
-                            if probe_action == "reattach":
-                                manager_status = (
-                                    (probe_status or {})
-                                    .get("manager_status") or {})
-                                stage_workflow.state = "started"
-                                stage_workflow.manager_status = (
-                                    determine_stage_manager_status(
-                                        manager_status))
-                                for job in manager_status.get("jobs", []):
-                                    job_id = job.get("JobID")
-                                    if job_id:
-                                        stage_workflow.job_ids.add(str(job_id))
-                                await stage_workflow.create_monitor_only_task()
-                                if stage_workflow.task is not None:
-                                    launched_tasks.append(stage_workflow.task)
-                                    self.stage_tasks.append(
-                                        stage_workflow.task)
-                                all_terminal = False
-                                continue
+                            force_for_probe = stage_workflow.force_overwrite
+                            if (not force_for_probe
+                                    and is_fusion_host(stage_workflow)):
+                                for _fname in co_schedule_fusion.fused_set_members(
+                                        stage_workflow):
+                                    _msw = stage_by_name.get(_fname)
+                                    if (_msw is not None
+                                            and _msw.force_overwrite):
+                                        force_for_probe = True
+                                        break
+                            if not force_overwrite_skips_launch_probe(
+                                    force_for_probe):
+                                probe_action, probe_status = (
+                                    await stage_workflow.probe_remote_launch())
+                                if probe_action == "completed":
+                                    if is_fusion_host(stage_workflow):
+                                        mark_fused_set_completed(
+                                            stage_workflow, stage_by_name)
+                                    else:
+                                        stage_workflow.state = "completed"
+                                        stage_workflow.progress = 1.0
+                                    continue
+                                if probe_action == "reattach":
+                                    manager_status = (
+                                        (probe_status or {})
+                                        .get("manager_status") or {})
+                                    stage_workflow.state = "started"
+                                    stage_workflow.manager_status = (
+                                        determine_stage_manager_status(
+                                            manager_status))
+                                    for job in manager_status.get("jobs", []):
+                                        job_id = job.get("JobID")
+                                        if job_id:
+                                            stage_workflow.job_ids.add(
+                                                str(job_id))
+                                    await stage_workflow.create_monitor_only_task()
+                                    if stage_workflow.task is not None:
+                                        launched_tasks.append(
+                                            stage_workflow.task)
+                                        self.stage_tasks.append(
+                                            stage_workflow.task)
+                                    all_terminal = False
+                                    continue
                         await stage_workflow.create_tasks()
                         if stage_workflow.task is not None:
                             launched_tasks.append(stage_workflow.task)
@@ -1811,10 +2221,7 @@ def run_model(
     if seekrflow.work_directory is not None:
         seekrflow.work_directory = os.path.abspath(seekrflow.work_directory)
         os.chdir(seekrflow.work_directory)
-    if seekrflow.root_directory is None:
-        root_directory = os.path.join(seekrflow.work_directory, structures.ROOT)
-    else:
-        root_directory = seekrflow.root_directory
+    root_directory = str(seekrflow.get_root_directory())
     model_filename = os.path.join(root_directory, "model.json")
     model = seekr3_structures.load_model(model_filename)
     structures.validate_run_settings(seekrflow, model)
@@ -1983,7 +2390,8 @@ def run_model(
             
     # handle transfer_from_host/remote_only
     
-    # Optimize SEEKR time limit based on remaining work and benchmark data
+    # Walltime for remote/cloud submits is resolved via Placement.time_policy
+    # (see workload_managers.walltime) at submit time.
     
     # Only cleanup processes if NOT detaching (perform_final_transfer is our indicator)
     # When detaching (perform_final_transfer=False from 'd' command), leave processes running

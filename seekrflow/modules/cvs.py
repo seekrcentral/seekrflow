@@ -14,8 +14,7 @@ import parmed
 import seekr.modules.engines.structures as seekr_engines_structures
 
 import seekrflow.modules.base as base
-import seekrflow.modules.workflows.structures as workflow_structures
-import seekrflow.modules.parameterize_workflow as parameterize_workflow_module
+import seekrflow.modules.workflows.components as components_module
 
 # NOTE: These are valid for SEEKR2 - will need to change for SEEKR3
 # TODO: move these to base?
@@ -109,41 +108,46 @@ def alpha_carbon_selection_within_cutoff(
     return alpha_carbon_indices
 
 def get_receptor_ligand_com_com_selections(
-        workflow: parameterize_workflow_module.Parameterize_workflow,
+        workflow: "workflow_module.Workflow",
         complex_pdb_filename: str,
         alpha_carbon_ligand_threshold: float = 0.6,
+        ligand_component_name: str | None = None,
         ) -> typing.Tuple[list, list]:
     """
     Get the selections for the receptor and ligand in a com-com calculation.
-    
-    Parameters
-    ----------
-    complex_pdb_filename : str
-        The filename of the complex PDB file.
-    
-    Returns
-    -------
-    tuple
-        A tuple containing the receptor selection and ligand selection.
+
+    Ligand atoms come from a ``Small_molecule_component`` on the Workflow
+    (resolved against ``complex_pdb_filename``). Receptor atoms are protein
+    alpha carbons within ``alpha_carbon_ligand_threshold`` of the ligand.
     """
-    # This is a placeholder implementation. The actual implementation would
-    # depend on the specific structure of the PDB file and how the receptor
-    # and ligand are defined.
-    if len(workflow.ligand_indices) == 0:
-        assert workflow.parameterizer_information.ligand_resname != "", \
-            "ligand_resname must be set in the input JSON file if "\
-            "ligand_indices is empty."
-        workflow.ligand_indices = base.get_ligand_indices(
-            complex_pdb_filename, workflow.parameterizer_information.ligand_resname)
+    small_members = [
+        m for m in workflow.components.members
+        if isinstance(m, components_module.Small_molecule_component)]
+    assert len(small_members) > 0, \
+        "Workflow must contain a Small_molecule_component for COM-COM "\
+        "ligand selection."
+    if ligand_component_name is None:
+        ligand_member = small_members[0]
+    else:
+        ligand_member = workflow.components.get_member(ligand_component_name)
+        assert isinstance(
+            ligand_member, components_module.Small_molecule_component), \
+            f"Component '{ligand_component_name}' is not a small molecule."
     traj = mdtraj.load(complex_pdb_filename)
+    ligand_indices = ligand_member.resolve(traj)
+    assert len(ligand_indices) > 0, \
+        f"Ligand component '{ligand_member.name}' resolved to no atoms."
+    ligand_resname = ligand_member.parameterize_resname()
+    if ligand_resname == "LIG":
+        ligand_resname = ""
     receptor_selection = alpha_carbon_selection_within_cutoff(
-        traj, 
-        workflow.ligand_indices, 
-        alpha_carbon_ligand_threshold, 
-        ligand_resname=workflow.parameterizer_information.ligand_resname,
-        receptor_selection="protein"
+        traj,
+        ligand_indices,
+        alpha_carbon_ligand_threshold,
+        ligand_resname=ligand_resname,
+        receptor_selection="protein",
     )
-    return receptor_selection, workflow.ligand_indices
+    return receptor_selection, ligand_indices
 
 def get_bd_receptor_ligand_selections(
         receptor_pqr_filename: str,

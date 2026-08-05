@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import typing
 from dataclasses import dataclass
 
@@ -198,6 +199,124 @@ def wave_slices(n_units_in_member: int, concurrency: int) -> list[slice]:
     return waves
 
 
+def partition_entry_is_complete(entry: dict | None) -> bool:
+    """True when a seekr per-partition progress entry is done."""
+    if not isinstance(entry, dict):
+        return False
+    if entry.get("attained"):
+        return True
+    prog = entry.get("progress")
+    if isinstance(prog, (int, float)) and float(prog) >= 1.0:
+        return True
+    return False
+
+
+def lookup_unit_progress_entry(
+        unit: RunUnit,
+        progress_map: dict,
+        ) -> dict | None:
+    """
+    Find the per-partition progress dict for ``unit``.
+
+    Seekr keys partitions by anchor and/or swarm id (int or str). Missing
+    entries mean the unit has not started and is treated as incomplete.
+    """
+    if not isinstance(progress_map, dict):
+        return None
+
+    def _get(key: typing.Any) -> dict | None:
+        if key in progress_map and isinstance(progress_map[key], dict):
+            return progress_map[key]
+        return None
+
+    if unit.swarm_id is None:
+        if unit.anchor == "any":
+            return None
+        return _get(unit.anchor) or _get(str(unit.anchor))
+
+    if unit.anchor == "any":
+        return _get(unit.swarm_id) or _get(str(unit.swarm_id))
+
+    # anchor + swarm: nested map or compound key
+    for ak in (unit.anchor, str(unit.anchor)):
+        nested = _get(ak)
+        if nested is None:
+            continue
+        for sk in (unit.swarm_id, str(unit.swarm_id)):
+            if sk in nested and isinstance(nested[sk], dict):
+                return nested[sk]
+        # Nested entry may itself be the partition (no swarm nesting).
+        if "progress" in nested or "attained" in nested:
+            return nested
+
+    for key in (
+            f"{unit.anchor}_{unit.swarm_id}",
+            f"{unit.anchor}:{unit.swarm_id}",
+            (unit.anchor, unit.swarm_id),
+            ):
+        found = _get(key)
+        if found is not None:
+            return found
+    return None
+
+
+def filter_incomplete_units(
+        units: list[RunUnit] | tuple[RunUnit, ...],
+        progress_map: dict | None,
+        *,
+        stage_finished: bool = False,
+        force_overwrite: bool = False,
+        ) -> list[RunUnit]:
+    """
+    Drop units whose partition is already attained / complete.
+
+    When ``force_overwrite`` is set, all units are kept. When the stage is
+    finished (or every partition is complete), returns an empty list.
+    Missing progress entries are treated as incomplete.
+    """
+    if force_overwrite:
+        return list(units)
+    if stage_finished:
+        return []
+    if not progress_map:
+        return list(units)
+    return [
+        unit for unit in units
+        if not partition_entry_is_complete(
+            lookup_unit_progress_entry(unit, progress_map))
+    ]
+
+
+def lower_dispatch_from_units(
+        units: list[RunUnit] | tuple[RunUnit, ...],
+        group_size: int | None,
+        concurrency: int,
+        ) -> LoweredDispatch:
+    """Lower an explicit (possibly filtered) unit list to an array plan."""
+    units_t = tuple(units)
+    n_units = len(units_t)
+    if n_units == 0:
+        return LoweredDispatch(
+            units=(),
+            group_size=1,
+            concurrency=max(1, concurrency),
+            n_members=0,
+            use_array=False,
+        )
+    effective_group = group_size if group_size is not None else n_units
+    if effective_group < 1:
+        effective_group = max(n_units, 1)
+    n_members = member_count(n_units, group_size)
+    use_array = n_members > 1
+    return LoweredDispatch(
+        units=units_t,
+        group_size=effective_group,
+        concurrency=max(1, concurrency),
+        n_members=n_members,
+        use_array=use_array,
+    )
+
+
 def lower_dispatch(
         dimensions: list[str] | None,
         group_size: int | None,
@@ -207,20 +326,58 @@ def lower_dispatch(
     """
     Combine resolved dispatch fields with launch-time counts into a plan.
     """
-    units = tuple(build_run_units(dimensions, counts))
-    n_units = len(units)
-    effective_group = group_size if group_size is not None else n_units
-    if effective_group < 1:
-        effective_group = max(n_units, 1)
-    n_members = member_count(n_units, group_size)
-    use_array = n_members > 1
-    return LoweredDispatch(
-        units=units,
-        group_size=effective_group,
-        concurrency=max(1, concurrency),
-        n_members=n_members,
-        use_array=use_array,
+    return lower_dispatch_from_units(
+        build_run_units(dimensions, counts),
+        group_size,
+        concurrency,
     )
+
+
+def fetch_stage_progress_local(
+        model: typing.Any,
+        launching_stage: typing.Any,
+        status_fn: typing.Callable[..., dict] | None = None,
+        ) -> tuple[bool, dict]:
+    """
+    Call seekr ``status(..., instruction='progress')`` for ``launching_stage``.
+
+    Returns ``(stage_finished, partition_progress_map)``. The map is the
+    per-anchor/swarm ``progress`` dict under the stage entry (may be empty).
+    """
+    if status_fn is None:
+        import seekr.status as seekr_status
+        status_fn = seekr_status.status
+
+    stage_arg = getattr(launching_stage, "name", launching_stage)
+    msg = status_fn(
+        model, "progress", stage_arg=stage_arg, print_json=True)
+    progress_root = msg.get("progress", {})
+    if not isinstance(progress_root, dict):
+        return False, {}
+
+    stage_progress: dict = {}
+    stage_index = getattr(launching_stage, "index", None)
+    stage_name = getattr(launching_stage, "name", None)
+    for key, value in progress_root.items():
+        if not isinstance(value, dict):
+            continue
+        if stage_index is not None and (
+                key == stage_index or key == str(stage_index)):
+            stage_progress = value
+            break
+        if stage_name is not None and value.get("stage_name") == stage_name:
+            stage_progress = value
+            break
+    if not stage_progress and len(progress_root) == 1:
+        sole = next(iter(progress_root.values()))
+        if isinstance(sole, dict):
+            stage_progress = sole
+
+    finished = bool(stage_progress.get("finished", False))
+    partition_map = stage_progress.get("progress", {})
+    if not isinstance(partition_map, dict):
+        partition_map = {}
+    return finished, partition_map
 
 
 def array_member_indices(lowered: LoweredDispatch) -> list[int] | None:
@@ -374,8 +531,9 @@ def build_remote_command_string(
         f"stage_name = {stage_name!r}",
         f"force_overwrite = {force_overwrite!r}",
         f"benchmark = {benchmark!r}",
-        "member = int(os.environ.get('SLURM_ARRAY_TASK_ID', "
-        "os.environ.get('PBS_ARRAY_INDEX', '0')) or 0)",
+        "member = int(os.environ.get('AWS_BATCH_JOB_ARRAY_INDEX', "
+        "os.environ.get('SLURM_ARRAY_TASK_ID', "
+        "os.environ.get('PBS_ARRAY_INDEX', '0'))) or 0)",
         "start = member * group_size",
         "batch = units[start:min(start + group_size, len(units))]",
         "model = structures.load_model('model.json')",
@@ -399,4 +557,15 @@ def build_remote_command_string(
     ]
     driver = "\n".join(driver_lines)
     escaped = driver.replace("\\", "\\\\").replace('"', '\\"')
+    if lowered.use_array:
+        # Avoid interleaved writes when array members share a cwd.
+        root, ext = os.path.splitext(output_filename)
+        if not ext:
+            ext = ".out"
+        array_idx = (
+            "${AWS_BATCH_JOB_ARRAY_INDEX:-"
+            "${SLURM_ARRAY_TASK_ID:-"
+            "${PBS_ARRAY_INDEX:-0}}}"
+        )
+        return f'python -c "{escaped}" > {root}_{array_idx}{ext}'
     return f'python -c "{escaped}" > {output_filename}'

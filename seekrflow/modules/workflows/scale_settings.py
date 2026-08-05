@@ -129,11 +129,16 @@ class Molecular_dynamics_scale_settings(Scale_settings_base):
     """
     OpenMM molecular-dynamics scale settings. Maps to a seekr3
     ``Openmm_settings_input``.
+
+    ``system`` may be ``None`` when a Seekrflow ``parameterizer`` will produce
+    the solvated OpenMM system under ``work/parameterize/``. Prepare then
+    auto-fills ``system`` from those canonical outputs. If both ``system`` and
+    ``parameterizer`` are set, parameterization raises.
     """
     type: typing.Literal["molecular_dynamics"] = "molecular_dynamics"
-    system: System_for_md = field(
+    system: System_for_md | None = field(
         default=Factory(System_for_md),
-        validator=validators.instance_of(System_for_md),
+        validator=validators.optional(validators.instance_of(System_for_md)),
         )
     nonbonded_method: str = field(
         default="pme",
@@ -160,7 +165,7 @@ class Molecular_dynamics_scale_settings(Scale_settings_base):
         validator=validators.optional(validators.instance_of(float)),
         )
     integrator_type: str = field(
-        default="langevin",
+        default="langevinmiddle",
         validator=validators.instance_of(str),
         )
     platform_type: str = field(
@@ -182,11 +187,19 @@ class Brownian_dynamics_scale_settings(Scale_settings_base):
         default="browndye",
         validator=validators.in_(["browndye", "sda"]),
         )
+    geometry: str = field(
+        default="sphere",
+        validator=validators.in_(["sphere", "box", "nambox"]),
+        )
     system: System_for_bd = field(
         default=Factory(System_for_bd),
         validator=validators.instance_of(System_for_bd),
         )
     binary_directory: str = field(
+        default="",
+        validator=validators.instance_of(str),
+        )
+    auxiliary_directory: str = field(
         default="",
         validator=validators.instance_of(str),
         )

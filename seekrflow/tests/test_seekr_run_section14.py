@@ -59,6 +59,15 @@ class TestClassifyRemoteProbeStatus:
             None) == "submit"
 
 
+class TestForceOverwriteSkipsLaunchProbe:
+    def test_true_when_force(self):
+        assert remote_stage_lifecycle.force_overwrite_skips_launch_probe(True)
+
+    def test_false_when_not_force(self):
+        assert not remote_stage_lifecycle.force_overwrite_skips_launch_probe(
+            False)
+
+
 class TestRemoteSchedulerJobName:
     def test_name_format(self):
         assert remote_stage_lifecycle.remote_scheduler_job_name(

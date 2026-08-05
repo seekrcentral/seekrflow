@@ -91,18 +91,28 @@ class TestBuildStagePolicyMap:
         assert policy["ramd_proc_ramd"].dispatch.dimensions == ["swarm"]
         assert policy["ramd_proc_ramd"].dispatch.group_size == 1
 
-    def test_explicit_and_equilibration_generic(self):
-        equil = stage_procedures.Equilibration_globular_stage_procedure(
-            name="equilibration")
+    def test_explicit_generic(self):
         explicit = stage_procedures.Explicit_stage_procedure(
             name="explicit",
             items=[stage_procedures.MD_stage_item(name="sampling")])
-        for proc in (equil, explicit):
-            policy = stage_procedures.build_stage_policy_map(proc)
-            for emitted in policy.values():
-                assert emitted.dispatch.dimensions is None
-                assert emitted.dispatch.group_size is None
+        policy = stage_procedures.build_stage_policy_map(explicit)
+        for emitted in policy.values():
+            assert emitted.dispatch.dimensions is None
+            assert emitted.dispatch.group_size is None
+            assert emitted.co_schedule_with is None
+
+    def test_equilibration_co_schedules_successors(self):
+        equil = stage_procedures.Equilibration_globular_stage_procedure(
+            name="equilibration")
+        policy = stage_procedures.build_stage_policy_map(equil)
+        for i, row in enumerate(equil.schedule):
+            emitted = policy[row["name"]]
+            assert emitted.dispatch.dimensions is None
+            assert emitted.dispatch.group_size is None
+            if i == 0:
                 assert emitted.co_schedule_with is None
+            else:
+                assert emitted.co_schedule_with == "predecessor"
 
 
 class TestResolverPrecedence:
@@ -193,6 +203,99 @@ class TestCapabilityClamp:
             ])
         with pytest.raises(ValueError, match="dispatch.concurrency=8"):
             rs.resolve_stage_execution("MMVT", proc)
+
+
+class TestComputeResolveDefaults:
+    def test_time_limit_roundtrip(self):
+        assert structures.time_limit_to_seconds("02:30:00") == 9000
+        assert structures.seconds_to_time_limit(9000) == "02:30:00"
+        assert structures.time_limit_to_seconds("1-00:00:00") == 86400
+
+    def test_remote_defaults_and_placement_override(self):
+        proc = _host_guest_procedure()
+        resource = structures.Resource_remote_slurm(
+            name="cluster",
+            cpus_per_task=16,
+            memory_per_node=32000,
+            time_limit="04:00:00",
+            mps=2,
+        )
+        rs = structures.Run_settings(
+            resources=[resource],
+            placements=[
+                structures.Placement(target=["bd"], resource="cluster"),
+                structures.Placement(
+                    target=["MMVT"],
+                    resource="cluster",
+                    cpus=8,
+                    memory_mb=16000,
+                    time_limit="01:00:00",
+                ),
+            ])
+        bd = rs.resolve_stage_execution("bd", proc)
+        assert bd.cpus == 16
+        assert bd.memory_mb == 32000
+        assert bd.time_limit is None  # adaptive default
+        assert isinstance(bd.time_policy, structures.Time_policy_adaptive)
+        assert bd.time_policy.max_time_limit is None
+        assert bd.mps == 2
+        mmvt = rs.resolve_stage_execution("MMVT", proc)
+        assert mmvt.cpus == 8
+        assert mmvt.memory_mb == 16000
+        assert mmvt.time_limit is None
+        assert mmvt.time_policy.max_time_limit == "01:00:00"
+        assert mmvt.mps == 2
+
+    def test_cloud_defaults_from_aws_resource(self):
+        proc = _host_guest_procedure()
+        resource = structures.Resource_cloud_aws(
+            name="aws_gpu",
+            region="us-west-2",
+            account_id="123",
+            compute_env_name="ce",
+            job_queue_name="q",
+            n_vcpus=4,
+            memory_mb=14000,
+            job_timeout_seconds=7200,
+        )
+        rs = structures.Run_settings(
+            resources=[resource],
+            placements=[
+                structures.Placement(target=["equilibration"], resource="aws_gpu"),
+            ])
+        resolved = rs.resolve_stage_execution("equilibration", proc)
+        assert resolved.cpus == 4
+        assert resolved.memory_mb == 14000
+        assert resolved.time_limit is None  # adaptive default
+        assert isinstance(
+            resolved.time_policy, structures.Time_policy_adaptive)
+        assert resolved.mps == 1
+        # equilibration has no array dimensions; group_size stays unset
+        assert resolved.dispatch.group_size is None
+
+
+    def test_cloud_mmvt_keeps_array_group_size(self):
+        proc = _host_guest_procedure()
+        resource = structures.Resource_cloud_aws(
+            name="aws_gpu",
+            region="us-west-2",
+            account_id="123",
+            compute_env_name="ce",
+            job_queue_name="q",
+            n_vcpus=4,
+            memory_mb=14000,
+            job_timeout_seconds=7200,
+            mps=2,
+        )
+        rs = structures.Run_settings(
+            resources=[resource],
+            placements=[
+                structures.Placement(target=["MMVT"], resource="aws_gpu"),
+            ])
+        resolved = rs.resolve_stage_execution("MMVT", proc)
+        assert resolved.dispatch.dimensions == ["anchor"]
+        assert resolved.dispatch.group_size == 1
+        assert resolved.mps == 2
 
 
 class _FakeStage:

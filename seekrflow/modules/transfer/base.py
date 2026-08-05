@@ -14,7 +14,7 @@ import seekrflow.modules.transfer.aws_s3 as transfer_aws_s3
 
 def transfer_files_to_from_remote_resource(
         remote_root_directory_name: str,
-        resource: structures.Resource_remote_base,
+        resource: structures.Resource_base,
         local_directory: str,
         backwards: bool = False,
         ) -> None:
@@ -44,7 +44,11 @@ def transfer_files_to_from_remote_resource(
             backwards=backwards)
     
     elif resource.transfer_settings.type == "aws_s3":
-        s3_uri = resource.transfer_settings.get_uri()
+        # Isolate each seekrflow run under {prefix}/{seekrflow_name}/
+        s3_uri = (
+            f"{resource.transfer_settings.get_uri().rstrip('/')}/"
+            f"{remote_root_directory_name}"
+        )
         input_tarball_name = resource.transfer_settings.get_input_tarball_name()
         transfer_aws_s3.transfer_files_with_aws_s3(
             local_directory, s3_uri, input_tarball_name, resource.region, 
@@ -52,5 +56,5 @@ def transfer_files_to_from_remote_resource(
 
     else:
         raise NotImplementedError(
-            "Only rsync and globus transfers are implemented.")
+            "Only rsync, globus, and aws_s3 transfers are implemented.")
     return

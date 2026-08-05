@@ -25,6 +25,7 @@ from attrs import define, field, validators, Factory
 import mdtraj
 
 import seekrflow.modules.workflows.utilities as utilities_module
+import seekrflow.modules.workflows.membrane_utils as membrane_utils
 
 INITIAL = "initial"
 
@@ -75,6 +76,8 @@ class Metadynamics_sampling_spec(Sampling_spec_base):
         default=250, validator=validators.instance_of(int))
     number_of_points: int = field(
         default=101, validator=validators.instance_of(int))
+    write_biases: bool = field(
+        default=False, validator=validators.instance_of(bool))
 
 
 @define
@@ -155,7 +158,19 @@ class Positional_restraint_spec(Restraint_spec_base):
     coordinates_filename: str | None = field(
         default=None, validator=validators.optional(
             validators.instance_of(str)))
-    
+
+
+@define
+class Z_restraint_spec(Restraint_spec_base):
+    """Z-only planar restraint (e.g. lipid phosphorus along the membrane normal)."""
+    type: typing.Literal["z"] = "z"
+    selection_name: str = field(
+        default="", validator=validators.instance_of(str))
+    force_constant: float = field(
+        default=10.0, validator=validators.instance_of(float))
+    coordinates_filename: str | None = field(
+        default=None, validator=validators.optional(
+            validators.instance_of(str)))
 
 
 @define
@@ -182,9 +197,34 @@ class Proximity_restraint_spec(Restraint_spec_base):
         default=1000.0, validator=validators.instance_of(float))
 
 
+@define
+class Torsion_restraint_spec(Restraint_spec_base):
+    """
+    Proper or improper torsion restraints (e.g. cis double bonds, glycerol C2).
+
+    ``torsion_values`` are equilibrium angles in radians, one per torsion.
+    """
+    type: typing.Literal["torsion"] = "torsion"
+    torsion_indices: list[tuple[int, int, int, int]] = field(
+        default=Factory(list),
+        validator=validators.deep_iterable(
+            member_validator=validators.instance_of(tuple),
+            iterable_validator=validators.instance_of(list),
+        ))
+    torsion_values: list[float] = field(
+        default=Factory(list),
+        validator=validators.deep_iterable(
+            member_validator=validators.instance_of(float),
+            iterable_validator=validators.instance_of(list),
+        ))
+    force_constant: float = field(
+        default=10.0, validator=validators.instance_of(float))
+
+
 Restraint_spec = (
-    Positional_restraint_spec | Pairwise_restraint_spec
-    | Proximity_restraint_spec
+    Positional_restraint_spec | Z_restraint_spec
+    | Pairwise_restraint_spec | Proximity_restraint_spec
+    | Torsion_restraint_spec
 )
 
 
@@ -218,6 +258,8 @@ class Reporter_progress_completion_spec(Completion_spec_base):
         default="", validator=validators.instance_of(str))
     interval: int = field(
         default=100, validator=validators.instance_of(int))
+    max_steps: int = field(
+        default=2000000000, validator=validators.instance_of(int))
 
 @define 
 class CV_value_attained_completion_spec(Completion_spec_base):
@@ -344,8 +386,6 @@ Stage_item = MD_stage_item | BD_stage_item \
 #  are in seekr3 restraint units.
 # ======================================================================
 
-# Each row: (name, run_minimization, restraint_force_constant, number_of_steps,
-#            heat_ramp_start_temperature_or_None)
 DEFAULT_GLOBULAR_EQUIL_SCHEDULE: list[dict] = [
     {"name": "equil_stage_1", 
      "run_minimization": True,
@@ -426,6 +466,121 @@ DEFAULT_GLOBULAR_EQUIL_SCHEDULE: list[dict] = [
      "ensemble": "NPT"}
 ]
 
+DEFAULT_MEMBRANE_EQUIL_SCHEDULE: list[dict] = [
+    {"name": "equil_stage_1",
+     "run_minimization": True,
+     "backbone_force_constant": 41840.0,
+     "sidechain_force_constant": 41840.0,
+     "nonprotein_force_constant": 41840.0,
+     "phosphorus_atoms_force_constant": 2092.0,
+     # Doubled vs legacy draft: seekr uses 0.5*k; CHARMM-GUI OpenMM uses fc*(…)^2.
+     "cis_double_bonds_force_constant": 2092.0,
+     "glycerol_impropers_force_constant": 2092.0,
+     "number_of_steps": 10000,
+     "heat_ramp_start": 100.0,
+     "heat_ramp_stride": 10.0,
+     "heat_ramp_step_interval": 1000,
+     "timestep": 0.001,
+     "ensemble": "NPT_membrane"},
+    {"name": "equil_stage_2",
+     "run_minimization": False,
+     "backbone_force_constant": 41840.0,
+     "sidechain_force_constant": 41840.0,
+     "nonprotein_force_constant": 41840.0,
+     "phosphorus_atoms_force_constant": 2092.0,
+     "cis_double_bonds_force_constant": 836.8,
+     "glycerol_impropers_force_constant": 836.8,
+     "number_of_steps": 100000,
+     "heat_ramp_start": None,
+     "heat_ramp_stride": None,
+     "heat_ramp_step_interval": None,
+     "timestep": 0.001,
+     "ensemble": "NPT_membrane"},
+    {"name": "equil_stage_3",
+     "run_minimization": False,
+     "backbone_force_constant": 4184.0,
+     "sidechain_force_constant": 4184.0,
+     "nonprotein_force_constant": 4184.0,
+     "phosphorus_atoms_force_constant": 1046.0,
+     "cis_double_bonds_force_constant": 836.8,
+     "glycerol_impropers_force_constant": 836.8,
+     "number_of_steps": 10000,
+     "heat_ramp_start": 100.0,
+     "heat_ramp_stride": 10.0,
+     "heat_ramp_step_interval": 1000,
+     "timestep": 0.001,
+     "ensemble": "NPT_membrane"},
+    {"name": "equil_stage_4",
+     "run_minimization": False,
+     "backbone_force_constant": 4184.0,
+     "sidechain_force_constant": 4184.0,
+     "nonprotein_force_constant": 4184.0,
+     "phosphorus_atoms_force_constant": 1046.0,
+     "cis_double_bonds_force_constant": 836.8,
+     "glycerol_impropers_force_constant": 836.8,
+     "number_of_steps": 100000,
+     "heat_ramp_start": None,
+     "heat_ramp_stride": None,
+     "heat_ramp_step_interval": None,
+     "timestep": 0.001,
+     "ensemble": "NPT_membrane"},
+    {"name": "equil_stage_5",
+     "run_minimization": False,
+     "backbone_force_constant": 4184.0,
+     "sidechain_force_constant": 4184.0,
+     "nonprotein_force_constant": 4184.0,
+     "phosphorus_atoms_force_constant": 418.4,
+     "cis_double_bonds_force_constant": 418.4,
+     "glycerol_impropers_force_constant": 418.4,
+     "number_of_steps": 100000,
+     "heat_ramp_start": None,
+     "heat_ramp_stride": None,
+     "heat_ramp_step_interval": None,
+     "timestep": 0.001,
+     "ensemble": "NPT_membrane"},
+    {"name": "equil_stage_6",
+     "run_minimization": False,
+     "backbone_force_constant": 418.4,
+     "sidechain_force_constant": 418.4,
+     "nonprotein_force_constant": 418.4,
+     "phosphorus_atoms_force_constant": 209.2,
+     "cis_double_bonds_force_constant": 418.4,
+     "glycerol_impropers_force_constant": 418.4,
+     "number_of_steps": 200000,
+     "heat_ramp_start": None,
+     "heat_ramp_stride": None,
+     "heat_ramp_step_interval": None,
+     "timestep": 0.002,
+     "ensemble": "NPT_membrane"},
+    {"name": "equil_stage_7",
+     "run_minimization": False,
+     "backbone_force_constant": 418.4,
+     "sidechain_force_constant": 0.0,
+     "nonprotein_force_constant": 0.0,
+     "phosphorus_atoms_force_constant": 41.84,
+     "cis_double_bonds_force_constant": 209.2,
+     "glycerol_impropers_force_constant": 209.2,
+     "number_of_steps": 200000,
+     "heat_ramp_start": None,
+     "heat_ramp_stride": None,
+     "heat_ramp_step_interval": None,
+     "timestep": 0.002,
+     "ensemble": "NPT_membrane"},
+    {"name": "equil_stage_8",
+     "run_minimization": False,
+     "backbone_force_constant": 0.0,
+     "sidechain_force_constant": 0.0,
+     "nonprotein_force_constant": 0.0,
+     "phosphorus_atoms_force_constant": 0.0,
+     "cis_double_bonds_force_constant": 0.0,
+     "glycerol_impropers_force_constant": 0.0,
+     "number_of_steps": 500000,
+     "heat_ramp_start": None,
+     "heat_ramp_stride": None,
+     "heat_ramp_step_interval": None,
+     "timestep": 0.002,
+     "ensemble": "NPT_membrane"},
+]
 
 # ======================================================================
 #  Stage procedures (ordered, nestable; expand into stage items).
@@ -588,7 +743,8 @@ class Equilibration_globular_stage_procedure(Stage_procedure_base):
     align_selection_str: str = field(    
         default="protein and not type H")
     schedule: list[dict] = field(
-        default=Factory(lambda: [dict(row) for row in DEFAULT_GLOBULAR_EQUIL_SCHEDULE]),
+        default=Factory(lambda: [dict(row) \
+            for row in DEFAULT_GLOBULAR_EQUIL_SCHEDULE]),
         validator=validators.instance_of(list))
 
     def expand(
@@ -723,6 +879,220 @@ class Equilibration_globular_stage_procedure(Stage_procedure_base):
             ))
         return emitted_stages
 
+@define
+class Equilibration_membrane_stage_procedure(Stage_procedure_base):
+    """
+    Heat-ramp + progressive restraint-relaxation equilibration for a
+    membrane (or membrane-protein) system.
+
+    Protein restraints match the globular procedure. Lipid-specific
+    restraints follow CHARMM-GUI practice: phosphorus Z-only planar
+    restraints plus cis double-bond and glycerol C2 improper torsions.
+    There is no full-XYZ lipid headgroup restraint.
+    """
+    type: typing.Literal["equilibration_membrane"] = "equilibration_membrane"
+    reference_structure_filename: str | None = field(
+        default=None, validator=validators.optional(validators.instance_of(str)))
+    align_selection_str: str = field(
+        default="protein and not type H")
+    schedule: list[dict] = field(
+        default=Factory(lambda: [dict(row)
+            for row in DEFAULT_MEMBRANE_EQUIL_SCHEDULE]),
+        validator=validators.instance_of(list))
+
+    def expand(
+            self,
+            ctx: typing.Any,
+            input_stage_name: str = INITIAL,
+            ) -> list[Resolved_stage_item]:
+        target_temperature = getattr(ctx, "target_temperature", 298.15)
+        if self.reference_structure_filename is not None:
+            ref_mdtraj = mdtraj.load(self.reference_structure_filename)
+        else:
+            ref_mdtraj = mdtraj.load(ctx.md_structure_filename)
+        md_mdtraj = mdtraj.load(ctx.md_structure_filename)
+        ref_atom_indices, md_atom_indices = utilities_module\
+            .obtain_md_ref_structure_map(
+                ref_mdtraj, md_mdtraj, self.align_selection_str)
+
+        lipid_atoms = membrane_utils.identify_lipid_atoms(md_mdtraj)
+        phosphorus_indices = [int(i) for i in lipid_atoms["phosphorus"]]
+        cis_torsions = [
+            tuple(int(x) for x in t) for t in lipid_atoms["cis_double_bonds"]]
+        glycerol_impropers = [
+            tuple(int(x) for x in t)
+            for t in lipid_atoms["glycerol_impropers"]]
+        glycerol_theta0s = [
+            membrane_utils.glycerol_improper_theta0(md_mdtraj.xyz[0], improper)
+            for improper in glycerol_impropers]
+
+        PHOSPHORUS_SELECTION_NAME = "phosphorus_for_equilibration"
+        if phosphorus_indices:
+            ctx.selections["molecular_dynamics"][PHOSPHORUS_SELECTION_NAME] \
+                = phosphorus_indices
+            phosphorus_coordinates_filename = os.path.join(
+                ctx.root_directory,
+                f"{self.name}_phosphorus_restraint_coordinates.npy")
+            np.savetxt(
+                phosphorus_coordinates_filename,
+                md_mdtraj.xyz[0, phosphorus_indices])
+
+        items: list[Stage_item_base] = []
+        for row in self.schedule:
+            sampling = Conventional_sampling_spec()
+            if row.get("heat_ramp_start") is not None:
+                heat_ramp_start = float(row["heat_ramp_start"])
+                heat_ramp_end = target_temperature
+                heat_ramp_stride = float(row["heat_ramp_stride"])
+                heat_ramp_temperatures = np.arange(
+                    heat_ramp_start, heat_ramp_end, heat_ramp_stride)
+                sampling.heat_ramp_temperatures = heat_ramp_temperatures.tolist()
+                sampling.heat_ramp_temperatures.append(target_temperature)
+                sampling.heat_ramp_step_interval = int(
+                    row["heat_ramp_step_interval"])
+                number_of_steps = (
+                    int(row["heat_ramp_step_interval"])
+                    * len(sampling.heat_ramp_temperatures))
+            else:
+                number_of_steps = int(row["number_of_steps"])
+
+            restraints: list[Restraint_spec] = []
+
+            # Backbone restraints
+            backbone_selection = "protein and backbone and not element H"
+            protein_backbone_md_indices, protein_backbone_ref_indices \
+                = utilities_module.select_both_from_mdtraj_and_indices(
+                    md_mdtraj, md_atom_indices, ref_mdtraj, ref_atom_indices,
+                    backbone_selection)
+            BACKBONE_SELECTION_NAME = "backbone_for_equilibration"
+            assert len(protein_backbone_ref_indices) == len(
+                protein_backbone_md_indices), \
+                "Number of protein backbone atoms in solvated and unsolvated "\
+                "structures should be the same"
+            backbone_coordinates_filename = os.path.join(
+                ctx.root_directory,
+                f"{self.name}_backbone_restraint_coordinates.npy")
+            np.savetxt(
+                backbone_coordinates_filename,
+                ref_mdtraj.xyz[0, protein_backbone_ref_indices])
+            if row.get("backbone_force_constant", 0.0) > 0.0:
+                restraints.append(Positional_restraint_spec(
+                    selection_name=BACKBONE_SELECTION_NAME,
+                    force_constant=float(row["backbone_force_constant"]),
+                    coordinates_filename=backbone_coordinates_filename,
+                ))
+            ctx.selections["molecular_dynamics"][BACKBONE_SELECTION_NAME] \
+                = protein_backbone_md_indices
+
+            # Sidechain restraints
+            SIDECHAIN_SELECTION_NAME = "sidechain_for_equilibration"
+            sidechain_selection = "protein and sidechain and not element H"
+            protein_sidechain_md_indices, protein_sidechain_ref_indices \
+                = utilities_module.select_both_from_mdtraj_and_indices(
+                    md_mdtraj, md_atom_indices, ref_mdtraj, ref_atom_indices,
+                    sidechain_selection)
+            assert len(protein_sidechain_ref_indices) == len(
+                protein_sidechain_md_indices), \
+                "Number of protein sidechain atoms in solvated and unsolvated "\
+                "structures should be the same"
+            sidechain_coordinates_filename = os.path.join(
+                ctx.root_directory,
+                f"{self.name}_sidechain_restraint_coordinates.npy")
+            np.savetxt(
+                sidechain_coordinates_filename,
+                ref_mdtraj.xyz[0, protein_sidechain_ref_indices])
+            if row.get("sidechain_force_constant", 0.0) > 0.0:
+                restraints.append(Positional_restraint_spec(
+                    selection_name=SIDECHAIN_SELECTION_NAME,
+                    force_constant=float(row["sidechain_force_constant"]),
+                    coordinates_filename=sidechain_coordinates_filename,
+                ))
+            ctx.selections["molecular_dynamics"][SIDECHAIN_SELECTION_NAME] \
+                = protein_sidechain_md_indices
+
+            # Mapped nonprotein (ligand/cofactor) restraints — not lipid bilayer
+            NONPROTEIN_SELECTION_NAME = "nonprotein_for_equilibration"
+            nonprotein_selection = "not protein and not element H"
+            nonprotein_md_indices, nonprotein_ref_indices \
+                = utilities_module.select_both_from_mdtraj_and_indices(
+                    md_mdtraj, md_atom_indices, ref_mdtraj, ref_atom_indices,
+                    nonprotein_selection)
+            assert len(nonprotein_ref_indices) == len(nonprotein_md_indices), \
+                "Number of non-protein atoms in solvated and unsolvated "\
+                "structures should be the same"
+            nonprotein_coordinates_filename = os.path.join(
+                ctx.root_directory,
+                f"{self.name}_nonprotein_restraint_coordinates.npy")
+            np.savetxt(
+                nonprotein_coordinates_filename,
+                ref_mdtraj.xyz[0, nonprotein_ref_indices])
+            if row.get("nonprotein_force_constant", 0.0) > 0.0:
+                restraints.append(Positional_restraint_spec(
+                    selection_name=NONPROTEIN_SELECTION_NAME,
+                    force_constant=float(row["nonprotein_force_constant"]),
+                    coordinates_filename=nonprotein_coordinates_filename,
+                ))
+            ctx.selections["molecular_dynamics"][NONPROTEIN_SELECTION_NAME] \
+                = nonprotein_md_indices
+
+            # Lipid phosphorus Z-only
+            if (row.get("phosphorus_atoms_force_constant", 0.0) > 0.0
+                    and phosphorus_indices):
+                restraints.append(Z_restraint_spec(
+                    selection_name=PHOSPHORUS_SELECTION_NAME,
+                    force_constant=float(
+                        row["phosphorus_atoms_force_constant"]),
+                    coordinates_filename=phosphorus_coordinates_filename,
+                ))
+
+            # Cis double-bond torsions
+            if (row.get("cis_double_bonds_force_constant", 0.0) > 0.0
+                    and cis_torsions):
+                restraints.append(Torsion_restraint_spec(
+                    torsion_indices=cis_torsions,
+                    torsion_values=[0.0] * len(cis_torsions),
+                    force_constant=float(
+                        row["cis_double_bonds_force_constant"]),
+                ))
+
+            # Glycerol C2 improper torsions
+            if (row.get("glycerol_impropers_force_constant", 0.0) > 0.0
+                    and glycerol_impropers):
+                restraints.append(Torsion_restraint_spec(
+                    torsion_indices=glycerol_impropers,
+                    torsion_values=list(glycerol_theta0s),
+                    force_constant=float(
+                        row["glycerol_impropers_force_constant"]),
+                ))
+
+            items.append(MD_stage_item(
+                name=row["name"],
+                run_minimization=bool(row.get("run_minimization", False)),
+                ensemble=row["ensemble"],
+                sampling=sampling,
+                restraints=restraints,
+                completion=Number_of_steps_completion_spec(
+                    number_of_steps=number_of_steps),
+                timestep=float(row["timestep"]),
+                position_reporter_interval=self.position_reporter_interval,
+                ))
+        return _chain(items, input_stage_name)
+
+    def get_emitted_stages(self) -> list[Emitted_stage]:
+        emitted_stages = []
+        for i, row in enumerate(self.schedule):
+            if i > 0:
+                co_schedule_with = "predecessor"
+            else:
+                co_schedule_with = None
+            emitted_stages.append(
+                Emitted_stage(
+                    name=row["name"],
+                    role=row["name"],
+                    co_schedule_with=co_schedule_with
+            ))
+        return emitted_stages
+
 #@define
 #class Seeding_method_input:
 #    type: typing.Literal["base"] = "base"
@@ -754,6 +1124,8 @@ class Metadynamics_seeding_method_input: #(Seeding_method_input):
         default=250, validator=validators.instance_of(int))
     number_of_points: int = field(
         default=101, validator=validators.instance_of(int))
+    write_biases: bool = field(
+        default=False, validator=validators.instance_of(bool))
 
 Seeding_method_input = Steered_seeding_method_input \
                      | Metadynamics_seeding_method_input
@@ -786,31 +1158,50 @@ class Seeding_stage_procedure(Stage_procedure_base):
             ["NVT", "NPT", "NPT_membrane", "NVE"]))
     reporter_interval: int = field(
         default=100, validator=validators.instance_of(int))
-    
+    include_logistic_stage: bool = field(
+        default=True, validator=validators.instance_of(bool))
+    max_steps: int = field(
+        default=2000000000, validator=validators.instance_of(int))
 
     def get_emitted_stages(self) -> list[Emitted_stage]:
-        return [
-            Emitted_stage(name=f"{self.name}_seed", role="sampling"),
-            Emitted_stage(
+        sampling_stage = Emitted_stage(name=f"{self.name}_seed", role="sampling")
+        if self.include_logistic_stage:
+            logistic_stage = Emitted_stage(
                 name=f"{self.name}_assign_structures",
                 role="logistic",
-                co_schedule_with="predecessor"),
-        ]
+                co_schedule_with="predecessor")
+            return [sampling_stage, logistic_stage]
+        else:
+            return [sampling_stage]
 
     def expand(
             self,
             ctx: typing.Any,
             input_stage_name: str = INITIAL,
             ) -> list[Resolved_stage_item]:
-        seed_name, assign_name = self.get_stage_names()
-        reporter_name = f"{self.name}_anchor_reporter"
+        if self.include_logistic_stage:
+            seed_name = f"{self.name}_seed"
+            assign_name = f"{self.name}_assign_structures"
+            reporter_name = f"{self.name}_anchor_reporter"
+            completion_criteria = Reporter_progress_completion_spec(
+                reporter_name=reporter_name, 
+                interval=self.reporter_interval,
+                max_steps=self.max_steps)
+        else:
+            seed_name = f"{self.name}_seed"
+            assign_name = None
+            reporter_name = None
+            completion_criteria = Number_of_steps_completion_spec(
+                number_of_steps=self.max_steps)
+        
         if self.method_input.type == "metadynamics":
             sampling: Sampling_spec = Metadynamics_sampling_spec(
                 cv_names=list(self.cv_names), bias_factor=self.method_input.bias_factor,
                 gaussian_height=self.method_input.gaussian_height,
                 gaussian_width=self.method_input.gaussian_width,
                 steps_per_update=self.method_input.steps_per_update,
-                number_of_points=self.method_input.number_of_points)
+                number_of_points=self.method_input.number_of_points,
+                write_biases=self.method_input.write_biases)
         elif self.method_input.type == "steered":
             sampling = Steered_sampling_spec(
                 cv_names=list(self.cv_names),
@@ -823,17 +1214,20 @@ class Seeding_stage_procedure(Stage_procedure_base):
             scope="unpartitioned",
             ensemble=self.ensemble,
             sampling=sampling,
-            completion=Reporter_progress_completion_spec(
-                reporter_name=reporter_name, interval=self.reporter_interval),
+            completion=completion_criteria,
             reporter_name=reporter_name,
             position_reporter_interval=self.position_reporter_interval,
         )
-        logistic_stage = Logistic_anchor_from_reporter_stage_item(
+        if self.include_logistic_stage:
+            logistic_stage = Logistic_anchor_from_reporter_stage_item(
             name=assign_name,
             scope="partitioned",
             reporter_name=reporter_name,
         )
-        return _chain([seed_stage, logistic_stage], input_stage_name)
+        if self.include_logistic_stage:
+            return _chain([seed_stage, logistic_stage], input_stage_name)
+        else:
+            return _chain([seed_stage], input_stage_name)
 
 
 @define
@@ -1173,6 +1567,7 @@ def build_stage_to_procedure_map(
 
 Stage_procedure = (
     Explicit_stage_procedure | Equilibration_globular_stage_procedure
+    | Equilibration_membrane_stage_procedure
     | Seeding_stage_procedure | MMVT_stage_procedure | BD_stage_procedure
     | Composite_stage_procedure
 )

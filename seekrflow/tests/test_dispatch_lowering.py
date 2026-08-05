@@ -183,6 +183,98 @@ class TestInfoEnumeration:
             dl.build_run_units(["anchor"], counts)
 
 
+class TestFilterIncompleteUnits:
+    def test_drops_attained_anchors(self):
+        units = dl.build_run_units(["anchor"], _counts(num_anchors=4))
+        progress = {
+            0: {"progress": 1.0, "attained": True},
+            1: {"progress": 0.5, "attained": False},
+            "2": {"progress": 0.0, "attained": False},
+            # 3 missing → incomplete
+        }
+        kept = dl.filter_incomplete_units(units, progress)
+        assert [u.anchor for u in kept] == [1, 2, 3]
+
+    def test_stage_finished_returns_empty(self):
+        units = dl.build_run_units(["anchor"], _counts(num_anchors=3))
+        assert dl.filter_incomplete_units(
+            units, {}, stage_finished=True) == []
+
+    def test_force_overwrite_keeps_all(self):
+        units = dl.build_run_units(["anchor"], _counts(num_anchors=3))
+        progress = {0: {"attained": True}, 1: {"attained": True}, 2: {"attained": True}}
+        kept = dl.filter_incomplete_units(
+            units, progress, force_overwrite=True)
+        assert len(kept) == 3
+
+    def test_progress_one_without_attained(self):
+        units = [dl.RunUnit(anchor=0, swarm_id=None)]
+        assert dl.filter_incomplete_units(
+            units, {0: {"progress": 1.0}}) == []
+
+    def test_swarm_keys(self):
+        units = dl.build_run_units(
+            ["swarm"],
+            _counts(scope="unpartitioned", num_anchors=None, num_swarms=3))
+        progress = {
+            0: {"attained": True},
+            1: {"progress": 0.2},
+        }
+        kept = dl.filter_incomplete_units(units, progress)
+        assert [u.swarm_id for u in kept] == [1, 2]
+
+    def test_empty_progress_keeps_all(self):
+        units = dl.build_run_units(["anchor"], _counts(num_anchors=2))
+        assert len(dl.filter_incomplete_units(units, None)) == 2
+        assert len(dl.filter_incomplete_units(units, {})) == 2
+
+
+class TestLowerFromFilteredUnits:
+    def test_dense_array_from_subset(self):
+        units = [
+            dl.RunUnit(anchor=1, swarm_id=None),
+            dl.RunUnit(anchor=3, swarm_id=None),
+            dl.RunUnit(anchor=7, swarm_id=None),
+        ]
+        lowered = dl.lower_dispatch_from_units(units, group_size=1, concurrency=1)
+        assert lowered.n_members == 3
+        assert lowered.use_array
+        assert dl.array_member_indices(lowered) == [0, 1, 2]
+        assert [u.anchor for u in lowered.units] == [1, 3, 7]
+
+    def test_empty_units(self):
+        lowered = dl.lower_dispatch_from_units([], group_size=2, concurrency=1)
+        assert lowered.n_members == 0
+        assert lowered.units == ()
+        assert not lowered.use_array
+
+
+class TestFetchStageProgressLocal:
+    def test_parses_finished_and_map(self):
+        class _Stage:
+            name = "MMVT"
+            index = 2
+
+        def fake_status(model, instruction, stage_arg=None, print_json=True):
+            assert instruction == "progress"
+            return {
+                "progress": {
+                    2: {
+                        "finished": False,
+                        "progress": {
+                            0: {"attained": True, "progress": 1.0},
+                            1: {"attained": False, "progress": 0.1},
+                        },
+                    }
+                }
+            }
+
+        finished, pmap = dl.fetch_stage_progress_local(
+            None, _Stage(), status_fn=fake_status)
+        assert finished is False
+        assert 0 in pmap and pmap[0]["attained"] is True
+
+
 class TestCommandString:
     def test_single_unit_default(self):
         lowered = dl.lower_dispatch(None, None, 1, _counts())
@@ -200,3 +292,18 @@ class TestCommandString:
             output_filename="out.log")
         assert "SLURM_ARRAY_TASK_ID" in cmd
         assert "group_size = 2" in cmd
+        assert "out_${AWS_BATCH_JOB_ARRAY_INDEX" in cmd
+        assert cmd.rstrip().endswith(".log") or ".log" in cmd.split(">")[-1]
+
+    def test_filtered_units_embedded_in_driver(self):
+        units = [
+            dl.RunUnit(anchor=2, swarm_id=None),
+            dl.RunUnit(anchor=5, swarm_id=None),
+        ]
+        lowered = dl.lower_dispatch_from_units(units, group_size=1, concurrency=1)
+        cmd = dl.build_remote_command_string(
+            "MMVT", lowered, force_overwrite=False, benchmark=False,
+            output_filename="out.log")
+        # json.dumps embeds null for swarm_id=None
+        assert "[[2, null], [5, null]]" in cmd
+        assert "group_size = 1" in cmd
