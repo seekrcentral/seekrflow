@@ -54,7 +54,11 @@ def transfer_files_to_from_remote_resource(
             local_directory, s3_uri, input_tarball_name, resource.region, 
             backwards=backwards)
 
+    elif resource.transfer_settings.type == "none":
+        # Files already reside on the execution host (e.g. login-node Slurm).
+        return
+
     else:
         raise NotImplementedError(
-            "Only rsync, globus, and aws_s3 transfers are implemented.")
+            "Only rsync, globus, aws_s3, and none transfers are implemented.")
     return

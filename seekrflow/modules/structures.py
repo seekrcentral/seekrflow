@@ -108,6 +108,18 @@ class Remote_interface_globus_compute_sdk(Remote_interface_base):
     )
 
 @define
+class Remote_interface_local_shell(Remote_interface_base):
+    """
+    Local shell remote interface: run remote workflows on this host via
+    subprocess (e.g. HPC login node sharing Slurm/PBS with the cluster).
+    """
+    type: typing.Literal["local_shell"] = "local_shell"
+    python_executable: str = field(
+        default="python3",
+        validator=validators.instance_of(str),
+    )
+
+@define
 class Transfer_settings_base:
     """
     Base transfer settings class.
@@ -180,6 +192,13 @@ class Transfer_settings_aws_s3(Transfer_settings_base):
 
     def get_input_tarball_name(self):
         return INPUT_TARBALL_NAME
+
+@define
+class Transfer_settings_none(Transfer_settings_base):
+    """
+    No-op transfer: files are already on the execution host (e.g. login-node).
+    """
+    type: typing.Literal["none"] = "none"
 
 @define
 class Resource_base:
@@ -257,10 +276,18 @@ class Resource_remote_slurm(Resource_remote_base):
         default=1,
         validator=validators.instance_of(int),
     )
-    remote_interface: Remote_interface_globus_compute_sdk | Remote_interface_ssh = field(
+    remote_interface: (
+        Remote_interface_globus_compute_sdk
+        | Remote_interface_ssh
+        | Remote_interface_local_shell
+    ) = field(
         default=Factory(Remote_interface_globus_compute_sdk),
     )
-    transfer_settings: Transfer_settings_rsync | Transfer_settings_globus = field(
+    transfer_settings: (
+        Transfer_settings_rsync
+        | Transfer_settings_globus
+        | Transfer_settings_none
+    ) = field(
         default=Factory(Transfer_settings_globus),
     )
 
@@ -319,10 +346,18 @@ class Resource_remote_pbs(Resource_remote_base):
         validator=[validators.instance_of(int),
                             validators.ge(1)],
     )
-    remote_interface: Remote_interface_globus_compute_sdk | Remote_interface_ssh = field(
+    remote_interface: (
+        Remote_interface_globus_compute_sdk
+        | Remote_interface_ssh
+        | Remote_interface_local_shell
+    ) = field(
         default=Factory(Remote_interface_globus_compute_sdk),
     )
-    transfer_settings: Transfer_settings_rsync | Transfer_settings_globus = field(
+    transfer_settings: (
+        Transfer_settings_rsync
+        | Transfer_settings_globus
+        | Transfer_settings_none
+    ) = field(
         default=Factory(Transfer_settings_globus),
     )
 

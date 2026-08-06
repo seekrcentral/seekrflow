@@ -1,0 +1,146 @@
+{
+    "name": "host_guest_example",
+    "structure_version": "1.5",
+    "workflow": {
+        "type": "workflow",
+        "structure_version": "1.1",
+        "components": {
+            "members": [
+                {
+                    "name": "host",
+                    "selector": {
+                        "type": "resname",
+                        "resname": "MGO",
+                        "include_hydrogens": true
+                    },
+                    "type": "small_molecule"
+                },
+                {
+                    "name": "guest",
+                    "selector": {
+                        "type": "resname",
+                        "resname": "APN",
+                        "include_hydrogens": true
+                    },
+                    "type": "small_molecule"
+                }
+            ],
+            "group_selectors": []
+        },
+        "cv_specs": [
+            {
+                "name": "distance_host_guest",
+                "type": "com_com_distance",
+                "group1_selection_name": "host",
+                "group2_selection_name": "guest",
+                "min_value": 0.0,
+                "max_value": 1.4
+            }
+        ],
+        "anchor_spec": {
+            "type": "uniform",
+            "n_anchors": 14
+        },
+        "procedure": {
+            "name": "full_procedure",
+            "position_reporter_interval": null,
+            "type": "composite",
+            "procedures": [
+                {
+                    "name": "metadynamics",
+                    "position_reporter_interval": null,
+                    "type": "seeding",
+                    "method_input": {
+                        "type": "metadynamics",
+                        "bias_factor": 10.0,
+                        "gaussian_height": 0.1,
+                        "gaussian_width": 0.1,
+                        "steps_per_update": 250,
+                        "number_of_points": 101
+                    },
+                    "cv_names": [
+                        "distance_host_guest"
+                    ],
+                    "ensemble": "NVT",
+                    "reporter_interval": 100
+                },
+                {
+                    "name": "MMVT",
+                    "position_reporter_interval": null,
+                    "type": "mmvt",
+                    "ensemble": "NVT",
+                    "number_of_steps": 250000,
+                    "checkpoint_interval": 5000
+                }
+            ]
+        },
+        "scale_settings": [
+            {
+                "type": "molecular_dynamics",
+                "system": {
+                    "parameters_topology": {
+                        "type": "Amber",
+                        "prmtop_filename": "/home/lvotapka/seekrflow/seekrflow/examples/host_guest/params_and_structures/BCD_1-butanol.parm7",
+                        "inpcrd_filename": null
+                    },
+                    "solvated_pdb": "/home/lvotapka/seekrflow/seekrflow/examples/host_guest/params_and_structures/BCD_1-butanol.pdb"
+                },
+                "nonbonded_method": "pme",
+                "nonbonded_cutoff": 0.9,
+                "constraints": "hbonds",
+                "hydrogen_mass": 3.0,
+                "timestep": 0.004,
+                "friction_coefficient": 1.0,
+                "integrator_type": "langevinMiddle",
+                "platform_type": "cuda"
+            }
+        ],
+        "plugins": []
+    },
+    "physical_attributes": {
+        "temperature": 298.15,
+        "pressure": null,
+        "ionic_strength": 0.0,
+        "random_seed": 111
+    },
+    "work_directory": "~/tmp/seekrflow_hostguest_example/",
+    "root_directory": null,
+    "parameterizer": null,
+    "run_settings": {
+        "resources": [
+            {
+                "type": "slurm_remote",
+                "name": "head_node_slurm",
+                "remote_working_directory": "N/A",
+                "partition": "gpu",
+                "account": "dummy",
+                "constraint": null,
+                "nodes_per_block": 1,
+                "cpus_per_task": 2,
+                "memory_per_node": 6400,
+                "time_limit": "12:00:00",
+                "scheduler_options": "--gres gpu:1",
+                "worker_init": "source /home/lvotapka/.bashrc && mamba activate SEEKR3",
+                "remote_interface": {
+                    "type": "local_shell"
+                },
+                "transfer_settings": {
+                    "type": "none"
+                }
+            }
+        ],
+        "placements": [
+            {
+                "target": [],
+                "resource": "head_node_slurm",
+                "dispatch": null,
+                "co_schedule_with": null,
+                "cpus": null,
+                "memory_mb": null,
+                "time_limit": null,
+                "mps": null,
+                "time_policy": null
+            }
+        ]
+    }
+}

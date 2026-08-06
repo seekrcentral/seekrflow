@@ -16,6 +16,7 @@ import seekrflow.modules.workload_managers.aws as workload_aws
 import seekrflow.modules.workload_managers.dispatch_lowering as dispatch_lowering
 import seekrflow.modules.remote_interfaces.globus_compute_sdk as remote_globus
 import seekrflow.modules.remote_interfaces.ssh as remote_ssh
+import seekrflow.modules.remote_interfaces.local_shell as remote_local_shell
 
 
 def resource_kind(resource: structures.Resource_base | None) -> str:
@@ -154,6 +155,12 @@ def submit_remote_workflow(
                 resource.name, workflow, args,  
                 hostname, username, password, port,
                 private_key_filename, private_key_passphrase)
+    elif resource.remote_interface.type == "local_shell":
+        result = remote_local_shell\
+            .submit_remote_workflow_with_local_shell(
+                resource.name, workflow, args,
+                python_executable=resource.remote_interface.python_executable,
+                silent=silent)
     else:
         raise NotImplementedError(
             f"Remote interface type not implemented: "\
