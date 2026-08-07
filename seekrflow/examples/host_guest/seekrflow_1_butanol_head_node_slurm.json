@@ -111,7 +111,7 @@
             {
                 "type": "slurm_remote",
                 "name": "head_node_slurm",
-                "remote_working_directory": "N/A",
+                "remote_working_directory": "",
                 "partition": "gpu",
                 "account": "dummy",
                 "constraint": null,

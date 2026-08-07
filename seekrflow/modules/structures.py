@@ -222,6 +222,21 @@ class Resource_remote_base(Resource_base):
     """
     pass
 
+
+def _validate_local_shell_transfer_none(resource: Resource_remote_base) -> None:
+    """local_shell requires transfer_settings.type == 'none'."""
+    remote_interface = getattr(resource, "remote_interface", None)
+    transfer_settings = getattr(resource, "transfer_settings", None)
+    if remote_interface is None or transfer_settings is None:
+        return
+    if remote_interface.type == "local_shell" and transfer_settings.type != "none":
+        raise ValueError(
+            f"Resource {getattr(resource, 'name', '')!r} uses "
+            f"remote_interface type 'local_shell' but transfer_settings "
+            f"type is {transfer_settings.type!r}; must be 'none'."
+        )
+
+
 @define
 class Resource_remote_slurm(Resource_remote_base):
     """
@@ -290,6 +305,9 @@ class Resource_remote_slurm(Resource_remote_base):
     ) = field(
         default=Factory(Transfer_settings_globus),
     )
+
+    def __attrs_post_init__(self) -> None:
+        _validate_local_shell_transfer_none(self)
 
 @define
 class Resource_remote_pbs(Resource_remote_base):
@@ -360,6 +378,9 @@ class Resource_remote_pbs(Resource_remote_base):
     ) = field(
         default=Factory(Transfer_settings_globus),
     )
+
+    def __attrs_post_init__(self) -> None:
+        _validate_local_shell_transfer_none(self)
 
 @define
 class Resource_cloud_base(Resource_base):

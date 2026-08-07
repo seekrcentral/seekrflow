@@ -111,6 +111,22 @@ def calculate_optimal_time_limit(
     return resource.time_limit
 
 
+def resolve_remote_model_directory(
+        seekrflow: structures.Seekrflow,
+        resource: structures.Resource_base,
+        ) -> str:
+    """
+    Return the model root used by remote SLURM/PBS workflows.
+
+    For ``local_shell``, ignore ``remote_working_directory`` and use the same
+    local root prepare already writes (``seekrflow.get_root_directory()``).
+    Otherwise use ``remote_working_directory / seekrflow.name``.
+    """
+    if resource.remote_interface.type == "local_shell":
+        return str(seekrflow.get_root_directory())
+    return os.path.join(resource.remote_working_directory, seekrflow.name)
+
+
 def submit_remote_workflow(
         seekrflow: structures.Seekrflow,
         resource_name: str,
@@ -124,8 +140,7 @@ def submit_remote_workflow(
     """
     resource: structures.Resource_remote_base \
         = seekrflow.run_settings.get_resource_by_name(resource_name)
-    destination_path = os.path.join(
-        resource.remote_working_directory, seekrflow.name)
+    destination_path = resolve_remote_model_directory(seekrflow, resource)
     if resource.type == "slurm_remote":
         args = [destination_path]
         if extra_args is not None:

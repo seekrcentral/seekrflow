@@ -687,9 +687,9 @@ class StageWorkflow:
                     destination_path = None
                     destination_model_filename = None
                     if remote_or_cloud == "remote":
-                        destination_path = os.path.join(
-                            self.resource.remote_working_directory,
-                            self.seekrflow.name)
+                        destination_path = (
+                            workload_remote.resolve_remote_model_directory(
+                                self.seekrflow, self.resource))
                         destination_model_filename = os.path.join(
                             destination_path, "model.json")
 
