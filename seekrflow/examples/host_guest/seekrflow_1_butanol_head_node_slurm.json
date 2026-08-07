@@ -118,7 +118,7 @@
                 "nodes_per_block": 1,
                 "cpus_per_task": 2,
                 "memory_per_node": 6400,
-                "time_limit": "12:00:00",
+                "time_limit": "1:00:00",
                 "scheduler_options": "--gres gpu:1",
                 "worker_init": "source /home/lvotapka/.bashrc && mamba activate SEEKR3",
                 "remote_interface": {
