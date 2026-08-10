@@ -54,9 +54,7 @@ class TestValidation:
     def test_zero_swarms_raises(self):
         with pytest.raises(ValueError, match="num_swarms=0"):
             dl.resolve_unit_counts(
-                {"stage_name": "seed", "num_swarms": 0},
-                None,
-                input_is_initial=False)
+                {"stage_name": "ramd_procedure_ramd", "num_swarms": 0})
 
 
 class TestArraySpecMath:
@@ -105,72 +103,68 @@ class TestInfoEnumeration:
         entry = dl.extract_info_entry(message, stage_name="MMVT")
         assert entry["num_anchors"] == 8
 
-    def test_input_stage_query(self):
+    def test_queries_launching_stage_not_input(self):
         class _Stage:
-            name = "MMVT"
-            index = 4
-            input_stage_index = 3
+            name = "ramd_procedure_ramd"
+            index = 3
+            input_stage_index = 2
 
         calls = []
 
         def fake_status(model, instruction, stage_arg, print_json=True):
             calls.append(stage_arg)
             if stage_arg == 3:
-                return {"info": {"3": {
-                    "stage_name": "seed",
-                    "scope": "partitioned",
-                    "num_anchors": 8,
-                    "num_swarms": 2,
-                }}}
+                return {"info": {
+                    "2": {
+                        "stage_name": "ramd_procedure_assign_swarm",
+                        "scope": "unpartitioned",
+                        "num_anchors": None,
+                        "num_swarms": 1,
+                    },
+                    "3": {
+                        "stage_name": "ramd_procedure_ramd",
+                        "scope": "unpartitioned",
+                        "num_anchors": None,
+                        "num_swarms": 100,
+                    },
+                }}
             raise AssertionError(stage_arg)
 
         counts = dl.fetch_unit_counts_local(None, _Stage(), status_fn=fake_status)
         assert calls == [3]
-        assert counts.num_swarms == 2
-        assert counts.num_anchors == 8
+        assert counts.num_swarms == 100
+        assert counts.scope == "unpartitioned"
+        assert counts.num_anchors is None
+        units = dl.build_run_units(["swarm"], counts)
+        assert len(units) == 100
 
-    def test_initial_stage_uses_launching_scope(self):
+    def test_launching_stage_scope_and_anchors(self):
         class _Stage:
             name = "MMVT"
             index = 2
             input_stage_index = 0
 
         def fake_status(model, instruction, stage_arg, print_json=True):
-            if stage_arg == 0:
-                return {"info": {"0": {
-                    "stage_name": "initial",
-                    "scope": "N/A",
-                    "num_anchors": 12,
-                    "num_swarms": 3,
-                }}}
-            if stage_arg == 2:
-                return {"info": {"2": {
-                    "stage_name": "MMVT",
-                    "scope": "partitioned",
-                    "num_anchors": 8,
-                    "num_swarms": 1,
-                }}}
-            raise AssertionError(stage_arg)
+            assert stage_arg == 2
+            return {"info": {"2": {
+                "stage_name": "MMVT",
+                "scope": "partitioned",
+                "num_anchors": 8,
+                "num_swarms": 1,
+            }}}
 
         counts = dl.fetch_unit_counts_local(None, _Stage(), status_fn=fake_status)
-        assert counts.num_swarms == 3
+        assert counts.num_swarms == 1
         assert counts.scope == "partitioned"
         assert counts.num_anchors == 8
 
-    def test_initial_unpartitioned_launch_rejects_anchor(self):
+    def test_unpartitioned_launch_rejects_anchor(self):
         class _Stage:
             name = "bd"
             index = 1
             input_stage_index = 0
 
         def fake_status(model, instruction, stage_arg, print_json=True):
-            if stage_arg == 0:
-                return {"info": {"0": {
-                    "stage_name": "initial",
-                    "scope": "N/A",
-                    "num_anchors": 12,
-                    "num_swarms": 2,
-                }}}
             return {"info": {"1": {
                 "stage_name": "bd",
                 "scope": "unpartitioned",
@@ -181,6 +175,16 @@ class TestInfoEnumeration:
         counts = dl.fetch_unit_counts_local(None, _Stage(), status_fn=fake_status)
         with pytest.raises(ValueError, match="partitioned"):
             dl.build_run_units(["anchor"], counts)
+
+    def test_parse_info_fetch_output_uses_launching(self):
+        stdout = (
+            '__SEEKR_INFO__{"ok": true, "launching_info": {'
+            '"stage_name": "ramd_procedure_ramd", "scope": "unpartitioned", '
+            '"num_anchors": null, "num_swarms": 100}}'
+        )
+        counts = dl.parse_info_fetch_output(stdout)
+        assert counts.num_swarms == 100
+        assert counts.scope == "unpartitioned"
 
 
 class TestFilterIncompleteUnits:

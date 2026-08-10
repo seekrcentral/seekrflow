@@ -270,7 +270,7 @@ def remote_run_python_snippet_workflow(args):
     try:
         proc = subprocess.run(["bash", "-lc", cmd],
                               cwd=str(pathlib.Path(working_dir)),
-                              capture_output=True, text=True, timeout=120)
+                              capture_output=True, text=True, timeout=1200) #120)
         return {"success": True, "error": None, "stdout": proc.stdout,
                 "stderr": proc.stderr, "returncode": proc.returncode}
     except Exception as e:
@@ -290,13 +290,11 @@ def fetch_unit_counts_remote(
         raise NotImplementedError(
             f"Resource type {resource.type} is not implemented.")
 
-    input_stage_index = getattr(launching_stage, "input_stage_index", 0)
     launching_stage_index = getattr(
         launching_stage, "index", launching_stage.name)
     snippet = dispatch_lowering.build_info_fetch_snippet(
         "model.json",
         launching_stage.name,
-        input_stage_index,
         launching_stage_index,
     )
     extra_args = [

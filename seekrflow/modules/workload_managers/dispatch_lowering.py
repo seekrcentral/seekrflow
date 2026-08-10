@@ -77,41 +77,31 @@ def _coerce_optional_int(value: typing.Any) -> int | None:
         return None
 
 
-def resolve_unit_counts(
-        input_info: dict,
-        launching_info: dict | None,
-        *,
-        input_is_initial: bool,
-        ) -> StageUnitCounts:
+def resolve_unit_counts(launching_info: dict) -> StageUnitCounts:
     """
-    Merge ``info`` results for the input stage and (when needed) the launching
-    stage into counts for array sizing.
+    Build array-sizing counts from the launching stage's seekr ``info``.
+
+    Seekr's ``info`` for the launching stage already counts structures
+    reachable via that stage's ``input_stage_index``, so ``num_swarms`` /
+    ``num_anchors`` / ``scope`` all come from the launching entry — not from
+    the input stage's own self-description.
     """
-    num_swarms = _coerce_optional_int(input_info.get("num_swarms"))
+    num_swarms = _coerce_optional_int(launching_info.get("num_swarms"))
     if num_swarms is None:
         num_swarms = 0
     if num_swarms == 0:
-        input_name = input_info.get("stage_name", "<input>")
+        launch_name = launching_info.get("stage_name", "<launching>")
         raise ValueError(
-            f"Input stage {input_name!r} has num_swarms=0 — it has not "
-            f"produced structures yet; cannot launch the downstream stage.")
+            f"Launching stage {launch_name!r} has num_swarms=0 — input "
+            f"structures are not available yet.")
 
-    if input_is_initial:
-        if launching_info is None:
-            raise ValueError(
-                "Launching-stage info is required when input_stage_index is 0.")
-        scope = str(launching_info.get("scope", ""))
-        num_anchors = _coerce_optional_int(launching_info.get("num_anchors"))
-    else:
-        scope = str(input_info.get("scope", ""))
-        num_anchors = _coerce_optional_int(input_info.get("num_anchors"))
-
+    scope = str(launching_info.get("scope", ""))
     if scope.upper() == "N/A":
         scope = "unpartitioned"
 
     return StageUnitCounts(
         scope=scope,
-        num_anchors=num_anchors,
+        num_anchors=_coerce_optional_int(launching_info.get("num_anchors")),
         num_swarms=num_swarms,
     )
 
@@ -393,12 +383,11 @@ def needs_unit_enumeration(dimensions: list[str] | None) -> bool:
 def build_info_fetch_snippet(
         model_filename: str,
         launching_stage_name: str,
-        input_stage_index: int,
-        launching_stage_index: int,
+        launching_stage_index: int | str,
         ) -> str:
     """
-    Python snippet (no shebang) that fetches ``info`` for unit enumeration and
-    prints ``__SEEKR_INFO__`` + JSON on stdout.
+    Python snippet (no shebang) that fetches launching-stage ``info`` for unit
+    enumeration and prints ``__SEEKR_INFO__`` + JSON on stdout.
     """
     lines = [
         "import json, sys",
@@ -407,30 +396,17 @@ def build_info_fetch_snippet(
         "    import seekr.status as st",
         f"    model = S.load_model({model_filename!r})",
         f"    launching_name = {launching_stage_name!r}",
-        f"    input_index = {input_stage_index}",
-        f"    launching_index = {launching_stage_index}",
-        "    def _entry(msg, stage_name=None):",
+        f"    launching_index = {launching_stage_index!r}",
+        "    def _entry(msg, stage_name):",
         "        info = msg.get('info') or {}",
-        "        if stage_name is not None:",
-        "            for v in info.values():",
-        "                if isinstance(v, dict) and v.get('stage_name') == stage_name:",
-        "                    return v",
-        "            raise KeyError(stage_name)",
-        "        return next(iter(info.values()))",
-        "    input_msg = st.status(model, instruction='info',",
-        "        stage_arg=input_index if input_index else 0, print_json=True)",
-        "    input_info = _entry(input_msg)",
-        "    launching_info = None",
-        "    if input_index == 0:",
-        "        launch_msg = st.status(model, instruction='info',",
-        "            stage_arg=launching_index, print_json=True)",
-        "        launching_info = _entry(launch_msg, launching_name)",
-        "    payload = {",
-        "        'ok': True,",
-        "        'input_info': input_info,",
-        "        'launching_info': launching_info,",
-        "        'input_is_initial': input_index == 0,",
-        "    }",
+        "        for v in info.values():",
+        "            if isinstance(v, dict) and v.get('stage_name') == stage_name:",
+        "                return v",
+        "        raise KeyError(stage_name)",
+        "    launch_msg = st.status(model, instruction='info',",
+        "        stage_arg=launching_index, print_json=True)",
+        "    launching_info = _entry(launch_msg, launching_name)",
+        "    payload = {'ok': True, 'launching_info': launching_info}",
         "    print('__SEEKR_INFO__' + json.dumps(payload))",
         "except Exception as e:",
         "    import traceback",
@@ -450,11 +426,11 @@ def parse_info_fetch_output(stdout: str) -> StageUnitCounts:
     if payload is None or not payload.get("ok"):
         raise RuntimeError(
             f"seekr info fetch failed: {payload!r}")
-    return resolve_unit_counts(
-        payload["input_info"],
-        payload.get("launching_info"),
-        input_is_initial=payload.get("input_is_initial", False),
-    )
+    launching_info = payload.get("launching_info")
+    if not isinstance(launching_info, dict):
+        raise RuntimeError(
+            f"seekr info fetch missing launching_info: {payload!r}")
+    return resolve_unit_counts(launching_info)
 
 
 def fetch_unit_counts_local(
@@ -463,36 +439,21 @@ def fetch_unit_counts_local(
         status_fn: typing.Callable[..., dict] | None = None,
         ) -> StageUnitCounts:
     """
-    Call seekr ``status(..., instruction='info')`` for the input stage (and
-    launching stage when the input is initial).
+    Call seekr ``status(..., instruction='info')`` for the launching stage.
     """
     if status_fn is None:
         import seekr.status as seekr_status
         status_fn = seekr_status.status
 
-    input_index = getattr(launching_stage, "input_stage_index", 0)
-    input_is_initial = input_index == 0
-
-    if input_is_initial:
-        input_msg = status_fn(
-            model, instruction="info", stage_arg=0, print_json=True)
-        launching_msg = status_fn(
-            model,
-            instruction="info",
-            stage_arg=getattr(launching_stage, "index", launching_stage.name),
-            print_json=True,
-        )
-        input_info = extract_info_entry(input_msg)
-        launching_info = extract_info_entry(
-            launching_msg, stage_name=launching_stage.name)
-        return resolve_unit_counts(
-            input_info, launching_info, input_is_initial=True)
-
-    input_msg = status_fn(
-        model, instruction="info", stage_arg=input_index, print_json=True)
-    input_info = extract_info_entry(input_msg)
-    return resolve_unit_counts(
-        input_info, None, input_is_initial=False)
+    launching_msg = status_fn(
+        model,
+        instruction="info",
+        stage_arg=getattr(launching_stage, "index", launching_stage.name),
+        print_json=True,
+    )
+    launching_info = extract_info_entry(
+        launching_msg, stage_name=launching_stage.name)
+    return resolve_unit_counts(launching_info)
 
 
 def build_remote_command_string(

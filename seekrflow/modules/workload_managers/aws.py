@@ -495,17 +495,20 @@ for stage_name in {stages_repr}:
 
     # ``info`` is optional for monitor health: older seekr images lack it.
     # Keep progress publishing working even when info is unsupported.
+    # Store the full multi-stage info map so downstream clients can size
+    # arrays from the *launching* stage entry (not only this stage's).
+    info_map = None
     try:
         info_msg = seekr_status.status(
-            model, instruction="info", stage_arg=stage_name, print_json=True)
+            model, instruction="info", print_json=True)
         if isinstance(info_msg, str):
             info_msg = json.loads(info_msg)
-        info_entry = _match_stage_entry(info_msg.get("info", {{}}), stage_name)
-        if not info_entry and isinstance(info_msg.get("info"), dict):
-            _vals = [v for v in info_msg["info"].values() if isinstance(v, dict)]
-            if len(_vals) == 1:
-                info_entry = _vals[0]
+        info_map = info_msg.get("info", {{}})
+        if not isinstance(info_map, dict):
+            info_map = {{}}
+        info_entry = _match_stage_entry(info_map, stage_name)
     except Exception as _info_err:
+        info_map = None
         info_entry = None
         _info_note = f"info unavailable: {{_info_err}}"
     else:
@@ -550,7 +553,7 @@ for stage_name in {stages_repr}:
     with open(f"/tmp/{{stage_name}}_dispatch.json", "w") as f:
         json.dump({{
             "version": 1,
-            "info": info_entry,
+            "info": info_map if info_map is not None else info_entry,
             "progress": stage_progress if stage_progress else None,
         }}, f)
 """.strip()
@@ -881,6 +884,30 @@ def _stage_name_for_index(model: typing.Any, stage_index: int) -> str:
         f"({[getattr(s, 'name', s) for s in stages]!r}).")
 
 
+def _launching_info_from_dispatch_payload(
+        info: typing.Any,
+        launching_stage_name: str,
+        ) -> dict | None:
+    """
+    Select the launching stage's info entry from a dispatch ``info`` field.
+
+    Accepts either a full multi-stage info map (preferred) or a legacy single
+    entry dict. Returns None when the launching stage cannot be resolved.
+    """
+    if not isinstance(info, dict) or not info:
+        return None
+    # Legacy single entry published for one stage only.
+    if "stage_name" in info and (
+            "num_swarms" in info or "num_anchors" in info or "scope" in info):
+        if info.get("stage_name") == launching_stage_name:
+            return info
+        return None
+    for value in info.values():
+        if isinstance(value, dict) and value.get("stage_name") == launching_stage_name:
+            return value
+    return None
+
+
 def fetch_unit_counts_cloud(
         resource: "structures.Resource_cloud_aws",
         seekrflow_name: str,
@@ -888,15 +915,22 @@ def fetch_unit_counts_cloud(
         launching_stage: typing.Any,
         ) -> "dispatch_lowering.StageUnitCounts":
     """
-    Unit counts for cloud dispatch from the input stage's S3 dispatch artifact.
+    Unit counts for cloud dispatch from the launching stage's seekr ``info``.
 
-    When the input is the prepared initial stage (index 0), fall back to local
-    seekr ``info`` — that tree is created on the client before the first upload.
+    Prefer a local ``info`` query on ``model``. Fall back to the input stage's
+    S3 ``*_dispatch.json``, which stores a full multi-stage info map so the
+    launching entry can be selected by name.
     """
     from seekrflow.modules.workload_managers import dispatch_lowering
 
+    try:
+        return dispatch_lowering.fetch_unit_counts_local(model, launching_stage)
+    except Exception:
+        pass
+
     input_index = getattr(launching_stage, "input_stage_index", 0)
     if input_index == 0:
+        # Initial input: local query is required (no upstream dispatch artifact).
         return dispatch_lowering.fetch_unit_counts_local(model, launching_stage)
 
     input_name = _stage_name_for_index(model, input_index)
@@ -905,7 +939,9 @@ def fetch_unit_counts_cloud(
     payload = download_stage_dispatch_from_s3(
         resource, seekrflow_name, input_name)
     info = (payload or {}).get("info") if payload else None
-    if not isinstance(info, dict) or not info:
+    launching_info = _launching_info_from_dispatch_payload(
+        info, launching_stage.name)
+    if launching_info is None:
         status_payload = _download_stage_status_from_s3(
             resource, seekrflow_name, input_name)
         status_state = None
@@ -914,7 +950,10 @@ def fetch_unit_counts_cloud(
         detail = (
             f"object missing at {uri}"
             if payload is None
-            else f"object exists at {uri} but info is empty/null"
+            else (
+                f"object exists at {uri} but launching stage "
+                f"{launching_stage.name!r} is not in info"
+            )
         )
         hint = ""
         if status_state == "completed":
@@ -923,7 +962,7 @@ def fetch_unit_counts_cloud(
                 f"usable dispatch artifact — it likely finished under an older "
                 f"seekrflow run script. Re-run that stage (e.g. -f {input_name} "
                 f"or its fusion host) with current seekrflow so the container "
-                f"publishes {input_name}_dispatch.json."
+                f"publishes {input_name}_dispatch.json with a full info map."
             )
         else:
             hint = (
@@ -931,10 +970,10 @@ def fetch_unit_counts_cloud(
                 f"seekrflow so the container publishes {input_name}_dispatch.json."
             )
         raise RuntimeError(
-            f"Missing S3 dispatch info for input stage {input_name!r} "
+            f"Missing S3 dispatch info for launching stage "
+            f"{launching_stage.name!r} via input {input_name!r} "
             f"({detail}; key={key}).{hint}")
-    return dispatch_lowering.resolve_unit_counts(
-        info, None, input_is_initial=False)
+    return dispatch_lowering.resolve_unit_counts(launching_info)
 
 
 def fetch_stage_progress_cloud(

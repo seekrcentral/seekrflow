@@ -1400,8 +1400,11 @@ class RAMD_stage_procedure(Stage_procedure_base):
             ensemble=self.ensemble,
             sampling=ramd_sampling,
             completion=CV_value_attained_completion_spec(
-                cv_name=self.escape_cv_name, cv_inequality="greater_than", 
-                cv_value=self.escape_distance,),
+                eval_interval=self.steps_per_update,
+                cv_name=self.escape_cv_name,
+                cv_inequality="greater_than",
+                cv_value=self.escape_distance,
+            ),
             position_reporter_interval=self.position_reporter_interval,
         )
         return _chain([sampling_stage, logistic_stage, ramd_stage], input_stage_name)

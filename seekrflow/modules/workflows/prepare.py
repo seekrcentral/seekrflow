@@ -257,6 +257,7 @@ def _map_completion(completion: typing.Any) -> typing.Any:
             as completion_criteria_structures
         return completion_criteria_structures\
                 .CV_value_attained_completion_criteria(
+            eval_interval=completion.eval_interval,
             cv_name=completion.cv_name,
             cv_inequality=completion.cv_inequality,
             cv_value=completion.cv_value)
