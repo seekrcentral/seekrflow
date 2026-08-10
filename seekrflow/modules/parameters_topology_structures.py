@@ -323,7 +323,11 @@ class Openmm_system:
         """
         assert pdb_filename != "", "pdb_filename must be defined."
         assert self.system_filename != "", "system_filename must be defined."
-        full_system_filename = os.path.join(directory, self.system_filename)
+        if os.path.isabs(self.system_filename):
+            full_system_filename = self.system_filename
+        else:
+            full_system_filename = os.path.join(
+                directory, self.system_filename)
         pdb = openmm_app.PDBFile(pdb_filename)
         with open(full_system_filename) as f:
             system = openmm.XmlSerializer.deserialize(f.read())

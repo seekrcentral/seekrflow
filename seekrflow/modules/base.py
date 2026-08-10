@@ -175,7 +175,9 @@ def make_ligand_openmm_and_mdtraj_top(
     from openff.units.openmm import to_openmm
     assert os.path.splitext(ligand_sdf_filename)[-1].lower() == ".sdf", \
         "Ligand SDF file must have a .sdf extension."
-    suppl = Chem.SDMolSupplier(ligand_sdf_filename)
+    # SDMolSupplier defaults to removeHs=True, which strips explicit
+    # hydrogens and breaks the atom-count match against the ligand PDB.
+    suppl = Chem.SDMolSupplier(ligand_sdf_filename, removeHs=False)
     mols = [x for x in suppl if x is not None]
     mol = mols[0]
     if draw_ligand:
@@ -187,7 +189,12 @@ def make_ligand_openmm_and_mdtraj_top(
     ligand_pdb = parmed.load_file(str(ligand_pdb_filename), skip_bonds=True)
     ligand_positions_in_A_pdb = ligand_pdb.coordinates
     conf = mol.GetConformer()
-    assert ligand_positions_in_A_pdb.shape[0] == mol.GetNumAtoms()
+    assert ligand_positions_in_A_pdb.shape[0] == mol.GetNumAtoms(), (
+        f"Ligand PDB has {ligand_positions_in_A_pdb.shape[0]} atoms but SDF "
+        f"mol has {mol.GetNumAtoms()} (file={ligand_sdf_filename!r}). "
+        "Atom counts must match so PDB coordinates can be copied onto the "
+        "SDF conformer."
+    )
     for i in range(mol.GetNumAtoms()):
         conf.SetAtomPosition(i, Point3D(ligand_positions_in_A_pdb[i,0],
                                         ligand_positions_in_A_pdb[i,1],

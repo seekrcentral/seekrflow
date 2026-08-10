@@ -55,8 +55,14 @@ _RICH_CONSOLE = Console()
 
 KEYSTROKE_CHECK_INTERVAL = 1.0 # seconds
 MAIN_LOOP_INTERVAL = 30.0 # 600.0  # seconds
+# Legacy counter kept on StageWorkflow for status snapshots; remote idle
+# handling no longer loops no-progress resubmits (see idle-incomplete path).
 MAX_SUBSEQUENT_NONCOMPLETED_RUNS = 3
-IDLE_INCOMPLETE_CHECKS_BEFORE_RESUBMIT = 3
+# Consecutive *clean* readings of scheduler-empty + unfinished before acting.
+IDLE_INCOMPLETE_CHECKS_BEFORE_ACTION = 12
+# Spacing between those idle-incomplete polls only (active jobs use
+# POLLING_INTERVAL). Gives slow Globus/status updates time to catch up.
+IDLE_INCOMPLETE_POLL_INTERVAL = 30.0  # seconds
 COMPLETED_DRAIN_CHECKS = 3
 SHUTDOWN_CANCEL_TIMEOUT = 30.0
 ENGINE_SHUTDOWN_TIMEOUT = 15.0
@@ -65,6 +71,19 @@ POLLING_INTERVAL = 5.0  # seconds
 STATUS_WRITE_INTERVAL = 5.0  # seconds
 STATUS_FILE_NAME = ".seekrflow_job_status.json"
 STATUS_SCHEMA_VERSION = 1
+
+
+async def _run_blocking(fn: typing.Callable[..., typing.Any], *args, **kwargs):
+    """
+    Run a blocking callable off the asyncio event loop (thread pool).
+
+    Used for Globus / remote status and submit calls so the UI keystroke
+    loop and Live display stay responsive while endpoints are slow.
+    """
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        None, lambda: fn(*args, **kwargs))
+
 
 combine_fused_commands = co_schedule_fusion.combine_fused_commands
 populate_fusion_map = co_schedule_fusion.populate_fusion_map
@@ -535,10 +554,12 @@ class StageWorkflow:
             member_statuses: dict[str, dict | None] = {}
             for stage_name in co_schedule_fusion.fused_set_members(self):
                 try:
-                    member_statuses[stage_name] = workload_remote.status_remote(
+                    member_statuses[stage_name] = await _run_blocking(
+                        workload_remote.status_remote,
                         self.seekrflow,
                         stage_name,
                         self.model,
+                        silent=False,
                         benchmark_mode=self.benchmark_mode,
                         host_stage_name=self.stage.name,
                         announce_failure=False,
@@ -552,7 +573,8 @@ class StageWorkflow:
                 member_statuses, self.stage.name)
             return action, member_statuses.get(self.stage.name)
         try:
-            status = workload_remote.status_remote(
+            status = await _run_blocking(
+                workload_remote.status_remote,
                 self.seekrflow,
                 self.stage.name,
                 self.model,
@@ -844,7 +866,8 @@ class StageWorkflow:
                                 stages_in_job,
                                 progress_by_stage=progress_by_stage,
                             )
-                        run_result = workload_remote.submit_remote_run_workflow(
+                        run_result = await _run_blocking(
+                            workload_remote.submit_remote_run_workflow,
                             self.seekrflow,
                             self.stage.name,
                             destination_path or "",
@@ -932,7 +955,8 @@ class StageWorkflow:
                                 )
                             persist_work_baselines_for_submit(
                                 self, stages_in_job)
-                        run_result = workload_remote.submit_remote_run_workflow(
+                        run_result = await _run_blocking(
+                            workload_remote.submit_remote_run_workflow,
                             self.seekrflow,
                             self.stage.name,
                             destination_path,
@@ -1050,7 +1074,8 @@ class StageWorkflow:
 
                 status = None
                 try:
-                    status = workload_remote.status_remote(
+                    status = await _run_blocking(
+                        workload_remote.status_remote,
                         self.seekrflow,
                         self.stage.name,
                         self.model,
@@ -1090,6 +1115,9 @@ class StageWorkflow:
                         scheduler_active = scheduler_active or host_active
                     remote_scheduler_active = scheduler_active
                     if not status_ok:
+                        # Unclean reading: do not fail or count toward
+                        # idle-incomplete grace. Retry until we get a
+                        # successful status payload.
                         remote_err = (
                             status.get("error")
                             or stage_status.get("notes", ""))
@@ -1099,73 +1127,79 @@ class StageWorkflow:
                             print(
                                 f"[remote-status] stage {self.stage.name}: "
                                 f"progress check failed (job still in "
-                                f"scheduler): {display_err}"
+                                f"scheduler); will retry: {display_err}"
                             )
                         else:
                             print(
                                 f"[remote-status] stage {self.stage.name}: "
-                                f"progress check failed and no active jobs: "
-                                f"{display_err}"
+                                f"progress check failed with idle "
+                                f"scheduler; not counting toward grace "
+                                f"(will retry): {display_err}"
                             )
-                            self.state = "failed"
-                    else:
-                        self.state = stage_status.get("state", self.state)
-                        self.progress = stage_status.get(
-                            "progress", self.progress)
-                        # Only submit-capable remote stages may resubmit.
-                        if self.fusion_host is None:
-                            if fused_host_name is not None:
-                                set_incomplete = not (
-                                    co_schedule_fusion.fused_set_completed(
-                                        fused_host_name,
-                                        self.peer_workflows))
-                                progress_for_resubmit = (
-                                    co_schedule_fusion.fused_set_progress(
-                                        fused_host_name,
-                                        self.peer_workflows))
-                            else:
-                                set_incomplete = self.state != "completed"
-                                progress_for_resubmit = self.progress
-                            if set_incomplete and not scheduler_active:
-                                idle_incomplete_checks += 1
-                                if (idle_incomplete_checks
-                                        >= IDLE_INCOMPLETE_CHECKS_BEFORE_RESUBMIT):
-                                    if (progress_for_resubmit
-                                            > self.last_progress):
-                                        self.last_progress = (
-                                            progress_for_resubmit)
-                                        self.subsequent_noncompleted_runs = 0
-                                        print(
-                                            f"[remote-resubmit] stage "
-                                            f"{self.stage.name}: job gone "
-                                            f"with progress advance "
-                                            f"({progress_for_resubmit:.1%}); "
-                                            f"resubmitting")
-                                        self.state = "unstarted"
-                                        break
-                                    self.subsequent_noncompleted_runs += 1
-                                    if (self.subsequent_noncompleted_runs
-                                            > MAX_SUBSEQUENT_NONCOMPLETED_RUNS):
-                                        print(
-                                            f"[remote-resubmit] stage "
-                                            f"{self.stage.name}: no progress "
-                                            f"after "
-                                            f"{self.subsequent_noncompleted_runs} "
-                                            f"idle resubmits; giving up")
-                                        self.state = "failed"
-                                        self.semaphore = "wait"
-                                        break
+                        await asyncio.sleep(POLLING_INTERVAL)
+                        continue
+                    self.state = stage_status.get("state", self.state)
+                    self.progress = stage_status.get(
+                        "progress", self.progress)
+                    finished = bool(stage_status.get("finished", False))
+                    # Only submit-capable remote stages may resubmit / wait.
+                    if self.fusion_host is None:
+                        if fused_host_name is not None:
+                            set_incomplete = not (
+                                co_schedule_fusion.fused_set_completed(
+                                    fused_host_name,
+                                    self.peer_workflows))
+                            progress_for_decision = (
+                                co_schedule_fusion.fused_set_progress(
+                                    fused_host_name,
+                                    self.peer_workflows))
+                        else:
+                            set_incomplete = (
+                                self.state != "completed" and not finished)
+                            progress_for_decision = self.progress
+                        if set_incomplete and not scheduler_active:
+                            idle_incomplete_checks += 1
+                            print(
+                                f"[remote-idle] stage {self.stage.name}: "
+                                f"scheduler empty, unfinished "
+                                f"(finished={finished}, "
+                                f"state={self.state}, "
+                                f"progress={progress_for_decision:.1%}, "
+                                f"last_progress={self.last_progress:.1%}, "
+                                f"idle_check="
+                                f"{idle_incomplete_checks}/"
+                                f"{IDLE_INCOMPLETE_CHECKS_BEFORE_ACTION})"
+                            )
+                            if (idle_incomplete_checks
+                                    >= IDLE_INCOMPLETE_CHECKS_BEFORE_ACTION):
+                                if (progress_for_decision
+                                        > self.last_progress):
+                                    self.last_progress = (
+                                        progress_for_decision)
+                                    self.subsequent_noncompleted_runs = 0
                                     print(
                                         f"[remote-resubmit] stage "
-                                        f"{self.stage.name}: job gone without "
-                                        f"progress "
-                                        f"({self.subsequent_noncompleted_runs}/"
-                                        f"{MAX_SUBSEQUENT_NONCOMPLETED_RUNS}); "
-                                        f"resubmitting")
+                                        f"{self.stage.name}: job gone "
+                                        f"with progress advance "
+                                        f"({progress_for_decision:.1%}); "
+                                        f"resubmitting"
+                                    )
                                     self.state = "unstarted"
                                     break
-                            else:
-                                idle_incomplete_checks = 0
+                                print(
+                                    f"[remote-idle] stage "
+                                    f"{self.stage.name}: job gone without "
+                                    f"progress advance "
+                                    f"({progress_for_decision:.1%}); "
+                                    f"setting semaphore=wait for review"
+                                )
+                                self.state = "failed"
+                                self.semaphore = "wait"
+                                break
+                            await asyncio.sleep(
+                                IDLE_INCOMPLETE_POLL_INTERVAL)
+                            continue
+                        idle_incomplete_checks = 0
 
             if self.resource_name == "local":
                 terminal_completed = self.state == "completed"

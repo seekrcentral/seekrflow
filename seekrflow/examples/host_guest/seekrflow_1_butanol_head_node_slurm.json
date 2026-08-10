@@ -1,5 +1,5 @@
 {
-    "name": "host_guest_example",
+    "name": "host_guest_head_node_slurm",
     "structure_version": "1.5",
     "workflow": {
         "type": "workflow",
@@ -103,7 +103,7 @@
         "ionic_strength": 0.0,
         "random_seed": 111
     },
-    "work_directory": "~/tmp/seekrflow_hostguest_example/",
+    "work_directory": "work_head_node_slurm",
     "root_directory": null,
     "parameterizer": null,
     "run_settings": {

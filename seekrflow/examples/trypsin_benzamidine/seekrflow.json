@@ -26,27 +26,78 @@
                     "resname": "BEN"
                 }
             ],
-            "group_selectors": []
+            "group_selectors": [
+                {
+                    "type": "binding_site",
+                    "name": "binding_site",
+                    "reference_component_name": "ligand",
+                    "random_seed": 111
+                }
+            ]
         },
         "cv_specs": [
             {
-                "name": "distance_receptor_ligand",
+                "name": "distance_site_ligand",
                 "type": "com_com_distance",
-                "group1_selection_name": "receptor",
+                "group1_selection_name": "binding_site",
                 "group2_selection_name": "ligand",
-                "min_value": 0.5,
-                "max_value": 1.6
+                "min_value": 0.0,
+                "max_value": 3.0
             }
         ],
         "anchor_spec": {
-            "type": "uniform",
-            "n_anchors": 12
+            "type": "graded",
+            "inner_spacing": 0.075,
+            "outer_spacing": 0.15,
+            "surface_margin": 0.3
         },
         "procedure": {
             "name": "procedure",
             "position_reporter_interval": null,
             "type": "composite",
-            "procedures": []
+            "procedures": [
+                {
+                    "name": "equilibration",
+                    "position_reporter_interval": null,
+                    "type": "equilibration_globular",
+                    "reference_structure_filename": "protein_ligand.pdb",
+                    "align_selection_str": "protein and not type H"
+                },
+                {
+                    "name": "metadynamics",
+                    "position_reporter_interval": null,
+                    "type": "seeding",
+                    "method_input": {
+                        "type": "metadynamics",
+                        "bias_factor": 10.0,
+                        "gaussian_height": 1.0,
+                        "gaussian_width": 0.05,
+                        "steps_per_update": 250,
+                        "number_of_points": 101
+                    },
+                    "cv_names": [
+                        "distance_site_ligand"
+                    ],
+                    "ensemble": "NVT",
+                    "reporter_interval": 100
+                },
+                {
+                    "name": "MMVT",
+                    "position_reporter_interval": null,
+                    "type": "mmvt",
+                    "ensemble": "NVT",
+                    "number_of_steps": 1000000,
+                    "checkpoint_interval": 10000
+                },
+                {
+                    "name": "bd",
+                    "position_reporter_interval": null,
+                    "type": "bd",
+                    "n_trajectories_per_output": 1000,
+                    "n_steps_per_output": 100000,
+                    "number_of_trajectories": 100000
+                }
+            ]
         },
         "scale_settings": [
             {
@@ -55,10 +106,10 @@
                 "nonbonded_method": "pme",
                 "nonbonded_cutoff": 0.9,
                 "constraints": "hbonds",
-                "hydrogen_mass": 1.5,
-                "timestep": 0.002,
+                "hydrogen_mass": 3.0,
+                "timestep": 0.004,
                 "friction_coefficient": 1.0,
-                "integrator_type": "langevin",
+                "integrator_type": "langevinMiddle",
                 "platform_type": "cuda"
             },
             {
@@ -91,7 +142,7 @@
         "temperature": 300.0,
         "pressure": null,
         "ionic_strength": 0.15,
-        "random_seed": 0
+        "random_seed": 111
     },
     "work_directory": "work",
     "root_directory": null,
@@ -119,7 +170,7 @@
             "pH": 7.0
         },
         "pdb_to_sdf_settings": {
-            "engine": "rdkit"
+            "engine": "openeye"
         },
         "solvent_padding": 0.9,
         "box_shape": "octahedron"

@@ -1,5 +1,5 @@
 """
-Section 15 tests: resubmit remote jobs that time out / die before completion.
+Section 15 tests: remote idle-incomplete grace, resubmit, and wait policy.
 """
 from __future__ import annotations
 
@@ -27,11 +27,16 @@ def _idle_incomplete_status(
         *,
         progress: float = 0.5,
         state: str = "started",
+        finished: bool = False,
         ) -> dict:
     return {
         "success": True,
         "manager_status": {"jobs": []},
-        "stage_status": {"state": state, "progress": progress},
+        "stage_status": {
+            "state": state,
+            "progress": progress,
+            "finished": finished,
+        },
     }
 
 
@@ -68,6 +73,8 @@ async def _run_monitor_with_statuses(
         sw,
         monkeypatch,
         statuses: list[dict],
+        *,
+        idle_checks_before_action: int = 3,
         ) -> int:
     from seekrflow.modules import seekr_run
     from seekrflow.modules.workload_managers import remote as workload_remote
@@ -84,6 +91,12 @@ async def _run_monitor_with_statuses(
 
     monkeypatch.setattr(workload_remote, "status_remote", fake_status)
     monkeypatch.setattr(seekr_run, "POLLING_INTERVAL", 0)
+    monkeypatch.setattr(seekr_run, "IDLE_INCOMPLETE_POLL_INTERVAL", 0)
+    monkeypatch.setattr(
+        seekr_run,
+        "IDLE_INCOMPLETE_CHECKS_BEFORE_ACTION",
+        idle_checks_before_action,
+    )
     await sw._monitor_stage_loop()
     return calls["n"]
 
@@ -95,8 +108,13 @@ def seekr_run_module():
     return seekr_run
 
 
-class TestRemoteTimeoutResubmit:
-    def test_job_gone_with_progress_resubmits(self, monkeypatch, seekr_run_module):
+class TestRemoteIdleIncompletePolicy:
+    def test_default_grace_constants(self, seekr_run_module):
+        assert seekr_run_module.IDLE_INCOMPLETE_CHECKS_BEFORE_ACTION == 12
+        assert seekr_run_module.IDLE_INCOMPLETE_POLL_INTERVAL == 30.0
+
+    def test_job_gone_with_progress_resubmits(
+            self, monkeypatch, seekr_run_module):
         sw = _make_remote_stage_workflow(
             seekr_run_module, last_progress=0.0)
         statuses = [
@@ -112,11 +130,11 @@ class TestRemoteTimeoutResubmit:
         assert sw.subsequent_noncompleted_runs == 0
         assert sw.last_progress == 0.5
 
-    def test_job_gone_without_progress_gives_up(self, monkeypatch, seekr_run_module):
+    def test_job_gone_without_progress_waits_after_grace(
+            self, monkeypatch, seekr_run_module):
         sw = _make_remote_stage_workflow(
             seekr_run_module,
             last_progress=0.2,
-            subsequent_noncompleted_runs=3,
         )
         statuses = [
             _idle_incomplete_status(progress=0.2),
@@ -126,7 +144,53 @@ class TestRemoteTimeoutResubmit:
         asyncio.run(_run_monitor_with_statuses(sw, monkeypatch, statuses))
         assert sw.state == "failed"
         assert sw.semaphore == "wait"
-        assert sw.subsequent_noncompleted_runs == 4
+        # No no-progress resubmit loop — wait on first grace expiry.
+        assert sw.subsequent_noncompleted_runs == 0
+
+    def test_failed_status_does_not_count_toward_grace(
+            self, monkeypatch, seekr_run_module):
+        sw = _make_remote_stage_workflow(
+            seekr_run_module, last_progress=0.2)
+        statuses = [
+            {
+                "success": False,
+                "error": "transient blip",
+                "manager_status": {"jobs": []},
+                "stage_status": {
+                    "state": "started",
+                    "progress": 0.2,
+                    "finished": False,
+                    "notes": "transient blip",
+                },
+            },
+            {
+                "success": False,
+                "error": "transient blip",
+                "manager_status": {"jobs": []},
+                "stage_status": {
+                    "state": "started",
+                    "progress": 0.2,
+                    "finished": False,
+                    "notes": "transient blip",
+                },
+            },
+            {
+                "success": True,
+                "manager_status": {
+                    "jobs": [{"JobID": "99", "State": "RUNNING"}],
+                },
+                "stage_status": {
+                    "state": "started",
+                    "progress": 0.2,
+                    "finished": False,
+                },
+            },
+        ]
+        n_calls = asyncio.run(
+            _run_monitor_with_statuses(sw, monkeypatch, statuses))
+        assert n_calls >= 3
+        assert sw.state == "started"
+        assert sw.semaphore == "go"
 
     def test_single_idle_check_does_not_resubmit(
             self, monkeypatch, seekr_run_module):
@@ -138,7 +202,11 @@ class TestRemoteTimeoutResubmit:
                 "manager_status": {
                     "jobs": [{"JobID": "99", "State": "RUNNING"}],
                 },
-                "stage_status": {"state": "started", "progress": 0.1},
+                "stage_status": {
+                    "state": "started",
+                    "progress": 0.1,
+                    "finished": False,
+                },
             },
             _idle_incomplete_status(progress=0.1),
             _idle_incomplete_status(progress=0.1),
@@ -186,17 +254,29 @@ class TestRemoteTimeoutResubmit:
             {
                 "success": True,
                 "manager_status": {"jobs": []},
-                "stage_status": {"state": "completed", "progress": 1.0},
+                "stage_status": {
+                    "state": "completed",
+                    "progress": 1.0,
+                    "finished": True,
+                },
             },
             {
                 "success": True,
                 "manager_status": {"jobs": []},
-                "stage_status": {"state": "completed", "progress": 1.0},
+                "stage_status": {
+                    "state": "completed",
+                    "progress": 1.0,
+                    "finished": True,
+                },
             },
             {
                 "success": True,
                 "manager_status": {"jobs": []},
-                "stage_status": {"state": "completed", "progress": 1.0},
+                "stage_status": {
+                    "state": "completed",
+                    "progress": 1.0,
+                    "finished": True,
+                },
             },
         ]
         n_calls = asyncio.run(
@@ -218,7 +298,11 @@ class TestRemoteTimeoutResubmit:
             {
                 "success": True,
                 "manager_status": {"jobs": []},
-                "stage_status": {"state": "completed", "progress": 1.0},
+                "stage_status": {
+                    "state": "completed",
+                    "progress": 1.0,
+                    "finished": True,
+                },
             },
         ]
         n_calls = asyncio.run(
@@ -239,9 +323,12 @@ class TestRemoteTimeoutResubmit:
         member.state = "started"
         member.progress = 0.3
         statuses = [
-            _idle_incomplete_status(progress=1.0, state="completed"),
-            _idle_incomplete_status(progress=1.0, state="completed"),
-            _idle_incomplete_status(progress=1.0, state="completed"),
+            _idle_incomplete_status(progress=1.0, state="completed",
+                                    finished=True),
+            _idle_incomplete_status(progress=1.0, state="completed",
+                                    finished=True),
+            _idle_incomplete_status(progress=1.0, state="completed",
+                                    finished=True),
         ]
         asyncio.run(_run_monitor_with_statuses(host, monkeypatch, statuses))
         assert host.state == "unstarted"

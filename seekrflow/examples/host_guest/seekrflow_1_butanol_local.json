@@ -80,10 +80,10 @@
                 "system": {
                     "parameters_topology": {
                         "type": "Amber",
-                        "prmtop_filename": "/home/lvotapka/seekrflow/seekrflow/examples/host_guest/params_and_structures/BCD_1-butanol.parm7",
+                        "prmtop_filename": "params_and_structures/BCD_1-butanol.parm7",
                         "inpcrd_filename": null
                     },
-                    "solvated_pdb": "/home/lvotapka/seekrflow/seekrflow/examples/host_guest/params_and_structures/BCD_1-butanol.pdb"
+                    "solvated_pdb": "params_and_structures/BCD_1-butanol.pdb"
                 },
                 "nonbonded_method": "pme",
                 "nonbonded_cutoff": 0.9,
@@ -103,7 +103,7 @@
         "ionic_strength": 0.0,
         "random_seed": 111
     },
-    "work_directory": "~/tmp/seekrflow_hostguest_example/",
+    "work_directory": "work_local",
     "root_directory": null,
     "parameterizer": null,
     "run_settings": {

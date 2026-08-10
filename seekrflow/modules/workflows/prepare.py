@@ -583,10 +583,17 @@ def _ensure_bd_pqrs(ctx: Prepare_context) -> dict[str, str]:
             pqr_paths[molecule.name] = molecule.pqr_filename
             continue
         if parmed_complex is None:
+            # MD system paths from parameterize are work-relative
+            # (e.g. parameterize/complex_system.xml), not root-relative.
+            work_directory = os.path.dirname(
+                os.path.abspath(ctx.root_directory))
+            pdb_filename = ctx.md_structure_filename
+            if not os.path.isabs(pdb_filename):
+                pdb_filename = os.path.join(work_directory, pdb_filename)
             parmed_complex = \
                 md_settings.system.parameters_topology.make_parmed(
-                    pdb_filename=ctx.md_structure_filename,
-                    directory=ctx.root_directory)
+                    pdb_filename=pdb_filename,
+                    directory=work_directory)
         one_resid_per_atom = components.get_member(molecule.component_name)\
             .one_resid_per_atom_pqr
         pqr_filename = os.path.join(

@@ -13,7 +13,8 @@ Automate seekr handling with seekrflow to decrease time and manual intervention 
 
 The seekr (simulation-enabled estimation of kinetic rates) program facilitates the preparation, running, and
 analysis of molecular kinetics calculations using a multiscale molecular dynamics (MD) / Brownian dynamics (BD) 
-simulation framework along with a combination of enhanced sampling methods such as milestoning, steered molecular dynamics (SMD) and metadynamics (MetaD). Nevertheless, running a seekr calculation can be difficult, time-consuming, and error-prone. Parameterization of a system for MD requires time and expertise. Preparing the input files for a seekr calculation is similarly tedious and time-consuming. Running a SEEKR calculation often requires transferring files to a high-performance-computing (HPC) resource, and then writing and submitting several SLURM or PBS scripts per system in order to efficiently conduct the calculations. In addition, all the previously mentioned steps can become exponentially difficult and time-consuming if several systems or batches of seekr jobs must be run.
+simulation framework along with a combination of enhanced sampling methods such as milestoning, steered molecular dynamics (SMD) and metadynamics (MetaD). 
+Other types of enhanced sampling methods are possible as well through plugins. Nevertheless, running a seekr calculation can be difficult, time-consuming, and error-prone. Parameterization of a system for MD requires time and expertise. Preparing the input files for a seekr calculation is similarly tedious and time-consuming. Running a SEEKR calculation often requires transferring files to a high-performance-computing (HPC) resource, and then writing and submitting several SLURM or PBS scripts per system in order to efficiently conduct the calculations. In addition, all the previously mentioned steps can become exponentially difficult and time-consuming if several systems or batches of seekr jobs must be run.
 
 The seekrflow program aims to remedy the difficulty of using seekr by establishing commonly-used workflows that facilitate the preparation of a seekr calculation. Parameterization (careful!), preparation, and running of seekr calculations are all automated in seekrflow.
 
@@ -21,7 +22,7 @@ This README is only a quickstart guide to get seekrflow up and running as soon a
 
 ## Install
 
-The easiest, quickest way to install the seekrflow is to use Mamba. If you don't already have 
+The easiest, quickest way to install seekrflow is to use Mamba. If you don't already have 
 Mamba installed, Download the Miniforge install script and run.
 
 ```sh
@@ -32,25 +33,36 @@ bash Miniforge3-$(uname)-$(uname -m).sh
 Once this has been done, set up a new environment:
 
 ```sh
-mamba create -n SEEKR2 python=3.11 --yes
+mamba create -n SEEKR python=3.12 --yes
 ```
 
 If you plan to use seekrflow for parameterization, you will probably need a second environment to avoid conflicts.
 ```sh
-mamba create -n SEEKRFLOW_PARAM python=3.11 --yes
+mamba create -n SEEKRFLOW_PARAM python=3.12 --yes
 ```
 
-### Dependencies
+### Bare Minimum Installation
+One may install seekrflow with the bare minimum dependencies, which are required for the most basic functionality
+
+This step installs seekrflow from mamba.
+```sh
+mamba activate SEEKR
+mamba install seekrflow --yes
+```
+
+Or one can install it from github.
+```sh
+git clone https://github.com/seekrcentral/seekrflow.git
+cd seekrflow
+python -m pip install .
+```
+
+But then one must install seekr separate (instructions below). The installation of extra dependencies (below) are recommended for certain capabilities.
+
+### Extra Dependencies
 Many of the dependencies for seekrflow will be installed alongside seekrflow, but some must be installed separately, and are installed before seekrflow
 
-#### Git (required)
-Make sure git is installed to clone repositories. If git isn't already installed on your computer, run:
-```sh
-mamba install git --yes
-```
-
 #### PDBFixer (recommended; needed for parameterization)
-
 PDBfixer is recommended to install in case one wants to run the parameterization using seekrflow.
 
 ```sh
@@ -59,7 +71,7 @@ mamba install pdbfixer --yes
 ```
 
 #### OpenEye Toolkits (recommended; possibly needed for parameterization)
-The OpenEye Toolkits are used for quantum chemistry-based force field parameterization. The OpenEye toolkits require a valid OpenEye academic license, free for academic users but must be obtained directly from https://www.eyesopen.com/academic-licensing. Seekrflow uses it to generate SDF files from PDB files of small molecules. If you do not plan to use seekrflow for parameterization, or will already have SDF files for your small molecules, then you do not need to install OpenEye.
+The OpenEye Toolkits are used for quantum chemistry-based force field parameterization. The OpenEye toolkits require a valid OpenEye academic license, free for academic users but must be obtained directly from https://www.eyesopen.com/academic-licensing. Seekrflow uses it to generate SDF files from PDB files of small molecules. If you do not plan to use seekrflow for parameterization, if will already have SDF files for your small molecules, or if you plan to use RDKit to generate SDF files, then you do not need to install OpenEye.
 
 ```sh
 mamba install openeye::openeye-toolkits --yes
@@ -89,7 +101,6 @@ mamba install openmmforcefields --yes
 ```
 
 #### Espaloma Machine-learned Forcefield (optional)
-
 If you want to parameterize your molecular system with the machine-learned forcefield espaloma, you will need to install it.
 ```sh
 mamba install espaloma=0.3.2 --yes
@@ -100,55 +111,27 @@ You will also need to download the correct espaloma .pt file, and save it somewh
 curl -O https://github.com/choderalab/espaloma/releases/download/0.3.2/espaloma-0.3.2.pt
 ```
 
-#### Browndye2 (recommended)
-SEEKR2 can use Browndye2 if Brownian dynamics (BD) simulations will be run (necessary for k-on calculations). Please see (https://browndye.ucsd.edu/) for Browndye2 installation instructions. Some of these steps require sudo privileges (administrator access). If you do not have sudo access, contact your system administrator.
+#### Browndye (recommended)
+SEEKR2 can use Browndye if Brownian dynamics (BD) simulations will be run (necessary for k-on calculations). Please see (https://browndye.ucsd.edu/) for Browndye installation instructions. Some of these steps require sudo privileges (administrator access). If you do not have sudo access, contact your system administrator.
 
-#### SEEKR2 plugin, SEEKR2, and SeekrTools (required)
-This step installs OpenMM plugin for SEEKR2 package.
+#### seekr (required)
+This step installs OpenMM plugin for seekr package if you installed seekrflow from github. (A seekrflow installation from Mamba will automatically install seekr.)
 ```sh
-mamba activate SEEKR2
-mamba install seekr2_openmm_plugin openmm=8.1 --yes
+mamba activate SEEKR
+mamba install seekr --yes
 ```
 
-Run the following command to check if the SEEKR2 OpenMM plugin is correctly installed. If no error message appears, the installation was successful.
-```sh
-python -c "import seekr2plugin"
-```
-
-Install SEEKR2.
+or install seekr from git.
 ```sh
 cd ~
-git clone https://github.com/seekrcentral/seekr2.git
-cd seekr2
+git clone https://github.com/seekrcentral/seekr.git
+cd seekr
 python -m pip install .
 ```
 
-Optionally, one may run the tests for SEEKR2.
+Optionally, one may run the tests for seekr.
 ```sh
 pytest
-```
-
-Next, clone and install SeekrTools.
-```sh
-cd ~
-git clone https://github.com/seekrcentral/seekrtools.git
-cd seekrtools
-python -m pip install .
-```
-
-Optionally, one may run the tests for SeekrTools.
-```sh
-pytest
-```
-
-### Install seekrflow
-
-Finally, with the dependencies out of the way, we can install seekrflow.
-
-```sh
-git clone https://github.com/seekrcentral/seekrflow.git
-cd seekrflow
-python -m pip install .
 ```
 
 ### Testing seekrflow (Optional)
@@ -160,21 +143,21 @@ pytest
 
 ## Example System - Trypsin/Benzamidine
 
-A seekrflow calculation will need a input JSON file to run, as well as a starting PDB file containing a bound complex of the receptor and ligand molecules. An example system can be found in seekrflow/seekrflow/examples/trypsin_benzamidine. Here, the bound complex of the receptor and ligand is found in the file "protein_ligand.pdb", and an example input JSON file can be found in "seekrflow.json". A full workflow run can be done with the following steps.
+A seekrflow calculation will need a input JSON file to run, as well as a starting PDB file containing a bound complex of the receptor and ligand molecules. An example system can be found in seekrflow/seekrflow/examples/trypsin_benzamidine. Here, the bound complex of the receptor and ligand is found in the file "protein_ligand.pdb", and an example input JSON file can be found in "seekrflow.json". A full workflow run can be done with the following steps. (This example runs all calculations locally, and assumes that you have a GPU available.)
 
 ```sh
 mamba activate SEEKRFLOW_PARAM
-python ~/seekrflow/seekrflow/parameterize.py protein_ligand.pdb -i seekrflow.json
+python ~/seekrflow/seekrflow/flow.py parameterize -i seekrflow.json
 mamba deactivate
-mamba activate SEEKR2
-python ~/seekrflow/seekrflow/flow.py work/seekrflow.json prepare
-python ~/seekrflow/seekrflow/flow.py work/seekrflow.json run
-python ~/seekr2/seekr2/analyze.py work/root/model.xml
+mamba activate SEEKR
+python ~/seekrflow/seekrflow/flow.py prepare -i seekrflow.json
+python ~/seekrflow/seekrflow/flow.py run -i seekrflow.json
+python ~/seekr/seekr/analyze.py work/root/model.json
 ```
 
 ### Important Options and Hints
 
-* In general, seekrflow, SEEKR2, and SeekrTools programs can be run with the '-h' argument to see all available options. Please see https://seekrflow.readthedocs.io/en/latest for a detailed description of programs and options.
+* In general, seekr's and seekrflow's programs can be run with the '-h' argument to see all available options. Please see https://seekrflow.readthedocs.io/en/latest for a detailed description of programs and options.
 
 ## Authors and Contributors
 

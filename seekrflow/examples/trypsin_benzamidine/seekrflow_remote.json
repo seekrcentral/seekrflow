@@ -1,96 +1,164 @@
 {
-    "name": "tryp_ben",
-    "structure_version": "1.2",
+    "name": "tryp_ben_hpc",
+    "structure_version": "1.5",
     "workflow": {
-        "type": "protein_ligand_seekr2",
-        "solvated_system_for_md": null,
-        "ligand_indices": [],
-        "receptor_indices": [],
-        "receptor_pqr_filename_for_bd": null,
-        "ligand_pqr_filename_for_bd": null,
-        "parameterizer_information": {
-            "ligand_sdf_file": "",
-            "ligand_resname": "BEN",
-            "receptor_ligand_pdb_filename": "protein_ligand.pdb"
-        },
-        "hidr_settings": {
-            "type": "hidr_metaD",
-            "gaussian_height": 1.0,
-            "gaussian_width": 0.05,
-            "bias_factor": 10.0
-        },
-        "mmvt_settings": {
-            "type": "MMVT",
-            "md_output_interval": 10000,
-            "md_steps_per_anchor": 1000000,
-            "anchor_radius_list": [
-                0.05,
-                0.15,
-                0.25,
-                0.35,
-                0.45,
-                0.7,
-                0.9,
-                1.1,
-                1.3,
-                1.5,
-                1.7,
-                1.9
+        "type": "workflow",
+        "structure_version": "1.1",
+        "components": {
+            "members": [
+                {
+                    "name": "receptor",
+                    "selector": {
+                        "type": "mdtraj",
+                        "selection_string": "protein"
+                    },
+                    "type": "protein"
+                },
+                {
+                    "name": "ligand",
+                    "selector": {
+                        "type": "resname",
+                        "resname": "BEN",
+                        "include_hydrogens": true
+                    },
+                    "type": "small_molecule",
+                    "sdf_file": "",
+                    "resname": "BEN"
+                }
+            ],
+            "group_selectors": [
+                {
+                    "type": "binding_site",
+                    "name": "binding_site",
+                    "reference_component_name": "ligand",
+                    "random_seed": 111
+                }
             ]
         },
-        "md_settings": {
-            "type": "MD",
-            "engine": "openmm",
-            "integrator": "langevin",
-            "nonbonded_cutoff": 0.9,
-            "friction": 1.0,
-            "barostat_period": null,
-            "stepsize": 0.002
+        "cv_specs": [
+            {
+                "name": "distance_site_ligand",
+                "type": "com_com_distance",
+                "group1_selection_name": "binding_site",
+                "group2_selection_name": "ligand",
+                "min_value": 0.0,
+                "max_value": 3.0
+            }
+        ],
+        "anchor_spec": {
+            "type": "graded",
+            "inner_spacing": 0.075,
+            "outer_spacing": 0.15,
+            "surface_margin": 0.3
         },
-        "bd_settings": {
-            "type": "BD",
-            "engine": "browndye",
-            "binary_directory": "",
-            "num_trajectories": 10000,
-            "num_threads": 1
-        }
+        "procedure": {
+            "name": "procedure",
+            "position_reporter_interval": null,
+            "type": "composite",
+            "procedures": [
+                {
+                    "name": "equilibration",
+                    "position_reporter_interval": null,
+                    "type": "equilibration_globular",
+                    "reference_structure_filename": "protein_ligand.pdb",
+                    "align_selection_str": "protein and not type H"
+                },
+                {
+                    "name": "metadynamics",
+                    "position_reporter_interval": null,
+                    "type": "seeding",
+                    "method_input": {
+                        "type": "metadynamics",
+                        "bias_factor": 10.0,
+                        "gaussian_height": 1.0,
+                        "gaussian_width": 0.05,
+                        "steps_per_update": 250,
+                        "number_of_points": 101
+                    },
+                    "cv_names": [
+                        "distance_site_ligand"
+                    ],
+                    "ensemble": "NVT",
+                    "reporter_interval": 100
+                },
+                {
+                    "name": "MMVT",
+                    "position_reporter_interval": null,
+                    "type": "mmvt",
+                    "ensemble": "NVT",
+                    "number_of_steps": 1000000,
+                    "checkpoint_interval": 10000
+                },
+                {
+                    "name": "bd",
+                    "position_reporter_interval": null,
+                    "type": "bd",
+                    "n_trajectories_per_output": 1000,
+                    "n_steps_per_output": 100000,
+                    "number_of_trajectories": 100000
+                }
+            ]
+        },
+        "scale_settings": [
+            {
+                "type": "molecular_dynamics",
+                "system": {
+                    "parameters_topology": {
+                        "type": "OpenMM_system",
+                        "system_filename": "work/parameterize/complex_system.xml",
+                    },
+                    "solvated_pdb": "work/parameterize/complex_solvent.pdb"
+                },
+                "nonbonded_method": "pme",
+                "nonbonded_cutoff": 0.9,
+                "constraints": "hbonds",
+                "hydrogen_mass": 3.0,
+                "timestep": 0.004,
+                "friction_coefficient": 1.0,
+                "integrator_type": "langevinMiddle",
+                "platform_type": "cuda"
+            },
+            {
+                "type": "brownian_dynamics",
+                "engine": "browndye",
+                "geometry": "sphere",
+                "system": {
+                    "molecules": [
+                        {
+                            "name": "receptor",
+                            "component_name": "receptor",
+                            "pqr_filename": "",
+                            "role": "receptor"
+                        },
+                        {
+                            "name": "ligand",
+                            "component_name": "ligand",
+                            "pqr_filename": "",
+                            "role": "ligand"
+                        }
+                    ]
+                },
+                "binary_directory": "",
+                "auxiliary_directory": ""
+            }
+        ],
+        "plugins": []
     },
     "physical_attributes": {
         "temperature": 300.0,
         "pressure": null,
         "ionic_strength": 0.15,
-        "hydrogen_mass": 1.008
+        "random_seed": 111
     },
-    "work_directory": "work",
-    "parameterizer": {
-        "forcefield": "gaff-2.11",
-        "water_model": "tip3p",
-        "auxiliary_forcefield_files": ["amber/ff14SB.xml",
-            "amber/tip3p_standard.xml",
-            "amber/tip3p_HFE_multivalent.xml"],
-        "pdb_fixer_settings": {
-            "remove_extra_chains": true,
-            "find_missing_residues": true,
-            "find_and_replace_nonstandard_residues": true,
-            "remove_heterogens": true,
-            "find_and_add_missing_atoms": true,
-            "add_missing_hydrogens_pH": null
-        },
-        "pdb2pqr_settings": {
-            "forcefield": "AMBER",
-            "forcefield_output_format": "AMBER",
-            "pH": 7.0
-        },
-        "solvent_padding": 0.9
-    },
+    "work_directory": "work_hpc",
+    "root_directory": null,
+    "parameterizer": null,
     "run_settings": {
         "resources": [
             {
                 "type": "slurm_remote",
                 "name": "delta",
-                "remote_seekr2_directory": "$HOME/seekr2/seekr2/",
-                "remote_seekrtools_directory": "$HOME/seekrtools/seekrtools/",
-                "remote_working_directory": "/scratch/kif/$USER/seekrflow_playground/",
+                "remote_working_directory": "/scratch/YOUR_DIRECTORY/$USER/seekrflow_playground/",
                 "max_workers_per_node": 1,
                 "partition": "gpuA100x4,gpuA40x4",
                 "account": "YOUR ACCOUNT NAME",
@@ -98,9 +166,9 @@
                 "nodes_per_block": 1,
                 "cpus_per_task": 32,
                 "memory_per_node": 5000,
-                "time_limit": "00:30:00",
+                "time_limit": "48:00:00",
                 "scheduler_options": "--gpus-per-node=1 --gpu-bind=closest",
-                "worker_init": "source $HOME/.bashrc; conda activate SEEKR2; export OPENMM_CUDA_COMPILER=`which nvcc`",
+                "worker_init": "source $HOME/.bashrc; conda activate SEEKR; nvidia-cuda-mps-control -d",
                 "remote_interface": {
                     "type": "globus_compute_sdk",
                     "endpoint_id": "YOUR GLOBUS COMPUTE ENDPOINT"
@@ -165,8 +233,29 @@
             { "target": [], "resource": "local" },
             { "target": ["equilibration"], "resource": "local" },
             { "target": ["metadynamics", "sampling"], "resource": "anvil" },
-            { "target": ["metadynamics", "logistic"], "resource": "local" },
-            { "target": ["MMVT"], "resource": "delta" },
+            { "target": ["metadynamics", "logistic"], 
+              "resource": "anvil",
+              "co_schedule_with": "predecessor"
+            },
+            { "target": ["MMVT"], 
+              "resource": "delta",
+              "dispatch": {
+                    "type": "dispatch",
+                    "dimensions": [
+                        "anchors"
+                    ],
+                    "group_size": 1,
+                    "concurrency": 1
+                },
+              "mps": 2,
+              "time_policy": {
+                    "type": "adaptive",
+                    "estimated_performance": 500.0,
+                    "safety_factor": 0.2,
+                    "min_time_limit": null,
+                    "max_time_limit": null
+                }
+            },
             { "target": ["bd"], "resource": "local" }
         ]
     }

@@ -33,7 +33,7 @@ dependencies = [
     "networkx",
     "biopython",
     # NOTE: these are better installed from source at the moment
-    #"radical.asyncflow",
+    "radical.asyncflow",
     #"rhapsody"
 ]
 
