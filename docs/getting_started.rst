@@ -255,24 +255,32 @@ Configure the endpoint:
     globus-compute-endpoint configure my_seekr_endpoint
 
 At this point, one should modify the file at 
-~/.globus-compute/my_seekr_endpoint/config.yaml in order to properly make full 
-use of the HPC resource's full capabilities.
+~/.globus-compute/my_seekr_endpoint/user_config_template.yaml.j2 
+in order to properly make full use of the HPC resource's full capabilities.
 
 Here is an example Globus Compute Endpoint configuration file that I used for 
 the NCSA Delta supercomputer:
 
-.. code-block:: yaml
+.. code-block::
+    
+    # Comments here...
 
-    display_name: null
+    endpoint_setup: ''
+
     engine:
-    max_workers_per_node: 4
-    provider:
-        worker_init: "source /path/to/your/.bashrc; conda activate SEEKR"
-        init_blocks: 1
-        max_blocks: 1
-        min_blocks: 0
-        type: LocalProvider
-    type: GlobusComputeEngine
+        type: GlobusComputeEngine
+        max_workers_per_node: 4
+
+        provider:
+            type: LocalProvider
+
+            min_blocks: 0
+            max_blocks: 1
+            init_blocks: 1
+
+            worker_init: 'source /path/to/your/miniforge3/etc/profile.d/conda.sh && mamba activate SEEKR2'
+
+
 
 .. note::
     This configuration applies to the head/login node *before* SLURM/PBS job 
