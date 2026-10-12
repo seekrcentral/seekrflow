@@ -26,8 +26,33 @@ CONFIRM_PROMPTS = {"s": "Stop (permanent for this session)?",
                    "d": "Detach the whole session?"}
 ENTER_KEYS = {curses.KEY_ENTER, 10, 13}
 ESCAPE_KEY = 27
+# Colors as (xterm 256-color number, 8-color fallback)
+PALETTE = {"white": (252, curses.COLOR_WHITE), "blue": (75, curses.COLOR_BLUE),
+           "green": (114, curses.COLOR_GREEN), "yellow": (221, curses.COLOR_YELLOW),
+           "red": (203, curses.COLOR_RED), "aqua": (80, curses.COLOR_CYAN)}
+BACKGROUND, HIGHLIGHT = 233, 238  # off-black and dark grey (256-color only)
 HELP = ("Up/Down move  Enter open  Esc back  g go  w wait  s stop  "
         "t transfer  d detach session  q quit")
+
+def color_attributes() -> dict[tuple[str, bool], int]:
+    """
+    The curses attribute for each (color name, highlighted) pair.
+    """
+    if not curses.has_colors():
+        return {(name, highlighted): curses.A_REVERSE if highlighted else 0
+                for name in PALETTE for highlighted in (False, True)}
+    curses.start_color()
+    rich = curses.COLORS >= 256
+    attributes = {}
+    for i, (name, (color_256, color_8)) in enumerate(PALETTE.items()):
+        for highlighted in (False, True):
+            pair = 1 + 2 * i + highlighted
+            background = HIGHLIGHT if highlighted else BACKGROUND
+            curses.init_pair(pair, color_256 if rich else color_8,
+                             background if rich else curses.COLOR_BLACK)
+            attributes[name, highlighted] = curses.color_pair(pair) | (
+                curses.A_REVERSE if highlighted and not rich else 0)
+    return attributes
 
 class Tui:
     def __init__(self, control_file: str, status_file: str, interval: float) -> None:
@@ -102,15 +127,16 @@ class Tui:
         body = height - 4
         top = max(0, self.cursor[level] - body + 1)
         for y, row in enumerate([None] + rows[top:top + body]):
-            x, attr = 0, curses.A_UNDERLINE if row is None else curses.A_NORMAL
-            if row is not None and top + y - 1 == self.cursor[level]:
-                attr = curses.A_REVERSE
+            x = 0
+            selected = row is not None and top + y - 1 == self.cursor[level]
             for column in columns:
                 cell_width = column.width or max(1, width - x - 1)
                 text = column.header if row is None else column.text(row)
+                attr = self.colors[column.color_of(text), selected] if row \
+                    else self.colors["white", False] | curses.A_UNDERLINE
                 if x < width - 1:
-                    screen.addnstr(y + 1, x, f"{text:<{cell_width}}",
-                                   min(cell_width, width - x - 1), attr)
+                    screen.addnstr(y + 1, x, f"{text:<{cell_width}} ",
+                                   min(cell_width + 1, width - x - 1), attr)
                 x += cell_width + 1
         screen.addnstr(height - 2, 0, self.message, width - 1)
         screen.addnstr(height - 1, 0, HELP, width - 1, curses.A_DIM)
@@ -128,6 +154,8 @@ class Tui:
 
     def run(self, screen: curses.window) -> None:
         curses.curs_set(0)
+        self.colors = color_attributes()
+        screen.bkgd(" ", self.colors["white", False])
         screen.timeout(self.timeout_ms)
         while True:
             self.refresh_status()
