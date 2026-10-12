@@ -135,7 +135,7 @@ class Tui:
                 attr = self.colors[column.color_of(text), selected] if row \
                     else self.colors["white", False] | curses.A_UNDERLINE
                 if x < width - 1:
-                    screen.addnstr(y + 1, x, f"{text:<{cell_width}} ",
+                    screen.addnstr(y + 1, x, f"{text[:cell_width]:<{cell_width}} ",
                                    min(cell_width + 1, width - x - 1), attr)
                 x += cell_width + 1
         screen.addnstr(height - 2, 0, self.message, width - 1)
