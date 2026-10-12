@@ -23,7 +23,6 @@ class StageInfo:
     anchor_indices: Optional[List[int]]
     swarm_indices: Optional[List[str]]
     filename: str
-    stage_state_filename: str
     starting_timestamp: float
 
     def save(
@@ -41,7 +40,7 @@ class StageInfo:
             self.filename = str(path_basename)
         # Creates root_dir/.stage_states; fails if root_dir is missing
         path.parent.mkdir(exist_ok=True)
-        path_tmp = path.with_suffix(".tmp")
+        path_tmp = path.with_name(path.name + f".{os.getpid()}.tmp")
         with open(path_tmp, "w") as f:
             json.dump(asdict(self), f, indent=2)
         os.rename(path_tmp, path)
@@ -83,7 +82,7 @@ class StageState:
             self.filename = str(path_basename)
         # Creates root_dir/.stage_states; fails if root_dir is missing
         path.parent.mkdir(exist_ok=True)
-        path_tmp = path.with_suffix(".tmp")
+        path_tmp = path.with_name(path.name + f".{os.getpid()}.tmp")
         self.latest_timestamp = time.time()
         with open(path_tmp, "w") as f:
             json.dump(asdict(self), f, indent=2)
@@ -115,7 +114,7 @@ class StageSpec:
 
     def save(self, path) -> None:
         path = pathlib.Path(path)
-        path_tmp = path.with_suffix(".tmp")
+        path_tmp = path.with_name(path.name + f".{os.getpid()}.tmp")
         with open(path_tmp, "w") as f:
             json.dump(self.to_dict(), f, indent=2)
         os.rename(path_tmp, path)
@@ -139,11 +138,19 @@ class JobSpec:
 
     def to_dict(self) -> dict:
         return asdict(self)
+        
     @classmethod
     def from_dict(cls, data: dict) -> "JobSpec":
-        stages = [StageSpec(**s) if isinstance(s, dict) else s
-                  for s in data["stages"]]
-        return cls(**{**data, "stages": stages})
+        stage_specs = [
+            StageSpec(**spec) if isinstance(spec, dict) else spec
+            for spec in data["stage_specs"]
+        ]
+        run_units = [
+            RunUnit(**unit) if isinstance(unit, dict) else unit
+            for unit in data["run_units"]
+        ]
+        return cls(**{**data, "stage_specs": stage_specs, "run_units": run_units})
+
     def save(self, path) -> None:
         path = pathlib.Path(path)
         path_tmp = path.with_suffix(".tmp")
@@ -191,6 +198,5 @@ class JobSpec:
                 anchor_indices=[run_unit.anchor for run_unit in self.run_units],
                 swarm_indices=[run_unit.swarm_id for run_unit in self.run_units],
                 filename=str(stage_info_path),
-                stage_state_filename=str(stage_state_path),
                 starting_timestamp=time.time())
         return stage_info

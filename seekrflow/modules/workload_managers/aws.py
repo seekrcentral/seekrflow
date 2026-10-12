@@ -176,8 +176,9 @@ def build_aws_container_script(manager_payload: dict) -> str:
     cpus = resource_payload.get("cpus") or 1
     # NOTE: I don't think there needs to be a worker_init for AWS.
     #worker_init = resource_payload.get("worker_init") or ""
-    internal_id = manager_payload["job_specs"][0].internal_id
-    interval = manager_payload["job_specs"][0].status_write_interval
+    spec0 = manager_payload["job_specs"][0]
+    internal_id = spec0["internal_id"]
+    interval = spec0["status_write_interval"]
     root = CONTAINER_ROOT_DIR
     jobs = f"{root}/.seekr_jobs"
     # Left for the shell. Batch sets this to 0..N-1.
@@ -326,7 +327,16 @@ def submit_aws_job(
     resource_payload = manager_payload["resource_payload"]
     seekrflow_name = manager_payload["seekrflow_name"]
     job_name = resource_payload["job_name"]
-    job_specs = manager_payload["job_specs"]
+    #job_specs = manager_payload["job_specs"]
+    # Convert the dictionary of job specs to JobSpec objects.
+    namespace = {}
+    exec(manager_payload["runner_files"]["structures.py"], namespace)
+    JobSpec = namespace["JobSpec"]
+    job_specs = [
+        JobSpec.from_dict(spec) if isinstance(spec, dict) else spec
+        for spec in manager_payload["job_specs"]
+    ]
+    
     try:
         # Drop stale failure diagnostics from a prior Batch job for this stage
         # so startup probes / leftover FAILED ids do not keep alarming.
@@ -371,7 +381,8 @@ def submit_aws_job(
                 Body=json.dumps(job_spec.to_dict()).encode("utf-8"),
                 ContentType="application/json",
             )
-
+        
+        manager_payload["job_specs"] = [spec.to_dict() for spec in job_specs]
         script = build_aws_container_script(manager_payload)
         script_uri = upload_aws_run_script(
             resource_payload, seekrflow_name, job_name, script)

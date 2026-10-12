@@ -45,6 +45,9 @@ class Tui:
                 self.status = json.load(f)
         except (OSError, ValueError) as error:
             self.message = f"Cannot read status file: {error}"
+        else:
+            if self.message.startswith("Cannot read status file:"):
+                self.message = ""
 
     def rows(self, width: int) -> list[dict]:
         """

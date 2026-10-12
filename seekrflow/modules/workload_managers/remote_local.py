@@ -286,13 +286,13 @@ def submit_job(
     else:
         memory_mb = None
     # Pass the contents of job.py and structures.py to the remote worker.
-    _JOB_DIR = pathlib.Path(seekrflow.__file__).resolve().parent / "modules" / "job"
+    _JOB_DIR = pathlib.Path(__file__).resolve().parent.parent / "job"
     job_py_source = (_JOB_DIR / "job.py").read_text()
     structures_py_source = (_JOB_DIR / "structures.py").read_text()
 
     manager_payload = {
         "resource_payload": None,
-        "job_specs": job_specs,
+        "job_specs": [spec.to_dict() for spec in job_specs],
         "runner_files": {
             "job.py": job_py_source,
             "structures.py": structures_py_source,

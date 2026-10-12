@@ -34,7 +34,7 @@ dependencies = [
     "biopython",
     # NOTE: these are better installed from source at the moment
     "radical.asyncflow",
-    #"rhapsody"
+    "rhapsody-py"
 ]
 
 # Update the urls once the hosting is set up.

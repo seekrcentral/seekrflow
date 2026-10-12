@@ -284,8 +284,6 @@ def _apply_placement_fields(
         accumulator["cpus"] = placement.cpus
     if placement.memory_mb is not None:
         accumulator["memory_mb"] = placement.memory_mb
-    if placement.time_limit is not None:
-        accumulator["time_limit"] = placement.time_limit
     if placement.mps is not None:
         accumulator["mps"] = placement.mps
     if placement.dispatch is not None:

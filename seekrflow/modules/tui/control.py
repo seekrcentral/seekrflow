@@ -24,7 +24,7 @@ def update(
             with open(control_file, "r") as f:
                 control_dict = json.load(f)
             change(control_dict)
-            tmp_file = control_file + ".tmp"
+            tmp_file = control_file + f".{os.getpid()}.tmp"
             with open(tmp_file, "w") as f:
                 json.dump(control_dict, f, indent=2)
             os.rename(tmp_file, control_file)

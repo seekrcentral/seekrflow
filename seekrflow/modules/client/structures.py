@@ -65,11 +65,11 @@ class RunSession:
         default="", validator=validators.instance_of(str))
     control_file: str = field(
         default="", validator=validators.instance_of(str))
-    max_concurrent_local_runs: int = field(
-        default=DEFAULT_MAX_CONCURRENT_LOCAL_RUNS,
+    max_concurrent_systems: int | None = field(
+        default=None,
         validator=validators.and_(
-            validators.instance_of(int),
-            validators.ge(1),
+            validators.optional(validators.instance_of(int)),
+            validators.optional(validators.ge(1)),
         ),
     )
     background_poll_interval: float = field(
@@ -187,13 +187,11 @@ class Batch:
             validators.ge(1),
         ),
     )
-    # Cap concurrent *local stages* across the batch (see local_slots.py).
-    # Remote/cloud stages are never counted against this limit.
-    max_concurrent_local_runs: int = field(
-        default=1,
+    max_concurrent_systems: int | None = field(
+        default=None,
         validator=validators.and_(
-            validators.instance_of(int),
-            validators.ge(1),
+            validators.optional(validators.instance_of(int)),
+            validators.optional(validators.ge(1)),
         ),
     )
     background_poll_interval: float = field(
@@ -370,7 +368,7 @@ class Batch:
             output_file=output_file,
             control_file=control_file,
             batch_directory=self.batch_directory,
-            max_concurrent_local_runs=self.max_concurrent_local_runs,
+            max_concurrent_systems=self.max_concurrent_systems,
             background_poll_interval=self.background_poll_interval,
             focused_poll_interval=self.focused_poll_interval,
             telemetry_poll_interval=self.telemetry_poll_interval,

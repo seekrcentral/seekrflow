@@ -18,8 +18,8 @@ import argparse
 from concurrent.futures import ProcessPoolExecutor
 
 from radical.asyncflow import WorkflowEngine
-from rhapsody.backends import ConcurrentExecutionBackend
-from seekrflow.modules.workflows import stage_procedures #, DragonExecutionBackend?
+from rhapsody.backends import ConcurrentExecutionBackend #, DragonExecutionBackend?
+from seekrflow.modules.workflows import stage_procedures 
 
 try: 
     from .structures import JobSpec
@@ -85,18 +85,33 @@ async def status_writer_loop(
                         swarm_id=run_unit.swarm_id,
                         print_json=True,
                     )
-                stage_state_dict = message_dict.get("progress", {}).get(
-                    str(stage_info.stage_index), {})
-                assert len(stage_state_dict) > 0, f"Stage state dict is empty: {stage_state_dict}"
-                # NOTE: anchor key will be "unpartitioned" in unpartitioned scope
+                progress = message_dict.get("progress") or {}
+                stage_state_dict = progress.get(stage_info.stage_index) \
+                    or progress.get(str(stage_info.stage_index)) or {}
+                if not stage_state_dict:
+                    stage_this_job_finished = False
+                    continue
                 anchor_key = str(run_unit.anchor) \
                     if run_unit.anchor != "any" else "unpartitioned"
-                stage_anchor_dict = stage_state_dict.get("progress", {}).get(
-                    anchor_key, {})
-                assert len(stage_anchor_dict) > 0, f"Stage anchor dict is empty: {stage_anchor_dict}"
-                stage_swarm_dict = stage_anchor_dict.get("swarms", {}).get(
-                    str(run_unit.swarm_id), {})
-                assert len(stage_swarm_dict) > 0, f"Stage swarm dict is empty: {stage_swarm_dict}"
+                stage_anchor_dict = (stage_state_dict.get("anchors") or {}).get(anchor_key) or {}
+                if not stage_anchor_dict:
+                    stage_this_job_finished = False
+                    continue
+                #stage_swarm_dict = (stage_anchor_dict.get("swarms") or {}).get(
+                #    str(run_unit.swarm_id)) or {}
+                #if not stage_swarm_dict:
+                #    stage_this_job_finished = False
+                #    continue
+                if run_unit.swarm_id is None:
+                    stage_swarm_dict = stage_anchor_dict
+                else:
+                    stage_swarm_dict = (stage_anchor_dict.get("swarms") or {}).get(
+                        str(run_unit.swarm_id)) or {}
+                if not stage_swarm_dict or (
+                        "progress" not in stage_swarm_dict
+                        and "finished" not in stage_swarm_dict):
+                    stage_this_job_finished = False
+                    continue
                 # Now we have the information specific to this stage/anchor/swarm
                 swarm_attained = stage_swarm_dict.get("finished", False)
                 if not swarm_attained:
@@ -214,9 +229,9 @@ async def do_job(
         """
         import sys
         import subprocess
-        stage_index = args[0]
-        stage_spec = job_spec.stage_specs[stage_index]
-        
+        list_index = args[0]
+        stage_spec = job_spec.stage_specs[list_index]
+        stage_index = stage_spec.stage_index
         
         model_filename = os.path.join(job_spec.remote_root_dir, "model.json")
         assert os.path.exists(model_filename), f"Model file does not exist: {model_filename}"
@@ -252,30 +267,32 @@ async def do_job(
             for proc in procs:
                 rc = proc.wait()
                 if rc != 0:
-                    sys.exit(rc)
+                    raise RuntimeError(
+                        f"seekr exited with code {rc}; output is {output_file_path}")
                 
         await asyncio.sleep(1)
         return
 
     # Launch all the stage runs
+    stage_tasks = []
     last_stage_task = None
-    for stage_spec in job_spec.stage_specs:
-        stage_index = stage_spec.stage_index
-        stage_task = run_stage(stage_index, last_stage_task)
+    for list_index, stage_spec in enumerate(job_spec.stage_specs):
+        stage_task = run_stage(list_index, last_stage_task)
+        stage_tasks.append(stage_task)
         last_stage_task = stage_task
-
     # Create the monitor loop
     stop_event = asyncio.Event()
     status_writer_task = asyncio.create_task(
         status_writer_loop(job_spec, stop_event))
-
-    await asyncio.gather(last_stage_task)
-    stop_event.set()
-    status_writer_task.cancel()
     try:
-        await status_writer_task
-    except asyncio.CancelledError:
-        pass
+        await asyncio.gather(*stage_tasks)
+    finally:
+        stop_event.set()
+        status_writer_task.cancel()
+        try:
+            await status_writer_task
+        except asyncio.CancelledError:
+            pass
     #await finish_all_stages_successful()
     if telemetry is not None:
         await telemetry.stop()
@@ -286,7 +303,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="Script running interior to a remote/cloud Seekrflow job.")
     parser.add_argument(
-        "job-spec", help="The path to the JobSpec JSON file.")
+        "job_spec", help="The path to the JobSpec JSON file.")
     args = parser.parse_args()
     job_spec = args.job_spec
 

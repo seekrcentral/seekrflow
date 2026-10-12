@@ -11,7 +11,6 @@ def direct_run_workload(args):
     import sys
     import time
     import json
-    import shlex
     import pathlib
     import subprocess
     import importlib.util
@@ -24,7 +23,16 @@ def direct_run_workload(args):
     job_name = manager_payload["resource_payload"]["job_name"]
     cpus_per_task = manager_payload["resource_payload"]["cpus"]
     
-    job_specs = manager_payload["job_specs"]
+    #job_specs = manager_payload["job_specs"]
+    # Convert the dictionary of job specs to JobSpec objects.
+    namespace = {}
+    exec(manager_payload["runner_files"]["structures.py"], namespace)
+    JobSpec = namespace["JobSpec"]
+    job_specs = [
+        JobSpec.from_dict(spec) if isinstance(spec, dict) else spec
+        for spec in manager_payload["job_specs"]
+    ]
+    
     job_py_source = manager_payload["runner_files"]["job.py"]
     structures_py_source = manager_payload["runner_files"]["structures.py"]
     
@@ -40,7 +48,7 @@ def direct_run_workload(args):
             if stage_spec.benchmark:
                 benchmark_mode = True
         for run_unit in job_spec.run_units:
-            if run_unit.anchor is not "any":
+            if run_unit.anchor != "any":
                 anchor_indices.add(run_unit.anchor)
             if run_unit.swarm_id is not None:
                 swarm_indices.add(run_unit.swarm_id)
@@ -74,7 +82,7 @@ def direct_run_workload(args):
         has its content file names split by underscore and the ID is after the first
         underscore or something.
         """
-        direct_runner_dir = get_direct_dir(root_dir)
+        direct_runner_dir = get_direct_dir(root_dir_path)
         if not direct_runner_dir.exists():
             return 0
         files = sorted(
@@ -124,7 +132,7 @@ def direct_run_workload(args):
                 self.filename = str(path_basename)
             # Creates root_dir/.direct_runner; fails if root_dir is missing
             path.parent.mkdir(exist_ok=True)
-            path_tmp = path.with_suffix(".tmp")
+            path_tmp = path.with_name(path.name + f".{os.getpid()}.tmp")
             with open(path_tmp, "w") as f:
                 json.dump(asdict(self), f, indent=2)
             os.rename(path_tmp, path)
@@ -205,11 +213,12 @@ def direct_run_workload(args):
     stage_state_basenames = []
     for stage_index in stage_indices:
         stage_info_filename = stage_dir_path / f"stage_info_{internal_id}_{stage_index}.json"
-        stage_state_filename = stage_dir_path / f"stage_state_{internal_id}_{stage_index}_{array_index}.json"
         stage_info_basenames.append(stage_info_filename.name)
-        stage_state_basenames.append(stage_state_filename.name)
         stage_info_filenames.append(str(stage_info_filename))
-        stage_state_filenames.append(str(stage_state_filename))
+        for array_index in array_indices:
+            stage_state_filename = stage_dir_path / f"stage_state_{internal_id}_{stage_index}_{array_index}.json"
+            stage_state_basenames.append(stage_state_filename.name)
+            stage_state_filenames.append(str(stage_state_filename))
 
     # Write the job.py and structures.py files to the root/.seekr_jobs/ directory.
     seekr_jobs_dir = root_dir_path / ".seekr_jobs"
@@ -220,8 +229,10 @@ def direct_run_workload(args):
     structures_py_path.write_text(structures_py_source)
 
     # Import the job.py and structures.py files.
-    spec = importlib.util.spec_from_file_location("job", structures_py_path)
+    spec = importlib.util.spec_from_file_location(
+        "seekr_job_structures", structures_py_path)
     structures_module = importlib.util.module_from_spec(spec)
+    sys.modules["seekr_job_structures"] = structures_module
     spec.loader.exec_module(structures_module)
     StageInfo = structures_module.StageInfo
     StageState = structures_module.StageState
@@ -245,14 +256,14 @@ def direct_run_workload(args):
         stage_info_filenames=stage_info_basenames,
         stage_state_filenames=stage_state_basenames,
     )
-    direct_info.save(root_dir_path=root_dir_path, path=direct_info_basename)
+    direct_info.save(root_dir_path=root_dir_path)
     direct_state = DirectState(
         internal_id=internal_id,
         filename=direct_state_basename,
         direct_info_filename=direct_info_basename,
         state="pending",
     )
-    direct_state.save(root_dir_path=root_dir_path, path=direct_state_basename)
+    direct_state.save(root_dir_path=root_dir_path)
     
     starting_stage_infos = []
     starting_stage_states = []
@@ -263,22 +274,24 @@ def direct_run_workload(args):
             anchor_indices=anchor_indices,
             swarm_indices=swarm_indices,
             filename=stage_info_basenames[i],
-            stage_state_filename=stage_state_basenames[i],
             starting_timestamp=time.time(),
         )
-        starting_stage_info.save(root_dir_path=root_dir_path, path=stage_info_basenames[i])
-        starting_stage_state = StageState(
-            internal_id=internal_id,
-            state="unknown",
-            finished=False,
-            stage_anchor_swarm_progress_list=None,
-            status_info=None,
-            notes=None,
-            filename=stage_state_basenames[i],
-            stage_info_filename=stage_info_basenames[i],
-            latest_timestamp=time.time(),
-        )
-        starting_stage_state.save(root_dir_path=root_dir_path, path=stage_state_basenames[i])
+        starting_stage_info.save(path=root_dir_path / ".stage_info_states" / stage_info_basenames[i])
+        
+        for j, array_index in enumerate(array_indices):
+            stage_array_index = i * len(array_indices) + j
+            starting_stage_state = StageState(
+                internal_id=internal_id,
+                state="unknown",
+                finished=False,
+                stage_anchor_swarm_progress_list=None,
+                status_info=None,
+                notes=None,
+                filename=stage_state_basenames[stage_array_index],
+                stage_info_filename=stage_info_basenames[i],
+                latest_timestamp=time.time(),
+            )
+            starting_stage_state.save(root_dir_path=root_dir_path, path=stage_dir_path / stage_state_basenames[stage_array_index])
         
     # 2. submit the job to direct
     log_dir_path.mkdir(parents=True, exist_ok=True)
@@ -315,11 +328,11 @@ def direct_run_workload(args):
     direct_info.process_stdout_filenames = stdout_basenames
     direct_info.process_stderr_filenames = stderr_basenames
     direct_info.submitted_at = time.time()
-    direct_info.save(root_dir_path=root_dir_path, path=direct_info_basename)
+    direct_info.save(root_dir_path=root_dir_path)
     direct_state.state = "running"
     direct_state.last_timestamp = time.time()
     direct_state.last_known_jobs = [str(pid) for pid in process_ids]
-    direct_state.save(root_dir_path=root_dir_path, path=direct_state_basename)
+    direct_state.save(root_dir_path=root_dir_path)
 
     return {
         "success": True, 
@@ -373,7 +386,7 @@ def direct_status_workload(args):
                 self.filename = str(path_basename)
             # Creates root_dir/.direct_runner; fails if root_dir is missing
             path.parent.mkdir(exist_ok=True)
-            path_tmp = path.with_suffix(".tmp")
+            path_tmp = path.with_name(path.name + f".{os.getpid()}.tmp")
             with open(path_tmp, "w") as f:
                 json.dump(asdict(self), f, indent=2)
             os.rename(path_tmp, path)
@@ -512,6 +525,35 @@ def direct_status_workload(args):
                         combined.extend(member.get(field) or [])
                     merged[field] = combined or None
                 stage_dicts_by_stage_index[stage_index] = merged
+            
+            stage_states = {
+                entry["state"] for entry in stage_dicts_by_stage_index.values()
+            }
+            stages_completed = bool(stage_states) and stage_states == {"completed"}
+            any_running = any(
+                item["state"] == "running"
+                for item in direct_dicts_by_array_index.values()
+            )
+            stderr_by_array_index = {
+                index: name
+                for index, name in zip(
+                    info_array_indices,
+                    direct_info.get("process_stderr_filenames") or [],
+                )
+            }
+            log_dir = direct_info.get("log_dir") or "logs"
+            if not any_running and not stages_completed:
+                for array_index, item in direct_dicts_by_array_index.items():
+                    stderr_name = stderr_by_array_index.get(array_index)
+                    tail = ""
+                    if stderr_name:
+                        err_path = root_dir_path / log_dir / stderr_name
+                        if err_path.is_file():
+                            lines = err_path.read_text(errors="replace").splitlines()
+                            tail = "\n".join(lines[-10:])
+                    item["state"] = "failed"
+                    item["error"] = tail or "process exited before the stage completed"
+
             job_dicts_by_job_id[job["job_id"]] = {
                 "manager_dicts_by_array_index": direct_dicts_by_array_index,
                 "stage_dicts_by_stage_index": stage_dicts_by_stage_index,

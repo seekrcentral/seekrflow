@@ -35,6 +35,8 @@ def client(
     Orchestrate a batch of seekrflow workflows.
     """
     curdir = os.getcwd()
+    output_file = os.path.abspath(output_file)
+    control_file = os.path.abspath(control_file)
     if batch.batch_directory is not None:
         os.chdir(batch.batch_directory)
     session = batch.create_session(output_file, control_file)

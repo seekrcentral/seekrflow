@@ -5,11 +5,12 @@ and cancellation.
 
 # NOTE: notice that this was changed from 'workflow' to 'workload'
 # TODO: combine with PBS to make it a single module. (DRY)
-def slurm_run_workload(args):
+def slurm_pbs_run_workload(args):
     """
     Submit a remote workload to SLURM.
     """
     import os
+    import sys
     import time
     import json
     import shlex
@@ -33,7 +34,16 @@ def slurm_run_workload(args):
     scheduler_options = manager_payload["resource_payload"]["scheduler_options"]
     worker_init = manager_payload["resource_payload"]["worker_init"]
     
-    job_specs = manager_payload["job_specs"]
+    #job_specs = manager_payload["job_specs"]
+    # Convert the dictionary of job specs to JobSpec objects.
+    namespace = {}
+    exec(manager_payload["runner_files"]["structures.py"], namespace)
+    JobSpec = namespace["JobSpec"]
+    job_specs = [
+        JobSpec.from_dict(spec) if isinstance(spec, dict) else spec
+        for spec in manager_payload["job_specs"]
+    ]
+    
     job_py_source = manager_payload["runner_files"]["job.py"]
     structures_py_source = manager_payload["runner_files"]["structures.py"]
     
@@ -49,7 +59,7 @@ def slurm_run_workload(args):
             if stage_spec.benchmark:
                 benchmark_mode = True
         for run_unit in job_spec.run_units:
-            if run_unit.anchor is not "any":
+            if run_unit.anchor != "any":
                 anchor_indices.add(run_unit.anchor)
             if run_unit.swarm_id is not None:
                 swarm_indices.add(run_unit.swarm_id)
@@ -93,7 +103,7 @@ def slurm_run_workload(args):
         has its content file names split by underscore and the ID is after the first
         underscore or something.
         """
-        batch_runner_dir = get_batch_dir(root_dir)
+        batch_runner_dir = get_batch_dir(root_dir_path)
         if not batch_runner_dir.exists():
             return 0
         files = sorted(
@@ -168,7 +178,7 @@ def slurm_run_workload(args):
                 self.filename = str(path_basename)
             # Creates root_dir/.batch_runner; fails if root_dir is missing
             path.parent.mkdir(exist_ok=True)
-            path_tmp = path.with_suffix(".tmp")
+            path_tmp = path.with_name(path.name + f".{os.getpid()}.tmp")
             with open(path_tmp, "w") as f:
                 json.dump(asdict(self), f, indent=2)
             os.rename(path_tmp, path)
@@ -210,7 +220,7 @@ def slurm_run_workload(args):
                 self.filename = str(path_basename)
             # Creates root_dir/.batch_runner; fails if root_dir is missing
             path.parent.mkdir(exist_ok=True)
-            path_tmp = path.with_suffix(".tmp")
+            path_tmp = path.with_name(path.name + f".{os.getpid()}.tmp")
             with open(path_tmp, "w") as f:
                 json.dump(asdict(self), f, indent=2)
             os.rename(path_tmp, path)
@@ -252,11 +262,12 @@ def slurm_run_workload(args):
     stage_state_basenames = []
     for stage_index in stage_indices:
         stage_info_filename = stage_dir_path / f"stage_info_{internal_id}_{stage_index}.json"
-        stage_state_filename = stage_dir_path / f"stage_state_{internal_id}_{stage_index}.json"
         stage_info_basenames.append(stage_info_filename.name)
-        stage_state_basenames.append(stage_state_filename.name)
         stage_info_filenames.append(str(stage_info_filename))
-        stage_state_filenames.append(str(stage_state_filename))
+        for array_index in array_indices:
+            stage_state_filename = stage_dir_path / f"stage_state_{internal_id}_{stage_index}_{array_index}.json"
+            stage_state_basenames.append(stage_state_filename.name)
+            stage_state_filenames.append(str(stage_state_filename))
 
     # Write the job.py and structures.py files to the root/.seekr_jobs/ directory.
     seekr_jobs_dir = root_dir_path / ".seekr_jobs"
@@ -267,8 +278,10 @@ def slurm_run_workload(args):
     structures_py_path.write_text(structures_py_source)
 
     # Import the job.py and structures.py files.
-    spec = importlib.util.spec_from_file_location("job", structures_py_path)
+    spec = importlib.util.spec_from_file_location(
+        "seekr_job_structures", structures_py_path)
     structures_module = importlib.util.module_from_spec(spec)
+    sys.modules["seekr_job_structures"] = structures_module
     spec.loader.exec_module(structures_module)
     StageInfo = structures_module.StageInfo
     StageState = structures_module.StageState
@@ -298,7 +311,7 @@ def slurm_run_workload(args):
         stage_info_filenames=stage_info_basenames,
         stage_state_filenames=stage_state_basenames,
     )
-    batch_info.save(root_dir_path=root_dir_path, path=batch_info_basename)
+    batch_info.save(root_dir_path=root_dir_path)
     batch_states = []
     for array_index, batch_state_basename in zip(array_indices, batch_state_basenames):
         batch_state = BatchState(
@@ -307,7 +320,7 @@ def slurm_run_workload(args):
             batch_info_filename=batch_info_basename,
             state="pending",
         )
-        batch_state.save(root_dir_path=root_dir_path, path=batch_state_basename)
+        batch_state.save(root_dir_path=root_dir_path)
         batch_states.append(batch_state)
     
     starting_stage_infos = []
@@ -319,22 +332,24 @@ def slurm_run_workload(args):
             anchor_indices=anchor_indices,
             swarm_indices=swarm_indices,
             filename=stage_info_basenames[i],
-            stage_state_filename=stage_state_basenames[i],
             starting_timestamp=time.time(),
         )
-        starting_stage_info.save(root_dir_path=root_dir_path, path=stage_info_basenames[i])
-        starting_stage_state = StageState(
-            internal_id=internal_id,
-            state="unknown",
-            finished=False,
-            stage_anchor_swarm_progress_list=None,
-            status_info=None,
-            notes=None,
-            filename=stage_state_basenames[i],
-            stage_info_filename=stage_info_basenames[i],
-            latest_timestamp=time.time(),
-        )
-        starting_stage_state.save(root_dir_path=root_dir_path, path=stage_state_basenames[i])
+        starting_stage_info.save(path = root_dir_path / ".stage_info_states" / stage_info_basenames[i])
+        
+        for j, array_index in enumerate(array_indices):
+            stage_array_index = i * len(array_indices) + j
+            starting_stage_state = StageState(
+                internal_id=internal_id,
+                state="unknown",
+                finished=False,
+                stage_anchor_swarm_progress_list=None,
+                status_info=None,
+                notes=None,
+                filename=stage_state_basenames[stage_array_index],
+                stage_info_filename=stage_info_basenames[i],
+                latest_timestamp=time.time(),
+            )
+            starting_stage_state.save(root_dir_path=root_dir_path, path=stage_dir_path / stage_state_basenames[stage_array_index])
         
         #stage_info_command = f"python {stage_dir_path}/remote_status_monitor.py "\
         #    f"-r {root_dir} -I {internal_id} -S {stage_index} "\
@@ -425,11 +440,11 @@ def slurm_run_workload(args):
     batch_info.job_stdout_filenames = stdout_basenames
     batch_info.job_stderr_filenames = stderr_basenames
     batch_info.submitted_at = time.time()
-    batch_info.save(root_dir_path=root_dir_path, path=batch_info_basename)
+    batch_info.save(root_dir_path=root_dir_path)
     for batch_state in batch_states:
         batch_state.state = "queued"
         batch_state.last_timestamp = time.time()
-        batch_state.save(root_dir_path=root_dir_path, path=batch_state.filename)
+        batch_state.save(root_dir_path=root_dir_path)
     return {"success": True, "error": None, "internal_id": internal_id, "job_id": job_id,
             "job_name": job_name}
 
@@ -475,7 +490,7 @@ def slurm_pbs_status_workload(args):
                 self.filename = str(path_basename)
             # Creates root_dir/.batch_runner; fails if root_dir is missing
             path.parent.mkdir(exist_ok=True)
-            path_tmp = path.with_suffix(".tmp")
+            path_tmp = path.with_name(path.name + f".{os.getpid()}.tmp")
             with open(path_tmp, "w") as f:
                 json.dump(asdict(self), f, indent=2)
             os.rename(path_tmp, path)
@@ -718,7 +733,7 @@ def slurm_pbs_status_workload(args):
                     # TODO: something here to figure out what happened to the job we expected
                     batch_state.state = "idle"
                     batch_state.last_known_jobs = []
-                batch_state.save(root_dir_path=root_dir_path, path=batch_state_path.name)
+                batch_state.save(root_dir_path=root_dir_path, path=batch_state_path)
                 batch_state_dict = asdict(batch_state)
                 batch_dicts_by_array_index[array_index] = batch_state_dict
             
