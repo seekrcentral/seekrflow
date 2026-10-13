@@ -213,6 +213,18 @@ class StageWorkflow:
                 silent=True,
             )
         except Exception as e:
+            if isinstance(e, ImportError):
+                self.last_error = f"probe failed: {e}"
+                self.control_file_semaphore = "wait"
+                self.semaphore = "wait"
+                self.manager_status = "failed"
+                for stage in self.stage_list:
+                    self.stage_state[stage.name] = "error"
+                print(
+                    f"[remote-probe] stage {self.stage_list[0].name}: "
+                    f"{self.last_error}; setting semaphore=wait"
+                )
+                return "wait"
             print(
                 f"[remote-probe] stage {self.stage_list[0].name}: "
                 f"probe failed ({e}); not submitting until state can be read"
@@ -577,7 +589,7 @@ class StageWorkflow:
                     if pre_action == "reattach":
                         self.manager_status = "running"
                         return
-                    if pre_action == "defer":
+                    if pre_action in ("defer", "wait"):
                         return
 
                 time_limit_override = self._compute_submit_time_limit_override(
@@ -674,6 +686,7 @@ class StageWorkflow:
             stages[stage.name] = {
                 "name": stage.name,
                 "index": stage.index,
+                "scale": getattr(stage, "scale_type", None),
                 "stage_state": self.stage_state.get(stage.name, "unknown"),
                 "force_overwrite": self.force_overwrite[stage.name],
                 "benchmark_mode": self.benchmark_mode[stage.name],
@@ -1112,6 +1125,7 @@ async def monitor_session_pipelines(
     Monitor the session pipelines.
     """
     stop = False
+    dead_resources: set[str] = set()
     while not stop:
         # Make status payload for all pipelines in the session
         ran_nothing = True
@@ -1151,6 +1165,8 @@ async def monitor_session_pipelines(
                     [system_name]["jobs"].append(job_dict)
 
         for resource_name, payload in status_payloads_by_resource.items():
+            if resource_name in dead_resources:
+                continue
             resource = resource_dict[resource_name]
             status = None
             try:
@@ -1160,6 +1176,24 @@ async def monitor_session_pipelines(
                     manager_payload=payload,
                 )
             except Exception as e:
+                if isinstance(e, ImportError):
+                    dead_resources.add(resource_name)
+                    for pipeline in pipelines:
+                        for sw in pipeline.stage_workflows:
+                            if sw.resource is None or sw.resource.name != resource_name:
+                                continue
+                            if sw.semaphore != "go":
+                                continue
+                            sw.last_error = f"status failed: {e}"
+                            sw.control_file_semaphore = "wait"
+                            sw.semaphore = "wait"
+                            sw.manager_status = "failed"
+                            for stage in sw.stage_list:
+                                sw.stage_state[stage.name] = "error"
+                    print(
+                        f"[remote-status] {resource_name}: {e}; setting semaphore=wait"
+                    )
+                    continue
                 print(
                     f"[remote-status] {resource_name}: "
                     f"status call raised an exception: {e}"
