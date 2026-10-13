@@ -388,9 +388,9 @@ def slurm_pbs_run_workload(args):
         if constraint: 
             slurm_args += ["--constraint", constraint]
         if scheduler_options: 
-            slurm_args += [scheduler_options]
+            slurm_args += shlex.split(scheduler_options)
 
-        slurm_args += ["--wrap", f"{wrap_cmd}; rc=$?; exit $rc"]
+        slurm_args += ["--wrap", "bash -lc " + shlex.quote(f"{wrap_cmd}; rc=$?; exit $rc")]
         out = run(["bash", "-lc", " ".join(shlex.quote(x) for x in slurm_args)])
         job_id = out[1].strip().split()[-1]
     
@@ -514,6 +514,7 @@ def slurm_pbs_status_workload(args):
         return out.returncode, out.stdout.strip(), out.stderr.strip()
     # SLURM-specific functions
     def parse_raw_state_slurm(raw_state: str) -> str:
+        raw_state = raw_state.strip().lower()
         if raw_state == "running":
             return "running"
         elif (raw_state == "queued") or (raw_state == "pending") or (raw_state == "configuring") \
@@ -528,7 +529,8 @@ def slurm_pbs_status_workload(args):
         elif (raw_state == "completing") or (raw_state == "completed"):
             return "completed"
         elif (raw_state == "timeout") or (raw_state == "deadline"):
-            return "idle"
+            #return "idle" # what I would have normally done
+            return "failed"
         else:
             return "unknown"
 
@@ -538,8 +540,10 @@ def slurm_pbs_status_workload(args):
         for line in (output or "").splitlines():
             job_id, array_index, raw_state, elapsed = line.split("|")
             state = parse_raw_state_slurm(raw_state)
-            if not array_index.isdigit():
+            if array_index.isdigit():
                 index = int(array_index)
+            else:
+                index = 0
             state_by_task[(job_id, index)] = state
             elapsed_by_task[(job_id, index)] = elapsed
         return state_by_task, elapsed_by_task
@@ -730,9 +734,22 @@ def slurm_pbs_status_workload(args):
                     batch_state.last_known_elapsed = elapsed_by_task[(job_id, array_index)]
                     batch_state.last_known_jobs = [job_id]
                 else:
-                    # TODO: something here to figure out what happened to the job we expected
-                    batch_state.state = "idle"
+                    finished = True
+                    for stage_index in stage_indices:
+                        stage_state_filename = (
+                            stage_dir_path
+                            / f"stage_state_{internal_id}_{stage_index}_{array_index}.json"
+                        )
+                        if not stage_state_filename.exists():
+                            finished = False
+                            break
+                        member = parse_json_file_to_dict(stage_state_filename)
+                        if member.get("state") != "completed" or not member.get("finished"):
+                            finished = False
+                            break
+                    batch_state.state = "completed" if finished else "failed"
                     batch_state.last_known_jobs = []
+                    
                 batch_state.save(root_dir_path=root_dir_path, path=batch_state_path)
                 batch_state_dict = asdict(batch_state)
                 batch_dicts_by_array_index[array_index] = batch_state_dict

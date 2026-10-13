@@ -255,6 +255,13 @@ class Resource_direct(Resource_base):
         default="",
         validator=validators.instance_of(str),
     )
+    max_concurrent_systems: int | None = field(
+        default=1,
+        validator=validators.optional(validators.and_(
+            validators.instance_of(int),
+            validators.ge(1),
+        )),
+    )
     remote_interface: (
         Remote_interface_globus_compute_sdk
         | Remote_interface_ssh
@@ -334,6 +341,13 @@ class Resource_remote_slurm(Resource_remote_base):
         default=1,
         validator=validators.instance_of(int),
     )
+    max_concurrent_systems: int | None = field(
+        default=1,
+        validator=validators.optional(validators.and_(
+            validators.instance_of(int),
+            validators.ge(1),
+        )),
+    )
     remote_interface: (
         Remote_interface_globus_compute_sdk
         | Remote_interface_ssh
@@ -406,6 +420,13 @@ class Resource_remote_pbs(Resource_remote_base):
         default=1,
         validator=[validators.instance_of(int),
                             validators.ge(1)],
+    )
+    max_concurrent_systems: int | None = field(
+        default=1,
+        validator=validators.optional(validators.and_(
+            validators.instance_of(int),
+            validators.ge(1),
+        )),
     )
     remote_interface: (
         Remote_interface_globus_compute_sdk
@@ -489,6 +510,13 @@ class Resource_cloud_aws(Resource_cloud_base):
         default=1,
         validator=[validators.instance_of(int), validators.ge(1)],
         )
+    max_concurrent_systems: int | None = field(
+        default=1,
+        validator=validators.optional(validators.and_(
+            validators.instance_of(int),
+            validators.ge(1),
+        )),
+    )
     transfer_settings: Transfer_settings_aws_s3 = field(
         default=Factory(Transfer_settings_aws_s3),
         )

@@ -61,6 +61,8 @@ STATUS_TMP_GLOB = ".seekrflow_job_status.*"
 # and the model.json file is transferred, but some other key files are not?
 FORWARD_TRANSFER_SENTINELS = ("model.json",)
 
+_ACTIVE_TASKS: dict[str, object] = {}
+_CANCELLED_TASKS: set[str] = set()
 
 class GlobusTransferError(RuntimeError):
     """A Globus transfer task did not deliver the files."""
@@ -344,6 +346,9 @@ def await_transfer_task(
     last_task: dict | None = None
     while True:
         try:
+            if task_id in _CANCELLED_TASKS:
+                raise GlobusTransferError(
+                    f"globus-transfer: task {task_id} ({label}) cancelled")
             finished = transfer_client.task_wait(
                 task_id, timeout=poll_interval, polling_interval=poll_interval)
             task = dict(transfer_client.get_task(task_id))
@@ -404,6 +409,13 @@ def cancel_transfer_task(transfer_client, task_id: str) -> None:
     except Exception as e:
         print(f"[transfer] could not cancel globus task {task_id}: {e}")
 
+def cancel_running_transfers() -> None:
+    """
+    Cancel all running transfer tasks.
+    """
+    for task_id, transfer_client in list(_ACTIVE_TASKS.items()):
+        _CANCELLED_TASKS.add(task_id)
+        cancel_transfer_task(transfer_client, task_id)
 
 def list_destination_names(
         transfer_client,
@@ -560,6 +572,7 @@ def transfer_files_with_globus(
                     continue
                 raise classified from e
 
+        _ACTIVE_TASKS[task_id] = transfer_client
         try:
             await_transfer_task(transfer_client, task_id, label)
             verify_destination_contents(
@@ -609,5 +622,8 @@ def transfer_files_with_globus(
                 time.sleep(retry_sleep)
                 continue
             raise classified from e
+        finally:
+            _ACTIVE_TASKS.pop(task_id, None)
+
     if last_error is not None:
         raise last_error

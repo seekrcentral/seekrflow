@@ -6,9 +6,25 @@ way to transfer files. However, this can be annoying if, say, two-
 factor authentication is always required.
 """
 
+import os
 import six
-import fabric
 import shlex
+import fabric
+import signal
+import subprocess
+
+_TRANSFER_PIDS: set[int] = set()
+
+def cancel_running_transfers() -> None:
+    """
+    Cancel all running transfer processes.
+    """
+    for pid in list(_TRANSFER_PIDS):
+        try:
+            os.killpg(pid, signal.SIGTERM)
+        except OSError:
+            pass
+    
 
 class Connection(fabric.Connection):
     def rsync(self, source, target, exclude=(),  rsync_opts="", ssh_opts="",
@@ -44,7 +60,31 @@ class Connection(fabric.Connection):
 
         upload_direction = f"{source} {remote_prefix}:{target}" \
             if not backwards else f"{remote_prefix}:{source} {target}"
-        return self.local(f"rsync {options} {upload_direction}")
+        #return self.local(f"rsync {options} {upload_direction}")
+        """ # DEBUG
+        cmd = f"rsync {options} {upload_direction}"
+        proc = subprocess.Popen(cmd, shell=True, start_new_session=True)
+        _TRANSFER_PIDS.add(proc.pid)
+        try:
+            rc = proc.wait()
+        finally:
+            _TRANSFER_PIDS.discard(proc.pid)
+        if rc != 0:
+            raise RuntimeError(f"rsync exited with {rc}")
+        """
+        cmd = f"rsync {options} {upload_direction}"
+        print(f"rsync command: {cmd}")
+        proc = subprocess.Popen(
+            cmd, shell=True, start_new_session=True,
+            stderr=subprocess.PIPE, text=True)
+        _TRANSFER_PIDS.add(proc.pid)
+        try:
+            _, err = proc.communicate()
+        finally:
+            _TRANSFER_PIDS.discard(proc.pid)
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"rsync exited with {proc.returncode}\n{err}")
 
 def transfer_files_with_rsync(
         local_path: str, 
@@ -73,14 +113,23 @@ def transfer_files_with_rsync(
     if not remote_path.endswith("/"):
         remote_path += "/"
     # Ensure the remote destination directory exists before rsync upload.
-    c.run(f"mkdir -p {shlex.quote(remote_path)}", hide=True)
+    # DEBUG
+    #c.run(f"mkdir -p {shlex.quote(remote_path)}", hide=True)
+    print(
+        f"ssh mkdir: {remote_username}@{remote_hostname}:{port} {remote_path}")
+    try:
+        c.run(f"mkdir -p {shlex.quote(remote_path)}", hide=True)
+    except Exception as e:
+        raise RuntimeError(
+            f"ssh mkdir failed ({type(e).__name__}): {e}"
+        ) from e
     
     if backwards:
-        c.rsync(source=remote_path, target=local_path, rsync_opts="-q -c -u", 
+        c.rsync(source=remote_path, target=local_path, rsync_opts="-uc", 
                 backwards=True)
 
     else:
-        c.rsync(source=local_path, target=remote_path, rsync_opts="-q -c -u", 
+        c.rsync(source=local_path, target=remote_path, rsync_opts="-uc", 
                 backwards=False)
 
     print("Transfer complete!")

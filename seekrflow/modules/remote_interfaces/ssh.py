@@ -52,13 +52,24 @@ def submit_remote_workload_with_ssh(
         hide=True,             # don't echo to our local terminal
         out_stream=out_buf,    # capture live stdout here
         err_stream=err_buf,    # capture live stderr here
+        timeout=SSH_RESULT_TIMEOUT_S,
     )
     # Track how much we’ve already printed from the buffers
     seen_out = seen_err = 0
 
     try:
         # Process finished — grab the final Result (exit code, full buffers, etc.)
-        promise.join(timeout=SSH_RESULT_TIMEOUT_S)
+        try:
+            promise.join()
+        except Exception:
+            so = out_buf.getvalue()
+            se = err_buf.getvalue()
+            raise RuntimeError(
+                "SSH command failed.\n"
+                f"stdout:\n{so[-4000:]}\n"
+                f"stderr:\n{se[-4000:]}"
+            ) from None
+            
         so = out_buf.getvalue()
         if len(so) > seen_out:
             seen_out = len(so)

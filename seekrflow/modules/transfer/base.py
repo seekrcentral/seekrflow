@@ -77,3 +77,11 @@ def transfer_files_to_from_remote_resource(
         raise NotImplementedError(
             "Only rsync, globus, aws_s3 transfers are implemented.")
     return
+
+def cancel_running_transfers() -> None:
+    """
+    Cancel all running transfer processes.
+    """
+    transfer_rsync.cancel_running_transfers()
+    transfer_globus.cancel_running_transfers()
+

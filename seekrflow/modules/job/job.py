@@ -24,7 +24,7 @@ from seekrflow.modules.workflows import stage_procedures
 try: 
     from .structures import JobSpec
 except ImportError:
-    from seekrflow.modules.job.structures import JobSpec
+    from structures import JobSpec
 
 async def status_writer_loop(
         job_spec: JobSpec,

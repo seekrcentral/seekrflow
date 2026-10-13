@@ -12,6 +12,7 @@ import os
 import json
 import copy
 import typing
+import asyncio
 from typing import List, Dict
 
 from attrs import define, field, validators
@@ -65,13 +66,6 @@ class RunSession:
         default="", validator=validators.instance_of(str))
     control_file: str = field(
         default="", validator=validators.instance_of(str))
-    max_concurrent_systems: int | None = field(
-        default=None,
-        validator=validators.and_(
-            validators.optional(validators.instance_of(int)),
-            validators.optional(validators.ge(1)),
-        ),
-    )
     background_poll_interval: float = field(
         default=DEFAULT_BACKGROUND_POLL_INTERVAL,
         validator=validators.and_(
@@ -92,6 +86,10 @@ class RunSession:
             validators.instance_of(float),
             validators.gt(0.0),
         ),
+    )
+    limit_semaphores_by_resource: Dict[str, asyncio.Semaphore] = field(
+        default={},
+        validator=validators.instance_of(dict),
     )
 
 # TODO: put this somewhere else? Used by Batch objects which are used in
@@ -185,13 +183,6 @@ class Batch:
         validator=validators.and_(
             validators.instance_of(int),
             validators.ge(1),
-        ),
-    )
-    max_concurrent_systems: int | None = field(
-        default=None,
-        validator=validators.and_(
-            validators.optional(validators.instance_of(int)),
-            validators.optional(validators.ge(1)),
         ),
     )
     background_poll_interval: float = field(
@@ -368,7 +359,6 @@ class Batch:
             output_file=output_file,
             control_file=control_file,
             batch_directory=self.batch_directory,
-            max_concurrent_systems=self.max_concurrent_systems,
             background_poll_interval=self.background_poll_interval,
             focused_poll_interval=self.focused_poll_interval,
             telemetry_poll_interval=self.telemetry_poll_interval,

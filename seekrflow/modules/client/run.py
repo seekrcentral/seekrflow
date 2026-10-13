@@ -57,6 +57,24 @@ def _format_hms(seconds: float) -> str:
     minutes, secs = divmod(rem, 60)
     return f"{hours:02d}:{minutes:02d}:{secs:02d}"
 
+def _elapsed_seconds(values: list) -> float | None:
+    """
+    Longest scheduler elapsed time, or None when none is known.
+    """
+    best = None
+    for value in values:
+        if not isinstance(value, str) or not value:
+            continue
+        days, _, clock = value.partition("-")
+        if not clock:
+            days, clock = "0", days
+        parts = [int(part) for part in clock.split(":")]
+        while len(parts) < 3:
+            parts.insert(0, 0)
+        seconds = ((int(days) * 24 + parts[0]) * 60 + parts[1]) * 60 + parts[2]
+        if best is None or seconds > best:
+            best = seconds
+    return best
 
 def run_units_from_info(
         dimensions: list[dict],
@@ -156,6 +174,11 @@ class StageWorkflow:
     telemetry_poll_interval: float | None = attrs.field(default=None)
     detached_requested: bool = attrs.field(default=False)
     control_file_semaphore: str | None = attrs.field(default=None, repr=False)
+
+    submitted_at: float | None = attrs.field(default=None)
+    progress_at_submit: dict[str, dict] = attrs.field(factory=dict)
+    monitor_generation: int = attrs.field(default=0)
+    failed_job_id: str | None = attrs.field(default=None)
     
     async def probe_launch(self) -> str:
         """
@@ -379,7 +402,7 @@ class StageWorkflow:
 
         self.transfer_status = "completed"
         self.transfer_direction = None
-        self.manager_status = prior_status if backwards else "idle"
+        self.manager_status = prior_status # if backwards else "idle"
         self.transfer_relaunch_count = 0
 
     def apply_stage_dicts(
@@ -430,7 +453,7 @@ class StageWorkflow:
                     self.transfer_status = "skipped"
                     self.transfer_error = None
                     return
-            self.move_files(backwards=False)
+            await _run_blocking(self.move_files, backwards=False)
 
         dep_index = getattr(self.stage_list[0], "input_stage_index", 0)
         should_transfer = bool(self.transfer_from) or (
@@ -442,6 +465,8 @@ class StageWorkflow:
         # Run stage
         @self.workflow_engine.function_task
         async def run_stage(*args):
+            if self.semaphore in ("wait", "stop"):
+                return
             stage_names = [stage.name for stage in self.stage_list]
             if self.resource is None:
                 raise Exception(
@@ -588,6 +613,10 @@ class StageWorkflow:
                     job_spec.internal_id = internal_id
                 self.internal_id = internal_id
                 self.job_id = job_id
+                self.submitted_at = time.time()
+                self.progress_at_submit = {
+                    name: dict(values) for name, values in self.progress.items()
+                }
                 self.job_name = job_name
                 self.manager_status = "queued"
                     
@@ -620,13 +649,18 @@ class StageWorkflow:
         """
         Monitor for transfer requests.
         """
+        generation = self.monitor_generation
         while True:
-            if self.detached_requested or self.semaphore == "stop" or self.is_terminal():
+            if (
+                self.detached_requested
+                or self.semaphore in ("stop", "wait")
+                or self.monitor_generation != generation
+                or self.is_terminal()
+            ):
                 break
             if self.transfer_requested:
                 self.transfer_requested = False
                 await _run_blocking(self.move_files, backwards=True)
-
             await asyncio.sleep(STATUS_WRITE_INTERVAL)
 
     def status_snapshot(self) -> dict:
@@ -667,7 +701,7 @@ class StageWorkflow:
         Idempotent; safe to call on stages that never started.
         """
         self.semaphore = "stop"
-        self.manager_status = "idle"
+        #self.manager_status = "idle"
         if self.resource is None or self.job_id is None:
             return
         root_dir = workload_remote_local.resolve_model_directory(
@@ -741,6 +775,7 @@ class SeekrPipeline:
         default=None, repr=False)
     _stop_event: asyncio.Event | None = attrs.field(
         default=None, repr=False)
+    limit_semaphores_by_resource: dict = attrs.field(factory=dict, repr=False)
     
     def __attrs_post_init__(
             self, 
@@ -933,6 +968,18 @@ class SeekrPipeline:
 
         stop_event = asyncio.Event()
         self._stop_event = stop_event
+        held_slots: list[StageWorkflow] = []
+        def release_slot(stage_workflow: StageWorkflow) -> None:
+            """
+            Release a slot for the stage workflow.
+            """
+            if stage_workflow not in held_slots:
+                return
+            held_slots.remove(stage_workflow)
+            sem = self.limit_semaphores_by_resource.get(stage_workflow.resource.name)
+            if sem is not None:
+                sem.release()
+
         try:
             while True:
                 if self.detached_requested or stop_event.is_set():
@@ -944,9 +991,15 @@ class SeekrPipeline:
                         all_terminal = True
                         break
                     
+                    if stage_workflow in held_slots and (
+                            stage_workflow.is_terminal()
+                            or (stage_workflow.semaphore == "wait"
+                                and not stage_workflow.has_running_task_or_process())):
+                        release_slot(stage_workflow)
+
                     # If all stage semaphores in this stage_workflow are stopped
                     if stage_workflow.semaphore == "stop":
-                        stage_workflow.kill()
+                        await _run_blocking(stage_workflow.kill)
                         continue
 
                     # If stage dependencies are not satisfied
@@ -961,6 +1014,10 @@ class SeekrPipeline:
 
                     # If a stage in the workflow process or task is already running
                     if stage_workflow.has_running_task_or_process():
+                        all_terminal = False
+                        continue
+
+                    if stage_workflow.task is not None and not stage_workflow.task.done():
                         all_terminal = False
                         continue
 
@@ -990,7 +1047,18 @@ class SeekrPipeline:
                                 stage_workflow.transfer_from = \
                                     upstream_sw.resource.name
 
-                        await stage_workflow.create_tasks()
+                        #await stage_workflow.create_tasks()
+                        sem = self.limit_semaphores_by_resource.get(
+                            stage_workflow.resource.name)
+                        if sem is not None and stage_workflow not in held_slots:
+                            await sem.acquire()
+                            held_slots.append(stage_workflow)
+                        try:
+                            await stage_workflow.create_tasks()
+                        except Exception:
+                            release_slot(stage_workflow)
+                            raise
+
                         if stage_workflow.task is not None:
                             self.stage_tasks.append(stage_workflow.task)
                         all_terminal = False
@@ -1002,16 +1070,18 @@ class SeekrPipeline:
                 if all_terminal:
                     break
 
-                if all(
-                        sw.semaphore == "wait"
-                        and not sw.has_running_task_or_process()
-                        for sw in self.stage_workflows):
-                    return
+                #if all(
+                #        sw.semaphore == "wait"
+                #        and not sw.has_running_task_or_process()
+                #        for sw in self.stage_workflows):
+                #    return
 
                 await asyncio.sleep(MAIN_LOOP_INTERVAL)
 
         finally:
             stop_event.set()
+            for stage_workflow in list(held_slots):
+                release_slot(stage_workflow)
 
         if (not self.detached_requested) and len(self.stage_tasks) > 0:
             await asyncio.gather(*self.stage_tasks, return_exceptions=True)
@@ -1097,6 +1167,10 @@ async def monitor_session_pipelines(
                 await asyncio.sleep(STATUS_WRITE_INTERVAL)
                 continue
             if status is not None:
+                if not isinstance(status, dict) or status.get("success") is False or "payload" not in status:
+                    print(f"[remote-status] {resource_name}: {status.get('error') if isinstance(status, dict) else status}")
+                    await asyncio.sleep(STATUS_WRITE_INTERVAL)
+                    continue
                 return_payload = status["payload"]
                 for pipeline in pipelines:
                     system_name = pipeline.systemrun.name
@@ -1124,7 +1198,43 @@ async def monitor_session_pipelines(
                                 sw.manager_status = "queued"
                             elif "failed" in manager_state_set:
                                 sw.manager_status = "failed"
-                                if sw.semaphore == "go":
+                                if sw.failed_job_id != sw.job_id:
+                                    sw.monitor_generation += 1
+                                    sw.failed_job_id = sw.job_id
+                                stage_dicts = job_dict.get("stage_dicts_by_stage_index") or {}
+
+                                # Check if we made any progress since previous submission
+                                made_progress = False
+                                for stage in sw.stage_list:
+                                    entry = stage_dicts.get(stage.index) or stage_dicts.get(str(stage.index)) or {}
+                                    baseline = (sw.progress_at_submit or {}).get(stage.name) or {}
+                                    for key_stage_index, key_anchor, key_swarm_id, value in (
+                                            entry.get("stage_anchor_swarm_progress_list") or []):
+                                        if key_stage_index != stage.index:
+                                            continue
+                                        key = f"anchor_{key_anchor}_swarm_{key_swarm_id}"
+                                        if value > baseline.get(key, 0.0):
+                                            made_progress = True
+                                            break
+                                    if made_progress:
+                                        break
+                                elapsed_values = [
+                                    item.get("last_known_elapsed")
+                                    for item in manager_dicts_by_array_index.values()
+                                ]
+                                run_seconds = _elapsed_seconds(elapsed_values)
+                                # We don't want to count the queue time.
+                                if run_seconds is None:
+                                    run_seconds = 0
+                                #if run_seconds is None and sw.submitted_at is not None:
+                                #    run_seconds = time.time() - sw.submitted_at
+                                resubmit = (
+                                    sw.semaphore == "go"
+                                    and made_progress
+                                    and run_seconds is not None
+                                    and run_seconds > 120
+                                )
+                                if not resubmit and sw.semaphore == "go":
                                     errors = [
                                         item.get("error")
                                         for item in manager_dicts_by_array_index.values()
@@ -1134,8 +1244,8 @@ async def monitor_session_pipelines(
                                         errors[0] if errors
                                         else "job exited before completion"
                                     )
-                                    for stage in sw.stage_list:
-                                        sw.stage_state[stage.name] = "error"
+                                    #for stage in sw.stage_list:
+                                    #    sw.stage_state[stage.name] = "error"
                                     sw.control_file_semaphore = "wait"
                                     sw.semaphore = "wait"
                                     print(
@@ -1148,6 +1258,9 @@ async def monitor_session_pipelines(
 
                         stage_dicts_by_stage_index = job_dict["stage_dicts_by_stage_index"]
                         sw.apply_stage_dicts(stage_dicts_by_stage_index)
+                        if sw.semaphore == "wait" and sw.manager_status == "failed":
+                            for stage in sw.stage_list:
+                                sw.stage_state[stage.name] = "error"
 
         if ran_nothing:
             stop = True
@@ -1224,6 +1337,8 @@ async def control_file_reader_loop(
                             made_changes = True
                         else:
                             sw.semaphore = stage_workflow_control["semaphore"]
+                            if sw.semaphore == "stop":
+                                transfer_base.cancel_running_transfers()
                     
                     control_dict[system_name] = system_control
                 
@@ -1305,15 +1420,15 @@ def restore_prior_jobs(
 
 async def run_pipeline_pool(
         pipelines: list[SeekrPipeline],
-        limit: int | None,
+        #limit: int | None,
         ) -> None:
     """
     Run pipelines, with at most `limit` active. None runs them all.
     """
-    if limit is None or limit >= len(pipelines):
-        await asyncio.gather(*(pipeline.run_workflows() for pipeline in pipelines))
-        return
-    pending = list(pipelines)
+    #if limit is None or limit >= len(pipelines):
+    await asyncio.gather(*(pipeline.run_workflows() for pipeline in pipelines))
+    return
+    '''pending = list(pipelines)
     async def worker() -> None:
         while pending:
             pipeline = pending.pop(0)
@@ -1324,6 +1439,7 @@ async def run_pipeline_pool(
                 pending.append(pipeline)
                 await asyncio.sleep(MAIN_LOOP_INTERVAL)
     await asyncio.gather(*(worker() for _ in range(limit)))
+    '''
 
 async def drop_dead_restored_jobs(
         pipelines: list[SeekrPipeline],
@@ -1369,6 +1485,7 @@ async def launch_session_pipelines(
             print("[shutdown] forcing immediate exit")
             os._exit(1)
         print("\n\n=== Received interrupt signal ===")
+        transfer_base.cancel_running_transfers()
         for pipeline in pipelines:
             pipeline.shutting_down = True
             for stage_workflow in pipeline.stage_workflows:
@@ -1377,13 +1494,24 @@ async def launch_session_pipelines(
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, _on_interrupt)
     # Run the pipelines.
-    limit = getattr(session, "max_concurrent_systems", None)
+    session.limit_semaphores_by_resource = {}
+    for systemrun in session.systemrun_objects:
+        for resource in systemrun.seekrflow.run_settings.resources:
+            if resource.max_concurrent_systems is None:
+                continue
+            if resource.name not in session.limit_semaphores_by_resource:
+                asyncio_semaphore = asyncio.Semaphore(resource.max_concurrent_systems)
+                session.limit_semaphores_by_resource[resource.name] = asyncio_semaphore
+                for pipeline in pipelines:
+                    pipeline.limit_semaphores_by_resource[resource.name] = asyncio_semaphore
+            else:
+                asyncio_semaphore = session.limit_semaphores_by_resource[resource.name]
     try:
         await asyncio.gather(
             control_file_reader_loop(session.control_file, pipelines),
             status_writer_loop(session.output_file, pipelines),
             monitor_session_pipelines(pipelines),
-            run_pipeline_pool(pipelines, limit),
+            run_pipeline_pool(pipelines) #, limit),
         )
     finally:
         await session.workflow_engine.shutdown()
