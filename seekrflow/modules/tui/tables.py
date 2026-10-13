@@ -54,6 +54,15 @@ def progress(stage: dict) -> float:
     values = list((stage.get("progress") or {}).values())
     return sum(values) / len(values) if values else 0.0
 
+def system_progress(stages: list[dict]) -> str:
+    """
+    Mean progress of a system's stages, skipping logistic stages (which are
+    short) and stages with no scale. Blank if no stage counts.
+    """
+    values = [progress(r["stage"]) for r in stages
+              if r["stage"].get("scale") not in (None, "logistic")]
+    return f"{100 * sum(values) / len(values):.2f}" if values else ""
+
 def stage_rows(system_status: dict) -> list[dict]:
     """
     One row per stage, joined with the stage workflow that runs it.
@@ -123,8 +132,7 @@ SYSTEM_COLUMNS = [
         len(r["stages"]))),
     Column("Semaphore", 10, lambda r: "/".join(sorted(
         {s["stage"]["semaphore"] for s in r["stages"]})), SEMAPHORE_COLORS),
-    Column("Detach", 7, lambda r: "yes" if r["status"].get("detached_requested") else "",
-           "red"),
+    Column("Progress %", 10, lambda r: system_progress(r["stages"])),
     Column("Error", 0, lambda r: r["error"], "red"),
 ]
 
