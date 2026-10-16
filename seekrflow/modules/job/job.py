@@ -26,7 +26,7 @@ try:
 except ImportError:
     from structures import JobSpec
 
-async def status_writer_loop(
+async def status_job_writer_loop(
         job_spec: JobSpec,
         stop_event: asyncio.Event,
         ) -> None:
@@ -50,7 +50,7 @@ async def status_writer_loop(
         stage_states.append(stage_state)
         stage_infos.append(stage_info)
 
-    while not stop_event.is_set():
+    while True:
         # Write the status snaphots
         for i, stage_spec in enumerate(job_spec.stage_specs):
             stage_info = stage_infos[i]
@@ -75,8 +75,13 @@ async def status_writer_loop(
             stage_anchor_swarm_time_of_last_progress_list = []
             max_progress = 0.0
             stage_this_job_finished = True
+            scope = "unpartitioned"
+            for model_stage in model.stages:
+                if getattr(model_stage, "index", None) == stage_info.stage_index:
+                    scope = getattr(model_stage, "scope", "unpartitioned")
+                    break
+
             for run_unit in job_spec.run_units:
-                key = (stage_info.stage_index, run_unit.anchor, run_unit.swarm_id)
                 message_dict = seekr_status.status(
                         model,
                         instruction,
@@ -91,65 +96,75 @@ async def status_writer_loop(
                 if not stage_state_dict:
                     stage_this_job_finished = False
                     continue
-                anchor_key = str(run_unit.anchor) \
-                    if run_unit.anchor != "any" else "unpartitioned"
-                stage_anchor_dict = (stage_state_dict.get("anchors") or {}).get(anchor_key) or {}
-                if not stage_anchor_dict:
-                    stage_this_job_finished = False
-                    continue
-                #stage_swarm_dict = (stage_anchor_dict.get("swarms") or {}).get(
-                #    str(run_unit.swarm_id)) or {}
-                #if not stage_swarm_dict:
-                #    stage_this_job_finished = False
-                #    continue
-                if run_unit.swarm_id is None:
-                    stage_swarm_dict = stage_anchor_dict
+                anchors = stage_state_dict.get("anchors") or {}
+                if run_unit.anchor == "any" and scope == "partitioned":
+                    entries = [
+                        (int(key) if str(key).isdigit() else key, value)
+                        for key, value in anchors.items()
+                        if key != "unpartitioned" and isinstance(value, dict)
+                    ]
+                    if not entries:
+                        stage_this_job_finished = False
+                        continue
                 else:
-                    stage_swarm_dict = (stage_anchor_dict.get("swarms") or {}).get(
-                        str(run_unit.swarm_id)) or {}
-                if not stage_swarm_dict or (
-                        "progress" not in stage_swarm_dict
-                        and "finished" not in stage_swarm_dict):
-                    stage_this_job_finished = False
-                    continue
-                # Now we have the information specific to this stage/anchor/swarm
-                swarm_attained = stage_swarm_dict.get("finished", False)
-                if not swarm_attained:
-                    stage_this_job_finished = False
-                swarm_progress = stage_swarm_dict.get("progress", 0.0)
-                swarm_current_step = stage_swarm_dict.get("current_step", None)
-                swarm_total_steps = stage_swarm_dict.get("total_steps", None)
-                if swarm_current_step is None or swarm_total_steps is None:
-                    # Handle the BD situation
-                    swarm_current_step = stage_swarm_dict.get("trajectories_completed")
-                    swarm_total_steps = stage_swarm_dict.get("trajectories_needed")
-                stage_anchor_swarm_progress \
-                    = (stage_info.stage_index, run_unit.anchor, run_unit.swarm_id, swarm_progress)
-                if swarm_current_step is not None and swarm_total_steps is not None:
-                    # Then this completion criteria can know steps in advance
-                    if (swarm_current_step >= 0) and (key not in start_by_key):
-                        start_by_key[key] = swarm_current_step
+                    anchor_key = (
+                        "unpartitioned" if run_unit.anchor == "any"
+                        else str(run_unit.anchor)
+                    )
+                    entries = [(run_unit.anchor, anchors.get(anchor_key) or {})]
+
+
+                for anchor, stage_anchor_dict in entries:
+                    key = (stage_info.stage_index, anchor, run_unit.swarm_id)
+                    if run_unit.swarm_id is None:
+                        stage_swarm_dict = stage_anchor_dict
+                    else:
+                        stage_swarm_dict = (stage_anchor_dict.get("swarms") or {}).get(
+                            str(run_unit.swarm_id)) or {}
+                    if not stage_swarm_dict or (
+                            "progress" not in stage_swarm_dict
+                            and "finished" not in stage_swarm_dict):
+                        stage_this_job_finished = False
+                        continue
+                    # Now we have the information specific to this stage/anchor/swarm
+                    swarm_attained = stage_swarm_dict.get("finished", False)
+                    if not swarm_attained:
+                        stage_this_job_finished = False
+                    swarm_progress = stage_swarm_dict.get("progress", 0.0)
+                    swarm_current_step = stage_swarm_dict.get("current_step", None)
+                    swarm_total_steps = stage_swarm_dict.get("total_steps", None)
+                    if swarm_current_step is None or swarm_total_steps is None:
+                        # Handle the BD situation
+                        swarm_current_step = stage_swarm_dict.get("trajectories_completed")
+                        swarm_total_steps = stage_swarm_dict.get("trajectories_needed")
+                    stage_anchor_swarm_progress \
+                        = (stage_info.stage_index, anchor, run_unit.swarm_id, swarm_progress)
+                    if swarm_current_step is not None and swarm_total_steps is not None:
+                        # Then this completion criteria can know steps in advance
+                        if (swarm_current_step >= 0) and (key not in start_by_key):
+                            start_by_key[key] = swarm_current_step
+                        
+                        stage_anchor_swarm_current_step \
+                            = (stage_info.stage_index, anchor, run_unit.swarm_id, swarm_current_step)
+                        stage_anchor_swarm_total_steps \
+                            = (stage_info.stage_index, anchor, run_unit.swarm_id, swarm_total_steps)
+                        stage_anchor_swarm_current_step_list.append(stage_anchor_swarm_current_step)
+                        stage_anchor_swarm_total_steps_list.append(stage_anchor_swarm_total_steps)
                     
-                    stage_anchor_swarm_current_step \
-                        = (stage_info.stage_index, run_unit.anchor, run_unit.swarm_id, swarm_current_step)
-                    stage_anchor_swarm_total_steps \
-                        = (stage_info.stage_index, run_unit.anchor, run_unit.swarm_id, swarm_total_steps)
-                    stage_anchor_swarm_current_step_list.append(stage_anchor_swarm_current_step)
-                    stage_anchor_swarm_total_steps_list.append(stage_anchor_swarm_total_steps)
-                
-                if swarm_progress > 0.0:
-                    
-                    if key not in first_by_key:
-                        first_by_key[key] = time.time()
+                    if swarm_progress > 0.0:
+                        
+                        if key not in first_by_key:
+                            first_by_key[key] = time.time()
 
-                    stage_anchor_swarm_time_of_last_progress \
-                        = (stage_info.stage_index, run_unit.anchor, run_unit.swarm_id, time.time())
-                    stage_anchor_swarm_time_of_last_progress_list.append(
-                        stage_anchor_swarm_time_of_last_progress)
+                        stage_anchor_swarm_time_of_last_progress \
+                            = (stage_info.stage_index, anchor, run_unit.swarm_id, time.time())
+                        stage_anchor_swarm_time_of_last_progress_list.append(
+                            stage_anchor_swarm_time_of_last_progress)
 
-                stage_anchor_swarm_progress_list.append(stage_anchor_swarm_progress)
-                max_progress = max(max_progress, swarm_progress)
+                    stage_anchor_swarm_progress_list.append(stage_anchor_swarm_progress)
+                    max_progress = max(max_progress, swarm_progress)
 
+            stage_state.finished = stage_this_job_finished
             if stage_this_job_finished:
                 stage_state.state = "completed"
             elif max_progress > 0.0:
@@ -184,6 +199,8 @@ async def status_writer_loop(
                 stage_state.stage_anchor_swarm_time_of_last_progress_list = None
             stage_state.save(path=stage_state_path)
         # wait for the next write interval
+        if stop_event.is_set():
+            break
         try:
             await asyncio.wait_for(
                 stop_event.wait(), job_spec.status_write_interval)
@@ -283,16 +300,13 @@ async def do_job(
     # Create the monitor loop
     stop_event = asyncio.Event()
     status_writer_task = asyncio.create_task(
-        status_writer_loop(job_spec, stop_event))
+        status_job_writer_loop(job_spec, stop_event))
     try:
         await asyncio.gather(*stage_tasks)
     finally:
         stop_event.set()
-        status_writer_task.cancel()
-        try:
-            await status_writer_task
-        except asyncio.CancelledError:
-            pass
+        await status_writer_task
+    
     #await finish_all_stages_successful()
     if telemetry is not None:
         await telemetry.stop()

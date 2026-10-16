@@ -248,7 +248,9 @@ class StageWorkflow:
         if states & {"running", "queued", "pending"}:
             return "reattach"
         stage_dicts = job_dict.get("stage_dicts_by_stage_index") or {}
-        if stage_dicts and all(entry.get("finished") for entry in stage_dicts.values()):
+        if stage_dicts and all(
+                entry.get("finished") or entry.get("state") == "completed" 
+                for entry in stage_dicts.values()):
             return "completed"
         return "submit"
         
@@ -1064,6 +1066,9 @@ class SeekrPipeline:
                         sem = self.limit_semaphores_by_resource.get(
                             stage_workflow.resource.name)
                         if sem is not None and stage_workflow not in held_slots:
+                            if sem.locked():
+                                all_terminal = False
+                                continue
                             await sem.acquire()
                             held_slots.append(stage_workflow)
                         try:

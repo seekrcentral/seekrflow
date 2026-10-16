@@ -26,7 +26,7 @@ def slurm_pbs_run_workload(args):
     scheduler = manager_payload["resource_payload"]["scheduler"]
     partition_queue = manager_payload["resource_payload"]["partition_queue"]
     account = manager_payload["resource_payload"]["account"]
-    constraint = manager_payload["resource_payload"]["constraint"]
+    constraint = manager_payload["resource_payload"].get("constraint")
     job_name = manager_payload["resource_payload"]["job_name"]
     cpus_per_task = manager_payload["resource_payload"]["cpus"]
     memory_mb_per_node = manager_payload["resource_payload"]["memory_mb"]
@@ -395,7 +395,15 @@ def slurm_pbs_run_workload(args):
         job_id = out[1].strip().split()[-1]
     
     elif scheduler == "pbs":
-        spec_path = seekr_jobs_dir / f"job_spec_{internal_id}_${{PBS_ARRAY_INDEX}}.json"
+        #spec_path = seekr_jobs_dir / f"job_spec_{internal_id}_${{PBS_ARRAY_INDEX}}.json"
+        if "," in array_spec:
+            raise RuntimeError(
+                f"PBS -J accepts one range, not {array_spec!r}"
+            )
+        bounds = array_spec if "-" in array_spec else f"{array_spec}-{array_spec}"
+        start_s, _, end_s = bounds.partition("-")
+        start_i, end_i = int(start_s), int(end_s)
+        one_task = start_i == end_i
         script_lines = [
             "#!/bin/bash",
             f"#PBS -N {job_name}",
@@ -403,10 +411,13 @@ def slurm_pbs_run_workload(args):
             f"#PBS -q {partition_queue}",
             f"#PBS -l walltime={time_limit}",
             f"#PBS -l nodes=1:ppn={cpus_per_task or 1}",
-            f"#PBS -J {array_spec}",
+            #f"#PBS -J {pbs_array_spec}",
             f"#PBS -o {log_dir_path}/",
             f"#PBS -e {log_dir_path}/",
         ]
+        if not one_task:
+            script_lines.append(f"#PBS -J {start_i + 1}-{end_i + 1}")
+
         if account:
             script_lines.append(f"#PBS -A {account}")
         if memory_mb_per_node:
@@ -417,7 +428,11 @@ def slurm_pbs_run_workload(args):
         script_lines.append(f"cd {root_dir_path}")
         if worker_init:
             script_lines.append(worker_init)
-        script_lines.append(f"python {job_py_path} {spec_path}")
+        if one_task:
+            spec_name = f"job_spec_{internal_id}_{start_i}.json"
+        else:
+            spec_name = f"job_spec_{internal_id}_$((PBS_ARRAY_INDEX - 1)).json"
+        script_lines.append(f"python {job_py_path} {seekr_jobs_dir}/{spec_name}")
         script_lines.append("rc=$?; exit $rc")
         qsub = subprocess.run(
             ["qsub"],
@@ -634,7 +649,7 @@ def slurm_pbs_status_workload(args):
 
     def call_qstat_and_parse_pbs():
         wanted = []
-        for payload in incoming_payload.values():
+        for payload in incoming_payload["system_payloads"].values():
             for job in payload.get("jobs", []):
                 for array_index in job.get("array_indices") or []:
                     wanted.append((job["job_id"], array_index))
@@ -660,12 +675,14 @@ def slurm_pbs_status_workload(args):
         state_by_task = {}
         elapsed_by_task = {}
         parent_state = {}
+        parent_elapsed = {}
         for parent, index, state, walltime in rows:
             if index is None:
                 parent_state[parent] = state
+                parent_elapsed[parent] = walltime
                 continue
             for job_id, array_index in wanted:
-                if str(job_id) == parent and int(array_index) == index:
+                if str(job_id) == parent and int(array_index) == index-1:
                     state_by_task[(job_id, array_index)] = state
                     elapsed_by_task[(job_id, array_index)] = walltime
         for job_id, array_index in wanted:
@@ -673,8 +690,8 @@ def slurm_pbs_status_workload(args):
                 continue
             parent = parent_state.get(str(job_id))
             if parent in {"queued", "running"}:
-                state_by_task[(job_id, array_index)] = "queued"
-                elapsed_by_task[(job_id, array_index)] = None
+                state_by_task[(job_id, array_index)] = parent
+                elapsed_by_task[(job_id, array_index)] = parent_elapsed.get(str(job_id))
         return {
             "success": True,
             "error": None,
@@ -749,7 +766,7 @@ def slurm_pbs_status_workload(args):
                             break
                     batch_state.state = "completed" if finished else "failed"
                     batch_state.last_known_jobs = []
-                    
+
                 batch_state.save(root_dir_path=root_dir_path, path=batch_state_path)
                 batch_state_dict = asdict(batch_state)
                 batch_dicts_by_array_index[array_index] = batch_state_dict

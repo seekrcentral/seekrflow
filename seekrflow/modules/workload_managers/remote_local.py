@@ -331,7 +331,6 @@ def submit_job(
             "scheduler": "pbs",
             "partition_queue": resource.queue,
             "account": resource.account,
-            "constraint": resource.constraint,
             "job_name": job_name,
             "cpus": cpus,
             "memory_mb": memory_mb,
