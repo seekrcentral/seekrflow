@@ -170,7 +170,10 @@ def build_aws_container_script(manager_payload: dict) -> str:
     Container script: sync the model tree, run job.py, sync results back.
     """
     resource_payload = manager_payload["resource_payload"]
-    s3_uri = resource_payload["transfer_settings_s3_uri"]
+    s3_uri = (
+        f"{resource_payload['transfer_settings_s3_uri'].rstrip('/')}/"
+        f"{manager_payload['seekrflow_name']}"
+    )
     tarball = resource_payload["transfer_settings_input_tarball_name"]
     region = resource_payload["region"]
     cpus = resource_payload.get("cpus") or 1
@@ -268,6 +271,26 @@ exec bash /tmp/seekrflow_run.sh
             f"(limit 8192); shorten build_aws_container_command.")
     return ["bash", "-lc", stub]
 
+def _matching_job_definition_arn(batch, name, image, requirements):
+    """Active revision with this image and resource requirements, if any."""
+    wanted = {(item["type"], str(item["value"])) for item in requirements}
+    token = None
+    while True:
+        kwargs = {"jobDefinitionName": name, "status": "ACTIVE"}
+        if token:
+            kwargs["nextToken"] = token
+        resp = batch.describe_job_definitions(**kwargs)
+        for defn in resp.get("jobDefinitions") or []:
+            props = defn.get("containerProperties") or {}
+            got = {
+                (item["type"], str(item["value"]))
+                for item in props.get("resourceRequirements") or []
+            }
+            if props.get("image") == image and got == wanted:
+                return defn["jobDefinitionArn"]
+        token = resp.get("nextToken")
+        if not token:
+            return None
 
 def register_job_definition(resource_payload: dict) -> str:
     """
@@ -283,17 +306,29 @@ def register_job_definition(resource_payload: dict) -> str:
     ]
     if resource_payload["n_gpus"] > 0:
         requirements.insert(0, {"type": "GPU", "value": str(resource_payload["n_gpus"])})
-    resp = batch.register_job_definition(
-        jobDefinitionName=name,
-        type="container",
-        platformCapabilities=["EC2"],
-        containerProperties={
-            "image": resource_payload["seekr_image_uri"],
-            "resourceRequirements": requirements,
-            "command": ["bash", "-lc", "echo overridden-at-submit"],
-            "logConfiguration": {"logDriver": "awslogs"},
-        },
-    )
+    image = resource_payload["seekr_image_uri"]
+    arn = _matching_job_definition_arn(batch, name, image, requirements)
+    if arn is not None:
+        return arn
+    try:
+        resp = batch.register_job_definition(
+            jobDefinitionName=name,
+            type="container",
+            platformCapabilities=["EC2"],
+            containerProperties={
+                "image": resource_payload["seekr_image_uri"],
+                "resourceRequirements": requirements,
+                "command": ["bash", "-lc", "echo overridden-at-submit"],
+                "logConfiguration": {"logDriver": "awslogs"},
+            },
+        )
+    except Exception as exc:
+        if "versions do not match" not in str(exc):
+            raise
+        arn = _matching_job_definition_arn(batch, name, image, requirements)
+        if arn is None:
+            raise
+        return arn
     return resp["jobDefinitionArn"]
 
 def next_internal_id(
@@ -345,12 +380,14 @@ def submit_aws_job(
         #clear_stage_failure_artifacts(model_directory, host_stage_name)
 
         job_def_arn = register_job_definition(resource_payload)
-        name = job_name
-
+        
         # Create the state files for the job.
         s3 = _s3_client(resource_payload)
         bucket = resource_payload["transfer_settings_bucket"]
-        s3_prefix = urlparse(resource_payload["transfer_settings_s3_uri"]).path.lstrip("/")
+        s3_prefix = (
+            f"{urlparse(resource_payload['transfer_settings_s3_uri']).path.strip('/')}/"
+            f"{seekrflow_name}"
+        ).strip("/")
         internal_id = next_internal_id(s3, bucket, s3_prefix)
         # Set the job spec to have the correct internal id - needed for job.py run
         for job_spec in job_specs:
@@ -367,11 +404,11 @@ def submit_aws_job(
 
         jobs_prefix = f"{s3_prefix}/.seekr_jobs".strip("/")
         runner_files = manager_payload["runner_files"]
-        for name in ("job.py", "structures.py"):
+        for file_name in ("job.py", "structures.py"):
             s3.put_object(
                 Bucket=bucket,
-                Key=f"{jobs_prefix}/{name}",
-                Body=runner_files[name].encode("utf-8"),
+                Key=f"{jobs_prefix}/{file_name}",
+                Body=runner_files[file_name].encode("utf-8"),
                 ContentType="text/x-python",
             )
         for job_spec in job_specs:
@@ -394,7 +431,7 @@ def submit_aws_job(
         if n_array < 1:
             raise ValueError("AWS job array size must be at least 1")
         submit_kwargs: dict = {
-            "jobName": name,
+            "jobName": job_name,
             "jobQueue": resource_payload["job_queue_name"],
             "jobDefinition": job_def_arn,
             "containerOverrides": {"command": command},
@@ -471,6 +508,30 @@ def load_stage_state(
             }
         raise
 
+def _failure_notes(resource_payload: dict, child: dict | None, state: str) -> str | None:
+    """Batch statusReason plus the CloudWatch tail when the job failed."""
+    if child is None:
+        return None
+    container = child.get("container") or {}
+    reason = child.get("statusReason") or ""
+    exit_code = container.get("exitCode")
+    notes = f"{reason} (exit {exit_code})".strip() if exit_code is not None else reason
+    log_stream = container.get("logStreamName")
+    if state != "failed" or not log_stream:
+        return notes or None
+    import boto3
+    logs = boto3.client("logs", region_name=resource_payload["region"])
+    events = logs.get_log_events(
+        logGroupName=CLOUDWATCH_LOG_GROUP,
+        logStreamName=log_stream,
+        limit=FAILURE_LOG_TAIL_LINES,
+        startFromHead=False,
+    ).get("events") or []
+    tail = "\n".join(event["message"] for event in events).strip()
+    if tail:
+        notes = f"{notes}\n{tail}" if notes else tail
+    return notes or None
+
 def status_aws(manager_payload: dict) -> dict:
     """
     Batch describe_jobs for manager state, S3 stage-state JSON for seekr state.
@@ -478,13 +539,16 @@ def status_aws(manager_payload: dict) -> dict:
     """
     resource_payload = manager_payload["resource_payload"]
     bucket = resource_payload["transfer_settings_bucket"]
-    s3_prefix = urlparse(resource_payload["transfer_settings_s3_uri"]).path.lstrip("/")
     batch = _batch_client(resource_payload)
     s3 = _s3_client(resource_payload)
     return_payload = {}
     try:
         for system_name, payload in manager_payload["system_payloads"].items():
             job_dicts_by_job_id = {}
+            s3_prefix = (
+                f"{urlparse(resource_payload['transfer_settings_s3_uri']).path.strip('/')}/"
+                f"{system_name}"
+            ).strip("/")
             for job in payload["jobs"]:
                 internal_id = job["internal_id"]
                 job_id = job.get("job_id")
@@ -520,7 +584,7 @@ def status_aws(manager_payload: dict) -> dict:
                         "filename": f"batch_state_{internal_id}_{array_index}.json",
                         "batch_info_filename": f"batch_info_{internal_id}.json",
                         "state": state,
-                        "notes": None if child is None else child.get("statusReason") or None,
+                        "notes": _failure_notes(resource_payload, child, state),
                         "last_timestamp": time.time(),
                         "last_known_elapsed": elapsed,
                         "last_known_jobs": known,
@@ -584,7 +648,6 @@ def cancel_aws_job(manager_payload: dict) -> dict:
     s3 = _s3_client(resource_payload)
     bucket = resource_payload["transfer_settings_bucket"]
     queue = resource_payload["job_queue_name"]
-    s3_prefix = urlparse(resource_payload["transfer_settings_s3_uri"]).path.lstrip("/")
     canceled: list[str] = []
     errors: list[str] = []
 
@@ -635,9 +698,14 @@ def cancel_aws_job(manager_payload: dict) -> dict:
                 elif job_name:
                     for found_id in ids_for_name(str(job_name)):
                         terminate(found_id)
-        if remove_json_files:
-            for dirname in (".batch_runner", ".stage_states"):
-                delete_prefix(f"{s3_prefix}/{dirname}/".lstrip("/"))
+            
+            if remove_json_files:
+                s3_prefix = (
+                    f"{urlparse(resource_payload['transfer_settings_s3_uri']).path.strip('/')}/"
+                    f"{name}"
+                ).strip("/")
+                for dirname in (".batch_runner", ".stage_states"):
+                    delete_prefix(f"{s3_prefix}/{dirname}/".lstrip("/"))
     except Exception as error:
         return {"success": False, "error": str(error), "payload": None}
 

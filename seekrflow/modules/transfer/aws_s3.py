@@ -5,28 +5,44 @@ Handle file transfers via AWS S3 - the required method for Amazon web services.
 """
 
 import os
+import time
+import random
 import subprocess
 import tempfile
 
 # Workload-manager state that must stay on the client (or be recreated).
 # Absolute symlinks under these dirs break container ``tar`` extract.
 LOCAL_RUNNER_DIRNAMES = (
-    ".multiprocessing",
     ".seekr_runner",
     ".batch_runner",
 )
 
 
-def _run(cmd: list[str]) -> None:
+def _run(cmd: list[str], attempts: int = 6) -> None:
     print(f"$ {' '.join(cmd)}")
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        parts = [f"Command {cmd!r} failed with exit status {result.returncode}"]
-        if result.stderr and result.stderr.strip():
-            parts.append(f"stderr:\n{result.stderr.rstrip()}")
-        if result.stdout and result.stdout.strip():
-            parts.append(f"stdout:\n{result.stdout.rstrip()}")
-        raise RuntimeError("\n".join(parts))
+    delay = 2.0
+    for attempt in range(1, attempts + 1):
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode == 0:
+            return
+        text = f"{result.stderr or ''}\n{result.stdout or ''}"
+        retryable = (
+            "Rate exceeded" in text
+            or "CreateOAuth2Token" in text
+            or "SlowDown" in text
+            or "Throttl" in text
+        )
+        if not retryable or attempt == attempts:
+            parts = [f"Command {cmd!r} failed with exit status {result.returncode}"]
+            if result.stderr and result.stderr.strip():
+                parts.append(f"stderr:\n{result.stderr.rstrip()}")
+            if result.stdout and result.stdout.strip():
+                parts.append(f"stdout:\n{result.stdout.rstrip()}")
+            raise RuntimeError("\n".join(parts))
+        wait = delay + random.uniform(0, delay)
+        print(f"aws rate limit, retry {attempt}/{attempts - 1} in {wait:.0f}s")
+        time.sleep(wait)
+        delay = min(delay * 2, 30.0)
 
 
 def build_model_tarball_command(
@@ -65,9 +81,14 @@ def transfer_files_with_aws_s3(
         if os.path.isfile(downloaded_tarball):
             os.remove(downloaded_tarball)
     else:
-        tarball_path = os.path.join(tempfile.gettempdir(), input_tarball_name)
-        _run(build_model_tarball_command(tarball_path, local_path))
-        _run(["aws", "s3", "cp", tarball_path, f"{s3_uri}/{input_tarball_name}",
-              "--region", region, "--only-show-errors"])
-        os.remove(tarball_path)
+        fd, tarball_path = tempfile.mkstemp(suffix=".tar.gz")
+        os.close(fd)
+        try:
+            _run(build_model_tarball_command(tarball_path, local_path))
+            _run(["aws", "s3", "cp", tarball_path,
+                f"{s3_uri}/{input_tarball_name}",
+                "--region", region, "--only-show-errors"])
+        finally:
+            if os.path.isfile(tarball_path):
+                os.remove(tarball_path)
         print("Transfer complete!")

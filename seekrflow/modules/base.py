@@ -141,7 +141,7 @@ def make_protein_openmm_and_mdtraj_top(protein_pdb_filename: str) -> typing.Tupl
     with open(protein_pdb_filename, 'r') as f:
         protein = openmm_app.PDBFile(f) 
     protein_topology = protein.topology
-    protein_positions = protein.positions 
+    protein_positions = protein.getPositions(asNumpy=True) #protein.positions 
     protein_md_topology = mdtraj.Topology.from_openmm(protein_topology)
     return (
         protein_topology,
@@ -149,12 +149,60 @@ def make_protein_openmm_and_mdtraj_top(protein_pdb_filename: str) -> typing.Tupl
         protein_positions
     )
 
+def _sdf_atom_name(atom) -> str:
+    info = atom.GetPDBResidueInfo()
+    if info is not None and info.GetName().strip():
+        return info.GetName().strip()
+    if atom.HasProp("_Name") and atom.GetProp("_Name").strip():
+        return atom.GetProp("_Name").strip()
+    return ""
+
+def _copy_pdb_coordinates_onto_mol(mol, ligand_pdb) -> None:
+    """
+    Copy PDB coordinates onto an RDKit molecule by atom name, and secondarily by index.
+    """
+    from rdkit.Geometry import Point3D
+    conf = mol.GetConformer()
+    pdb_names = [atom.name.strip() for atom in ligand_pdb.atoms]
+    sdf_names = [
+        _sdf_atom_name(mol.GetAtomWithIdx(i))
+        for i in range(mol.GetNumAtoms())]
+    coords = ligand_pdb.coordinates
+    if all(sdf_names):
+        if len(sdf_names) != len(set(sdf_names)) or len(pdb_names) != len(set(pdb_names)):
+            raise ValueError(
+                "PDB or SDF has duplicate atom names, so coordinates "
+                "cannot be matched by name.")
+        missing_in_pdb = sorted(set(sdf_names) - set(pdb_names))
+        missing_in_sdf = sorted(set(pdb_names) - set(sdf_names))
+        if missing_in_pdb or missing_in_sdf:
+            raise ValueError(
+                "PDB and SDF atom names differ. "
+                f"In SDF but not PDB: {missing_in_pdb}. "
+                f"In PDB but not SDF: {missing_in_sdf}.")
+        pdb_index = {name: i for i, name in enumerate(pdb_names)}
+        for i, name in enumerate(sdf_names):
+            xyz = coords[pdb_index[name]]
+            conf.SetAtomPosition(i, Point3D(float(xyz[0]), float(xyz[1]), float(xyz[2])))
+        return
+    if coords.shape[0] != mol.GetNumAtoms():
+        raise ValueError(
+            f"SDF atoms have no names, and the PDB has {coords.shape[0]} "
+            f"atoms while the SDF has {mol.GetNumAtoms()}.")
+    print(
+        "WARNING: SDF atoms have no names; copying PDB coordinates by "
+        "atom index. Confirm the PDB and SDF atom orders match.")
+    for i in range(mol.GetNumAtoms()):
+        xyz = coords[i]
+        conf.SetAtomPosition(i, Point3D(float(xyz[0]), float(xyz[1]), float(xyz[2])))
+
 def make_ligand_openmm_and_mdtraj_top(
         ligand_sdf_filename: str,
         ligand_pdb_filename: str,
         param_directory: str,
         draw_ligand: bool = True,
-        ligand_resname: str = ""
+        ligand_resname: str = "",
+        chain: str | None = None,
         ) -> typing.Tuple[
         "openmm.app.Topology",
         mdtraj.Topology,
@@ -167,7 +215,6 @@ def make_ligand_openmm_and_mdtraj_top(
     """
     from rdkit import Chem
     from rdkit.Chem import rdForceFieldHelpers, AllChem
-    from rdkit.Geometry import Point3D
     from rdkit.Chem import Draw
     import openmm.unit as unit
     import openmm.app as openmm_app
@@ -177,6 +224,7 @@ def make_ligand_openmm_and_mdtraj_top(
         "Ligand SDF file must have a .sdf extension."
     # SDMolSupplier defaults to removeHs=True, which strips explicit
     # hydrogens and breaks the atom-count match against the ligand PDB.
+    ligand_basename_without_extension = os.path.splitext(os.path.basename(ligand_sdf_filename))[0]
     suppl = Chem.SDMolSupplier(ligand_sdf_filename, removeHs=False)
     mols = [x for x in suppl if x is not None]
     mol = mols[0]
@@ -185,28 +233,37 @@ def make_ligand_openmm_and_mdtraj_top(
         mol_2d = Chem.Mol(mol)
         AllChem.Compute2DCoords(mol_2d)
         img = Draw.MolToImage(mol_2d, size=(300, 300))
-        img.save(os.path.join(param_directory,  "ligand.png"))
+        img.save(os.path.join(param_directory,  f"{ligand_basename_without_extension}.png"))
     ligand_pdb = parmed.load_file(str(ligand_pdb_filename), skip_bonds=True)
-    ligand_positions_in_A_pdb = ligand_pdb.coordinates
-    conf = mol.GetConformer()
-    assert ligand_positions_in_A_pdb.shape[0] == mol.GetNumAtoms(), (
-        f"Ligand PDB has {ligand_positions_in_A_pdb.shape[0]} atoms but SDF "
-        f"mol has {mol.GetNumAtoms()} (file={ligand_sdf_filename!r}). "
-        "Atom counts must match so PDB coordinates can be copied onto the "
-        "SDF conformer."
-    )
-    for i in range(mol.GetNumAtoms()):
-        conf.SetAtomPosition(i, Point3D(ligand_positions_in_A_pdb[i,0],
-                                        ligand_positions_in_A_pdb[i,1],
-                                        ligand_positions_in_A_pdb[i,2]))
-    
-    rdForceFieldHelpers.MMFFOptimizeMolecule(mol)
+    #ligand_positions_in_A_pdb = ligand_pdb.coordinates
+    #conf = mol.GetConformer()
+    _copy_pdb_coordinates_onto_mol(mol, ligand_pdb)
+    #assert ligand_positions_in_A_pdb.shape[0] == mol.GetNumAtoms(), (
+    #    f"Ligand PDB has {ligand_positions_in_A_pdb.shape[0]} atoms but SDF "
+    #    f"mol has {mol.GetNumAtoms()} (file={ligand_sdf_filename!r}). "
+    #    "Atom counts must match so PDB coordinates can be copied onto the "
+    #    "SDF conformer."
+    #)
+    #for i in range(mol.GetNumAtoms()):
+    #    conf.SetAtomPosition(i, Point3D(ligand_positions_in_A_pdb[i,0],
+    #                                    ligand_positions_in_A_pdb[i,1],
+    #                                    ligand_positions_in_A_pdb[i,2]))
+    # NOTE: we don't want to optimize atomic positions after assigning from PDB because
+    # the optimization is performed in a vacuum.
+    #rdForceFieldHelpers.MMFFOptimizeMolecule(mol)
     offmol = Molecule.from_rdkit(mol)
     ligand_positions = to_openmm(offmol.conformers[0])
     ligand_topology = offmol.to_topology().to_openmm()
-    output_pdb_filename_ligand = os.path.join(param_directory, "ligand_with_connections.pdb")
-    openmm_app.PDBFile.writeFile(ligand_topology, ligand_positions.value_in_unit(unit.nanometers), 
-                                file=open(output_pdb_filename_ligand, 'w'))
+    if chain:
+        chain_str = chain
+        for ligand_chain in ligand_topology.chains():
+            ligand_chain.id = chain_str
+    output_pdb_filename_ligand = os.path.join(
+        param_directory, "ligand_with_connections.pdb")
+    openmm_app.PDBFile.writeFile(
+        ligand_topology, 
+        ligand_positions.value_in_unit(unit.nanometers), 
+        file=open(output_pdb_filename_ligand, 'w'))
     ligand_md_topology = mdtraj.Topology.from_openmm(ligand_topology)
     for atom in ligand_md_topology.atoms:
         if ligand_resname == "":

@@ -209,5 +209,6 @@ def transfer_unique_stage_resources(
             resource,
             root_directory,
             backwards=backwards,
+            seekrflow_name=seekrflow.name,
         )
     return list(resources_by_name.keys())

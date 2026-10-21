@@ -70,6 +70,13 @@ RUN --mount=type=secret,id=github_token \
     && git -C /opt/seekr rev-parse HEAD \
     && python -m pip install --no-cache-dir /opt/seekr
 
+RUN python -m pip install --no-cache-dir \
+    psutil \
+    radical.asyncflow \
+    rhapsody-py \
+    opentelemetry-api \
+    opentelemetry-sdk
+
 # --- Sanity: verify OpenMM sees a CUDA platform at build time --------------
 # (Build-time check only lists platforms; GPU presence is validated at run.)
 RUN python -c "import openmm; print('OpenMM', openmm.version.version); \

@@ -19,7 +19,6 @@ from concurrent.futures import ProcessPoolExecutor
 
 from radical.asyncflow import WorkflowEngine
 from rhapsody.backends import ConcurrentExecutionBackend #, DragonExecutionBackend?
-from seekrflow.modules.workflows import stage_procedures 
 
 try: 
     from .structures import JobSpec

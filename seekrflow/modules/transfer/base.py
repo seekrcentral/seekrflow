@@ -32,6 +32,7 @@ def transfer_files_to_from_remote_resource(
         resource: structures.Resource_base,
         local_directory: str,
         backwards: bool = False,
+        seekrflow_name: str | None = None,
         ) -> None:
     
     if resource.transfer_settings.type == "globus":
@@ -60,9 +61,10 @@ def transfer_files_to_from_remote_resource(
     
     elif resource.transfer_settings.type == "aws_s3":
         # Isolate each seekrflow run under {prefix}/{seekrflow_name}/
+        assert seekrflow_name is not None, "seekrflow_name is required for aws_s3 transfers"
         s3_uri = (
             f"{resource.transfer_settings.get_uri().rstrip('/')}/"
-            f"{remote_root_directory_name}"
+            f"{seekrflow_name}"
         )
         input_tarball_name = resource.transfer_settings.get_input_tarball_name()
         transfer_aws_s3.transfer_files_with_aws_s3(

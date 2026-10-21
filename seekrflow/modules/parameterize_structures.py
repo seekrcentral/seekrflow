@@ -78,7 +78,7 @@ class PDBFixer_settings:
     which chains to keep. Do not silently drop ambiguous cofactor chains.
     """
     remove_extra_chains: bool = field(
-        default=True,
+        default=False,
         validator=validators.instance_of(bool),
         )
     keep_chain_indices: list[int] | None = field(
@@ -166,6 +166,10 @@ class PDB2PQR_settings:
         default=7.0,
         validator=validators.optional(validators.instance_of(float))
         )
+    drop_water: bool = field(
+        default=False,
+        validator=validators.instance_of(bool),
+    )
 
     def run(
             self,
@@ -180,9 +184,16 @@ class PDB2PQR_settings:
             output_pdb_string = f"--pdb-output {output_pdb_filename} "
         else:
             output_pdb_string = ""
-        cmd = f"pdb2pqr --ff {self.forcefield} --ffout {self.forcefield_output_format} "\
-        +f"{output_pdb_string} --with-ph {self.pH} --log-level CRITICAL --drop-water "\
-        +f"--nodebump --noopt {input_pdb_filename} {output_pqr_filename}"
+        #cmd = f"pdb2pqr --ff {self.forcefield} --ffout {self.forcefield_output_format} "\
+        #+f"{output_pdb_string} --with-ph {self.pH} --log-level CRITICAL --drop-water "\
+        #+f"--nodebump --noopt {input_pdb_filename} {output_pqr_filename}"
+        drop = "--drop-water " if self.drop_water else ""
+        cmd = (
+            f"pdb2pqr --ff {self.forcefield} "
+            f"--ffout {self.forcefield_output_format} "
+            f"{output_pdb_string}--with-ph {self.pH} --log-level CRITICAL "
+            f"{drop}--nodebump --noopt {input_pdb_filename} {output_pqr_filename}"
+        )
         print("running command:", cmd)
         os.system(cmd)
         assert os.path.exists(output_pqr_filename), \

@@ -403,7 +403,7 @@ class StageWorkflow:
             for resource, pull in steps:
                 transfer_base.transfer_files_to_from_remote_resource(
                     self.seekrflow.name, resource, self.model.directory,
-                    backwards=pull)
+                    backwards=pull, seekrflow_name=self.seekrflow.name)
         except Exception as e:
             self.transfer_error = str(e)
             self.control_file_semaphore = "wait"
@@ -1275,9 +1275,9 @@ async def monitor_session_pipelines(
                                 )
                                 if not resubmit and sw.semaphore == "go":
                                     errors = [
-                                        item.get("error")
+                                        item.get("error") or item.get("notes")
                                         for item in manager_dicts_by_array_index.values()
-                                        if item.get("error")
+                                        if item.get("error") or item.get("notes")
                                     ]
                                     sw.last_error = (
                                         errors[0] if errors

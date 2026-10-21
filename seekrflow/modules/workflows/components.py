@@ -65,6 +65,31 @@ class Selector_by_indices(Selector_base):
         self.resolved_indices = [int(i) for i in self.indices]
         return self.resolved_indices
 
+def _chain_of_atom(traj: mdtraj.Trajectory, atom_index: int) -> str:
+    """
+    Get the chain str of an atom.
+    """
+    chain = traj.topology.atom(int(atom_index)).residue.chain
+    chain_str = getattr(chain, "chain_id", None)
+    if not chain_str:
+        raise ValueError(
+            "This structure has no PDB chain strings, so chain cannot be "
+            "applied. Use Selector_by_chain with an integer chain index."
+        )
+    return str(chain_str).strip()
+
+def _filter_by_chain(
+        traj: mdtraj.Trajectory,
+        indices: list[int],
+        chain: str | None,
+        ) -> list[int]:
+    """
+    Filter a list of atom indices by chain ID.
+    """
+    if not chain:
+        return indices
+    wanted = chain.strip()
+    return [i for i in indices if _chain_of_atom(traj, i) == wanted]
 
 @define
 class Selector_by_resname(Selector_base):
@@ -75,6 +100,10 @@ class Selector_by_resname(Selector_base):
     resname: str = field(
         default="",
         validator=validators.instance_of(str),
+        )
+    chain: str | None = field(
+        default=None,
+        validator=validators.optional(validators.instance_of(str)),
         )
     resolved_indices: list[int] = field(
         init=False,
@@ -87,9 +116,11 @@ class Selector_by_resname(Selector_base):
     def resolve(self, traj: mdtraj.Trajectory) -> list[int]:
         assert self.resname != "", "resname must be defined."
         if self.include_hydrogens:
-            indices = traj.topology.select(f"resname '{self.resname}'")
+            query = f"resname '{self.resname}'"
         else:
-            indices = traj.topology.select(f"resname '{self.resname}' and not element H")
+            query = f"resname '{self.resname}' and not element H"
+        indices = traj.topology.select(query)
+        indices = _filter_by_chain(traj, indices, self.chain)
         self.resolved_indices = [int(i) for i in indices]
         return self.resolved_indices
 
@@ -242,6 +273,13 @@ class Membrane_component(Component_base):
     """
     type: typing.Literal["membrane"] = "membrane"
 
+@define
+class Solvent_component(Component_base):
+    """
+    Crystallographic waters (or other solvent) to carry into parameterization.
+    Not a Brownian-dynamics rigid body.
+    """
+    type: typing.Literal["solvent"] = "solvent"
 
 # ======================================================================
 #  Group selectors: derive CV/restraint groups from components.
