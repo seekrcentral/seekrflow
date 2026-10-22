@@ -79,13 +79,19 @@ def _make_protein_ligand_components(
         sdf_file=sdf_file,
         resname=ligand_resname,
     )
-    return components_module.Components(members=[protein, ligand])
+    binding_site = components_module.Binding_site_group_selector(
+        name="binding_site",
+        reference_component_name="ligand",
+        random_seed=111
+    )
+    return components_module.Components(members=[protein, ligand], group_selectors=[binding_site])
 
 
 def create_unparameterized_seekrflow(
         starting_structure: str,
         ligand_resname: str,
-        anchor_radius_list: list[float],
+        n_anchors: int,
+        anchor_radius_minmax: list[float],
         ff: str = "amber",
         ) -> structures.Seekrflow:
     """
@@ -94,25 +100,37 @@ def create_unparameterized_seekrflow(
     seekrflow = structures.Seekrflow()
     seekrflow.name = "test_seekrflow"
     components = _make_protein_ligand_components(ligand_resname)
-    n_anchors = len(anchor_radius_list)
     cv_spec = cv_specs_module.Com_com_distance_CV_spec(
         name="distance_receptor_ligand",
-        group1_selection_name="receptor",
+        group1_selection_name="binding_site",
         group2_selection_name="ligand",
-        min_value=min(anchor_radius_list) if anchor_radius_list else 0.0,
-        max_value=max(anchor_radius_list) if anchor_radius_list else 1.0,
+        min_value=min(anchor_radius_minmax) if anchor_radius_minmax else 0.0,
+        max_value=max(anchor_radius_minmax) if anchor_radius_minmax else 1.0,
     )
     md_scale = scale_settings_module.Molecular_dynamics_scale_settings()
     # Blank system: parameterize will produce it.
     md_scale.system = None
     md_scale.hydrogen_mass = 1.5
+    bd_scale = scale_settings_module.Brownian_dynamics_scale_settings()
+    bd_scale.system.molecules = [
+        scale_settings_module.BD_molecule(
+            name="receptor",
+            component_name="receptor",
+            pqr_filename="",
+            role="receptor"),
+        scale_settings_module.BD_molecule(
+            name="ligand",
+            component_name="ligand",
+            pqr_filename="",
+            role="ligand")
+    ]
     workflow = workflow_module.Workflow(
         components=components,
         cv_specs=[cv_spec],
         anchor_spec=anchor_specs_module.Uniform_anchor_spec(n_anchors=n_anchors),
         procedure=_minimal_prepare_procedure(
             reference_structure_filename=starting_structure),
-        scale_settings=[md_scale],
+        scale_settings=[md_scale, bd_scale],
     )
     seekrflow.workflow = workflow
     parameterizer = parameterizer_structures.Parameterizer()
@@ -144,7 +162,8 @@ def create_parameterized_seekrflow(
         receptor_pqr_filename: str,
         ligand_pqr_filename: str,
         ligand_resname: str,
-        anchor_radius_list: list[float],
+        n_anchors: int,
+        anchor_radius_minmax: list[float],
         ff: str = "amber",
         ligand_indices: list[int] | None = None,
         ) -> structures.Seekrflow:
@@ -154,7 +173,8 @@ def create_parameterized_seekrflow(
     seekrflow = create_unparameterized_seekrflow(
         starting_structure=solvated_pdb,
         ligand_resname=ligand_resname,
-        anchor_radius_list=anchor_radius_list,
+        n_anchors=n_anchors,
+        anchor_radius_minmax=anchor_radius_minmax,
         ff=ff,
     )
     # Already parameterized: clear parameterizer and set MD system explicitly.
@@ -195,12 +215,13 @@ def create_unparameterized_tryp_ben_seekrflow(
     starting_structure = os.path.join(
         TEST_DIRECTORY, "data", "trypsin_benzamidine.pdb")
     ligand_resname = "BEN"
-    anchor_radius_list = [
-        0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6]
+    n_anchors = 12
+    anchor_radius_minmax = [0.5, 1.6]
     return create_unparameterized_seekrflow(
         starting_structure=starting_structure,
         ligand_resname=ligand_resname,
-        anchor_radius_list=anchor_radius_list,
+        n_anchors=n_anchors,
+        anchor_radius_minmax=anchor_radius_minmax,
         ff=ff,
     )
 
@@ -222,15 +243,16 @@ def create_parameterized_tryp_ben_openmm_xml_seekrflow(
     md_parameters_topology = parameters_topology_structures.Openmm_system()
     md_parameters_topology.system_filename = starting_system_xml
     ligand_resname = "BEN"
-    anchor_radius_list = [
-        0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6]
+    n_anchors = 12
+    anchor_radius_minmax = [0.5, 1.6]
     return create_parameterized_seekrflow(
         solvated_pdb=starting_pdb,
         parameters_topology=md_parameters_topology,
         receptor_pqr_filename=receptor_pqr_filename,
         ligand_pqr_filename=ligand_pqr_filename,
         ligand_resname=ligand_resname,
-        anchor_radius_list=anchor_radius_list,
+        n_anchors=n_anchors,
+        anchor_radius_minmax=anchor_radius_minmax,
         ff=ff,
     )
 
@@ -252,38 +274,66 @@ def create_parameterized_host_guest_amber_seekrflow(
         parameters_topology_structures.Amber_parameters_topology()
     md_parameters_topology.prmtop_filename = starting_system_parm7
     ligand_resname = "APN"
-    anchor_radius_list = [
-        0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6]
-    # Host-guest: both are small molecules in the full example; for this
-    # fixture keep a protein-style receptor selector by indices for BD tests.
+    n_anchors = 12
+    anchor_radius_minmax = [0.5, 1.6]
+    cv_name = "distance_receptor_ligand"
     flow = create_parameterized_seekrflow(
         solvated_pdb=starting_pdb,
         parameters_topology=md_parameters_topology,
         receptor_pqr_filename=receptor_pqr_filename,
         ligand_pqr_filename=ligand_pqr_filename,
         ligand_resname=ligand_resname,
-        anchor_radius_list=anchor_radius_list,
+        n_anchors=n_anchors,
+        anchor_radius_minmax=anchor_radius_minmax,
         ff=ff,
-        ligand_indices=list(range(147, 162)),
     )
-    # Replace receptor with index-based host selection.
     host = components_module.Small_molecule_component(
         name="receptor",
-        selector=components_module.Selector_by_indices(
-            indices=list(range(147))),
+        selector=components_module.Selector_by_resname(resname="MGO"),
         resname="MGO",
     )
     guest = components_module.Small_molecule_component(
         name="ligand",
-        selector=components_module.Selector_by_indices(
-            indices=list(range(147, 162))),
+        selector=components_module.Selector_by_resname(resname="APN"),
         resname="APN",
     )
     flow.workflow.components.members = [host, guest]
-    flow.workflow.procedure = _minimal_prepare_procedure(
-        reference_structure_filename=starting_pdb,
-        align_selection_str="resname MGO and not type H",
-        cv_name="distance_receptor_ligand",
+    flow.workflow.components.group_selectors = []
+    flow.workflow.cv_specs[0].group1_selection_name = "receptor"
+    equilibration = stage_procedures_module.Explicit_stage_procedure(
+        name="equilibration",
+        items=[stage_procedures_module.MD_stage_item(
+            name="equilibration_sampling",
+            run_minimization=True,
+            ensemble="NVT",
+            sampling=stage_procedures_module.Conventional_sampling_spec(
+                heat_ramp_temperatures=[100.0, 298.15],
+                heat_ramp_step_interval=1000),
+            completion=stage_procedures_module.Number_of_steps_completion_spec(
+                number_of_steps=1000),
+        )],
+    )
+    seeding = stage_procedures_module.Seeding_stage_procedure(
+        name="metadynamics",
+        method_input=stage_procedures_module.Metadynamics_seeding_method_input(
+            bias_factor=10.0,
+            gaussian_height=0.1,
+            gaussian_width=0.1,
+            steps_per_update=250,
+            number_of_points=101),
+        cv_names=[cv_name])
+    mmvt = stage_procedures_module.MMVT_stage_procedure(
+        name="MMVT",
+        ensemble="NVT",
+        number_of_steps=1000)
+    bd = stage_procedures_module.BD_stage_procedure(
+        name="bd",
+        n_trajectories_per_output=1000,
+        n_steps_per_output=100000,
+        number_of_trajectories=100)
+    flow.workflow.procedure = stage_procedures_module.Composite_stage_procedure(
+        name="full_procedure",
+        procedures=[equilibration, seeding, mmvt, bd],
     )
     flow.physical_attributes.ionic_strength = 0.0
     return flow

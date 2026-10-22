@@ -38,7 +38,7 @@ def job_definition_name_for_resource(resource_payload: dict) -> str:
     """
     Return the AWS job definition name for a resource.
     """
-    return sanitize_job_definition_name(f"seekrflow-{resource_payload["name"]}")
+    return sanitize_job_definition_name(f"seekrflow-{resource_payload['name']}")
 
 def s3_status_key(
         resource: "structures.Resource_cloud_aws",
@@ -79,7 +79,7 @@ def s3_run_script_key(
     """
     S3 object key for the Batch run script (kept out of containerOverrides).
     """
-    prefix = urlparse(resource_payload["transfer_settings_s3_uri"]).path.strip("/")
+    prefix = urlparse(resource_payload['transfer_settings_s3_uri']).path.strip("/")
     parts = [p for p in (prefix, seekrflow_name, AWS_RUNNER_DIRNAME) if p]
     return "/".join(parts + [f"{job_name}_run.sh"])
 
@@ -90,7 +90,7 @@ def s3_run_script_uri(
         job_name: str,
         ) -> str:
     return (
-        f"s3://{resource_payload["transfer_settings_bucket"]}/"
+        f"s3://{resource_payload['transfer_settings_bucket']}/"
         f"{s3_run_script_key(resource_payload, seekrflow_name, job_name)}"
     )
 

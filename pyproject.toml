@@ -34,7 +34,9 @@ dependencies = [
     "biopython",
     # NOTE: these are better installed from source at the moment
     "radical.asyncflow",
-    "rhapsody-py"
+    "rhapsody-py",
+    "opentelemetry-api",
+    "opentelemetry-sdk"
 ]
 
 # Update the urls once the hosting is set up.
@@ -82,7 +84,7 @@ seekrflow = [
 ]
 
 [tool.versioningit]
-default-version = "2.1.7"
+default-version = "3.0.0"
 
 [tool.versioningit.format]
 distance = "{base_version}+{distance}.{vcs}{rev}"
@@ -94,7 +96,7 @@ distance-dirty = "{base_version}+{distance}.{vcs}{rev}.dirty"
 method = "git"  # <- The method name
 # Parameters to pass to the method:
 match = ["*"]
-default-tag = "2.1.7"
+default-tag = "3.0.0"
 
 [tool.versioningit.write]
 file = "seekrflow/_version.py"
