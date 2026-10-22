@@ -36,8 +36,6 @@ def make_batch_from_single_seekrflow(
         systems=[batch_system],
         prepare_concurrency=1,
         max_concurrent_local_runs=client_structures.DEFAULT_MAX_CONCURRENT_LOCAL_RUNS,
-        background_poll_interval=client_structures.DEFAULT_BACKGROUND_POLL_INTERVAL,
-        focused_poll_interval=client_structures.DEFAULT_FOCUSED_POLL_INTERVAL,
         telemetry_poll_interval=client_structures.DEFAULT_TELEMETRY_POLL_INTERVAL,
     )
     batch._existing_seekrflow = seekrflow_object

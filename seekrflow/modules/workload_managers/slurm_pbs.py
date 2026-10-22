@@ -916,7 +916,7 @@ def slurm_pbs_cancel_workload(args):
         "payload": results,
     }
     
-    for system_name, payload in incoming_payload.items():
+    for system_name, payload in incoming_payload["system_payloads"].items():
         root_dir = payload["root_dir"]
         root_dir_path = pathlib.Path(root_dir)
         if remove_json_files:

@@ -22,9 +22,7 @@ import seekr.modules.structures as seekr_structures
 import seekrflow.modules.structures as structures
 Seekrflow = structures.Seekrflow
 
-DEFAULT_BACKGROUND_POLL_INTERVAL = 300.0
 DEFAULT_TELEMETRY_POLL_INTERVAL = 30.0
-DEFAULT_FOCUSED_POLL_INTERVAL = 5.0
 DEFAULT_MAX_CONCURRENT_LOCAL_RUNS = 1
 SEEKRFLOW_JSON_NAME = "seekrflow.json"
 
@@ -66,20 +64,6 @@ class RunSession:
         default="", validator=validators.instance_of(str))
     control_file: str = field(
         default="", validator=validators.instance_of(str))
-    background_poll_interval: float = field(
-        default=DEFAULT_BACKGROUND_POLL_INTERVAL,
-        validator=validators.and_(
-            validators.instance_of(float),
-            validators.gt(0.0),
-        ),
-    )
-    focused_poll_interval: float = field(
-        default=DEFAULT_FOCUSED_POLL_INTERVAL,
-        validator=validators.and_(
-            validators.instance_of(float),
-            validators.gt(0.0),
-        ),
-    )
     telemetry_poll_interval: float = field(
         default=DEFAULT_TELEMETRY_POLL_INTERVAL,
         validator=validators.and_(
@@ -183,20 +167,6 @@ class Batch:
         validator=validators.and_(
             validators.instance_of(int),
             validators.ge(1),
-        ),
-    )
-    background_poll_interval: float = field(
-        default=DEFAULT_BACKGROUND_POLL_INTERVAL,
-        validator=validators.and_(
-            validators.instance_of(float),
-            validators.gt(0.0),
-        ),
-    )
-    focused_poll_interval: float = field(
-        default=DEFAULT_FOCUSED_POLL_INTERVAL,
-        validator=validators.and_(
-            validators.instance_of(float),
-            validators.gt(0.0),
         ),
     )
     telemetry_poll_interval: float = field(
@@ -359,7 +329,5 @@ class Batch:
             output_file=output_file,
             control_file=control_file,
             batch_directory=self.batch_directory,
-            background_poll_interval=self.background_poll_interval,
-            focused_poll_interval=self.focused_poll_interval,
             telemetry_poll_interval=self.telemetry_poll_interval,
         )
