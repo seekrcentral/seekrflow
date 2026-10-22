@@ -1237,7 +1237,8 @@ async def monitor_session_pipelines(
                                 sw.manager_status = "queued"
                             elif "failed" in manager_state_set:
                                 sw.manager_status = "failed"
-                                if sw.failed_job_id != sw.job_id:
+                                newly_failed = sw.failed_job_id != sw.job_id
+                                if newly_failed:
                                     sw.monitor_generation += 1
                                     sw.failed_job_id = sw.job_id
                                 stage_dicts = job_dict.get("stage_dicts_by_stage_index") or {}
@@ -1273,7 +1274,7 @@ async def monitor_session_pipelines(
                                     and run_seconds is not None
                                     and run_seconds > 120
                                 )
-                                if not resubmit and sw.semaphore == "go":
+                                if newly_failed and not resubmit and sw.semaphore == "go":
                                     errors = [
                                         item.get("error") or item.get("notes")
                                         for item in manager_dicts_by_array_index.values()
