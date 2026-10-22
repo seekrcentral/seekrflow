@@ -67,10 +67,11 @@ PDBfixer is recommended to install in case one wants to run the parameterization
 
 ```sh
 mamba activate SEEKRFLOW_PARAM
+mamba install seekrflow --yes
 mamba install pdbfixer --yes
 ```
 
-#### OpenEye Toolkits (recommended; possibly needed for parameterization)
+#### OpenEye Toolkits (optional; possibly needed for parameterization)
 The OpenEye Toolkits are used for quantum chemistry-based force field parameterization. The OpenEye toolkits require a valid OpenEye academic license, free for academic users but must be obtained directly from https://www.eyesopen.com/academic-licensing. Seekrflow uses it to generate SDF files from PDB files of small molecules. If you do not plan to use seekrflow for parameterization, if will already have SDF files for your small molecules, or if you plan to use RDKit to generate SDF files, then you do not need to install OpenEye.
 
 ```sh
@@ -112,10 +113,14 @@ curl -O https://github.com/choderalab/espaloma/releases/download/0.3.2/espaloma-
 ```
 
 #### Browndye (recommended)
-SEEKR2 can use Browndye if Brownian dynamics (BD) simulations will be run (necessary for k-on calculations). Please see (https://browndye.ucsd.edu/) for Browndye installation instructions. Some of these steps require sudo privileges (administrator access). If you do not have sudo access, contact your system administrator.
+Seekr can use Browndye if Brownian dynamics (BD) simulations will be run (necessary for k-on calculations). Please see (https://browndye.ucsd.edu/) for Browndye installation instructions. Some of these steps require sudo privileges (administrator access). If you do not have sudo access, contact your system administrator.
+
+#### SDA (optional)
+
+Seekr may also use SDA for Brownian dynamics as an alternative to Browndye. This is particularly useful for simulations of membrane systems or diffusion to a surface is modeled with seekr. For installation instructions, see (https://mcm.h-its.org/sda7/doc/doc_sda7/index.html) for installation instructions and usage of SDA. Some of these steps may require sudo privileges (administrator access). If you do not have sudo access, contact your system administrator.
 
 #### seekr (required)
-This step installs OpenMM plugin for seekr package if you installed seekrflow from github. (A seekrflow installation from Mamba will automatically install seekr.)
+This step installs the seekr package if you installed seekrflow from github. (A seekrflow installation from Mamba will automatically install seekr.)
 ```sh
 mamba activate SEEKR
 mamba install seekr --yes
@@ -147,11 +152,23 @@ A seekrflow calculation will need a input JSON file to run, as well as a startin
 
 ```sh
 mamba activate SEEKRFLOW_PARAM
-python ~/seekrflow/seekrflow/flow.py parameterize -i seekrflow.json
+python ~/seekrflow/seekrflow/parameterize.py seekrflow.json
 mamba deactivate
 mamba activate SEEKR
-python ~/seekrflow/seekrflow/flow.py prepare -i seekrflow.json
-python ~/seekrflow/seekrflow/flow.py run -i seekrflow.json
+python ~/seekrflow/seekrflow/prepare.py seekrflow.json
+python ~/seekrflow/seekrflow/client.py run -i seekrflow.json -o seekrflow_output.json -c seekrflow_control.json
+```
+
+Then, in a different terminal, run the user interface to see the job progress and control the job:
+
+```sh
+mamba activate SEEKR
+python ~/seekrflow/seekrflow/tui.py seekrflow_control.json seekrflow_output.json
+```
+
+And when the job is finished:
+
+```sh
 python ~/seekr/seekr/analyze.py work/root/model.json
 ```
 
@@ -177,7 +194,7 @@ For BibTex files of many of the following citations, please visit: https://seekr
 
 If you use seekrflow, please cite the following paper:
 
-* Anupam A. Ojha, Lane W. Votapka, Shiksha Dutta, Anson F. Noland, Sonya M. Hanson, Rommie E. Amaro, seekrflow: Towards end-to-end automated simulation pipeline with machine-learned force fields for accelerated drug-target kinetic and thermodynamic predictions, bioRxiv 2025.08.13.669965; doi: https://doi.org/10.1101/2025.08.13.669965
+* Anupam A. Ojha, Lane W. Votapka, Shiksha Dutta, Anson F. Noland, Sonya M. Hanson, Rommie E. Amaro; seekrflow: Towards an End-to-End Automated Simulation Pipeline with Machine-Learned Force Fields for Accelerated Drug-Target Kinetic and Thermodynamic Predictions. J. Chem. Theory Comput. 14 July 2026; 22 (13): 6941–6960. https://doi.org/10.1021/acs.jctc.6c00659
 
 One should also cite SEEKR2 and its dependencies:
 
@@ -207,7 +224,7 @@ You may also optionally cite the following papers related to SEEKR2:
 
 ### Copyright
 
-Copyright (c) 2025, Lane Votapka
+Copyright (c) 2026, Lane Votapka
 
 
 #### Acknowledgements

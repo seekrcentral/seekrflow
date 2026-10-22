@@ -31,7 +31,7 @@ First, let's examine the example system provided with seekrflow:
 .. code-block:: bash
 
     # Navigate to the example directory
-    cd seekrflow/examples/trypsin_benzamidine/
+    cd seekrflow/seekrflow/examples/trypsin_benzamidine/
     
     # List the contents
     ls -la
@@ -71,7 +71,7 @@ parameterization workflow
 
     cd seekrflow/seekrflow/examples/trypsin_benzamidine
     mamba activate SEEKRFLOW_PARAM
-    python ~/seekrflow/seekrflow/flow.py parameterize -i seekrflow.json
+    python ~/seekrflow/seekrflow/parameterize.py seekrflow.json
 
 Within a few minutes, a directory named "work" will be created, which will 
 contain a directory "parameterize", along with some other files. Within this 
@@ -127,8 +127,21 @@ the workflow and prepare and run the seekr calculation:
 .. code-block:: bash
 
     mamba activate SEEKR
-    python ~/seekrflow/seekrflow/flow.py prepare -i seekrflow.json
-    python ~/seekrflow/seekrflow/flow.py run -i seekrflow.json
+    python ~/seekrflow/seekrflow/prepare.py seekrflow.json
+    python ~/seekrflow/seekrflow/client.py run -i seekrflow.json -o seekrflow_output.json -c seekrflow_control.json
+
+Then, in a different terminal, run the user interface to see the job progress and control the job:
+
+.. code-block:: bash
+
+    mamba activate SEEKR
+    python ~/seekrflow/seekrflow/tui.py seekrflow_control.json seekrflow_output.json
+
+And when the job is finished:
+
+.. code-block:: bash
+
+    python ~/seekr/seekr/analyze.py work/root/model.json
 
 .. warning::
 

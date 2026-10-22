@@ -189,14 +189,26 @@ the remote HPC system in the same way as before:
 .. code-block:: bash
 
     mamba activate SEEKR
-    python ~/seekrflow/seekrflow/flow.py prepare -i seekrflow_remote.json
-    python ~/seekrflow/seekrflow/flow.py run -i seekrflow_remote.json
-    python ~/seekr/seekr/analyze.py work_hpc/root/model.xml
+    python ~/seekrflow/seekrflow/prepare.py seekrflow.json
+    python ~/seekrflow/seekrflow/client.py run -i seekrflow.json -o seekrflow_output.json -c seekrflow_control.json
+
+Then, in a different terminal, run the user interface to see the job progress and control the job:
+
+.. code-block:: bash
+
+    mamba activate SEEKR
+    python ~/seekrflow/seekrflow/tui.py seekrflow_control.json seekrflow_output.json
+
+And when the job is finished:
+
+.. code-block:: bash
+
+    python ~/seekr/seekr/analyze.py work/root/model.json
 
 The job will probably take quite a long time to run, depending on the 
 resources available on the remote system, as well as the backlog in the 
 remote job queue. However, the BD simulations should still be run remotely 
-and synchronously with the rest of the jobs. In this configuration, HIDR 
+and synchronously with the rest of the jobs. In this configuration, metadynamics 
 will be run on the remote system first, and then the seekr anchor calculations 
 will be run synchronously with each other. All file transfers should
 be automatically handled to and from the remote resource.

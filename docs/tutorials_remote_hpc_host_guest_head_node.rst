@@ -31,8 +31,20 @@ Next, run the parameterization workflow:
 
 .. code-block:: bash
 
-    python ~/seekrflow/seekrflow/flow.py prepare -i seekrflow_1_butanol_head_node_slurm.json
-    python ~/seekrflow/seekrflow/flow.py run -i seekrflow_1_butanol_head_node_slurm.json
-    python ~/seekr/seekr/analyze.py work_head_node_slurm/root/model.xml
+    python ~/seekrflow/seekrflow/prepare.py seekrflow_1_butanol_head_node_slurm.json
+    python ~/seekrflow/seekrflow/client.py run -i seekrflow_1_butanol_head_node_slurm.json  -o seekrflow_output.json -c seekrflow_control.json
+
+Then, in a different terminal, run the user interface to see the job progress and control the job:
+
+.. code-block:: bash
+
+    mamba activate SEEKR
+    python ~/seekrflow/seekrflow/tui.py seekrflow_control.json seekrflow_output.json
+
+And when the job is finished:
+
+.. code-block:: bash
+
+    python ~/seekr/seekr/analyze.py work_head_node_slurm/root/model.json
 
 This tutorial gave an example for how to run SEEKR with a system that has already been parameterized on the head node.

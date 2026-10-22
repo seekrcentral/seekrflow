@@ -38,12 +38,24 @@ files to use for BD. These are all defined within the
 ``seekrflow_1_butanol_local.json`` file, and one can open this file to see 
 how they are featured.
 
-Next, run the parameterization workflow:
+Next, run the preparation, run, and analyze workflow:
 
 .. code-block:: bash
 
-    python ~/seekrflow/seekrflow/flow.py prepare-i seekrflow_1_butanol_local.json
-    python ~/seekrflow/seekrflow/flow.py run -i seekrflow_1_butanol_local.json
-    python ~/seekr/seekr/analyze.py work_local/root/model.xml
+    python ~/seekrflow/seekrflow/prepare.py seekrflow_1_butanol_local.json
+    python ~/seekrflow/seekrflow/client.py run -i seekrflow_1_butanol_local.json  -o seekrflow_output.json -c seekrflow_control.json
+
+Then, in a different terminal, run the user interface to see the job progress and control the job:
+
+.. code-block:: bash
+
+    mamba activate SEEKR
+    python ~/seekrflow/seekrflow/tui.py seekrflow_control.json seekrflow_output.json
+
+And when the job is finished:
+
+.. code-block:: bash
+
+    python ~/seekr/seekr/analyze.py work_local/root/model.json
 
 This tutorial gave an example for how to run SEEKR with a system that has already been parameterized.

@@ -97,13 +97,25 @@ run with the following commands:
 
 .. code-block:: bash
 
-   mamba activate SEEKRFLOW_PARAM
-   python ~/seekrflow/seekrflow/flow.py parameterize -i seekrflow.json
-   mamba deactivate
-   mamba activate SEEKR
-   python ~/seekrflow/seekrflow/flow.py prepare -i seekrflow.json
-   python ~/seekrflow/seekrflow/flow.py run -i seekrflow.json
-   python ~/seekr/seekr/analyze.py work/root/model.json
+  mamba activate SEEKRFLOW_PARAM
+  python ~/seekrflow/seekrflow/parameterize.py seekrflow.json
+  mamba deactivate
+  mamba activate SEEKR
+  python ~/seekrflow/seekrflow/prepare.py seekrflow.json
+  python ~/seekrflow/seekrflow/client.py run -i seekrflow.json -o seekrflow_output.json -c seekrflow_control.json
+
+Then, in a different terminal, run the user interface to see the job progress and control the job:
+
+.. code-block:: bash
+
+  mamba activate SEEKR
+  python ~/seekrflow/seekrflow/tui.py seekrflow_control.json seekrflow_output.json
+
+And when the job is finished:
+
+.. code-block:: bash
+
+  python ~/seekr/seekr/analyze.py work/root/model.json
 
 For detailed installation instructions, see the :doc:`getting_started` guide.
 

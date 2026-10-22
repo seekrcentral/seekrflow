@@ -7,18 +7,18 @@ seekrflow for molecular dynamics simulation workflows.
 What is seekrflow?
 ------------------
 
-seekrflow is a workflow management system designed for molecular dynamics 
-simulations using the seekr package. It provides:
+seekrflow is a workflow management system designed for molecular dynamics / brownian 
+dynamics simulations using the seekr package. It provides:
 
 - Automated parameter generation for molecular systems
 - Streamlined workflow execution for enhanced sampling simulations
-- Integration with high-performance computing resources
+- Integration with high-performance and cloud computing resources
 - Support for complex molecular systems including protein-ligand interactions
 
 Installation
 ------------
 
-The easiest, quickest way to install the seekrflow is to use Mamba. If you don't 
+The easiest, quickest way to install seekrflow is to use Mamba. If you don't 
 already have Mamba installed, download the Miniforge install script and run.
 
 .. code-block:: bash
@@ -33,7 +33,7 @@ Once this has been done, set up a new environment:
 
 .. code-block:: bash
 
-    mamba create -n SEEKR2 python=3.12 --yes
+    mamba create -n SEEKR python=3.12 --yes
 
 If you plan to use seekrflow for parameterization, you will probably need a 
 second environment to avoid conflicts.
@@ -69,7 +69,7 @@ states, and to optionally produce PQR files for BD simulations
 
     pip install pdb2pqr
 
-OpenEye Toolkits (recommended; possibly needed for parameterization)
+OpenEye Toolkits (optional; possibly needed for parameterization)
 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 The OpenEye Toolkits are used for quantum chemistry-based force field 
@@ -134,14 +134,24 @@ somewhere on your computer system.
 
     curl -O https://github.com/choderalab/espaloma/releases/download/0.3.2/espaloma-0.3.2.pt
 
-Browndye2 (recommended)
+Browndye (recommended)
 +++++++++++++++++++++++
 
-Seekr can use Browndye2 if Brownian dynamics (BD) simulations will be run 
+Seekr can use Browndye (version 2) if Brownian dynamics (BD) simulations will be run 
 (necessary for k-on calculations). Please see (https://browndye.ucsd.edu/) 
-for Browndye2 installation instructions. Some of these steps require sudo 
+for Browndye installation instructions. Some of these steps require sudo 
 privileges (administrator access). If you do not have sudo access, contact 
 your system administrator.
+
+SDA (optional)
+++++++++++++++
+
+Seekr may also use SDA for Brownian dynamics as an alternative to Browndye. 
+This is particularly useful for simulations of membrane systems or diffusion 
+to a surface is modeled with seekr. For installation instructions, see 
+(https://mcm.h-its.org/sda7/doc/doc_sda7/index.html) for installation instructions 
+and usage of SDA. Some of these steps may require sudo privileges (administrator 
+access). If you do not have sudo access, contact your system administrator.
 
 seekr (required)
 ++++++++++++++++
@@ -150,6 +160,7 @@ Install seekr.
 
 .. code-block:: bash
 
+    mamba activate SEEKR
     cd ~
     git clone https://github.com/seekrcentral/seekr.git
     cd seekr
@@ -168,9 +179,17 @@ Install seekrflow
 Finally, with the dependencies out of the way, we can install seekrflow.
 
 .. code-block:: bash
-
+    
+    mamba activate SEEKR
     git clone https://github.com/seekrcentral/seekrflow.git
     cd seekrflow
+    python -m pip install .
+
+It's necessary to also install it in the other Mamba environment.
+
+.. code-block:: bash
+    
+    mamba activate SEEKRFLOW_PARAM
     python -m pip install .
 
 Testing seekrflow (Optional)
@@ -186,11 +205,11 @@ Installing Dependencies for Remote Execution on HPC Systems
 -----------------------------------------------------------
 
 If one want to use seekrflow to run SEEKR on a remote system, one must decide 
-whetherto run seekrflow on the head node, or use SSH or Globus Compute SDK 
+whether to run seekrflow on the head node, or use SSH or Globus Compute SDK 
 in order to control the jobs. They all function very similarly, but here are the 
 pros and cons of each.
 
-.. list-table:: SSH vs Globus Compute SDK Comparison
+.. list-table:: SSH vs Globus Compute vs Head Node SDK Comparison
    :widths: 20 20 20
    :header-rows: 1
 
@@ -227,10 +246,12 @@ On the local machine:
 
 On the remote HPC system, you will need to follow the steps above to create the 
 Mamba environment (on the head or login node; the environment is assumed to be 
-named "SEEKR"). Into this environment, install seekr and seekrflow. Then, make 
-sure it is activated. (There is probably no need to make a parameterization 
-environment on the remote machine, as it is presumed that parameterization, 
-if any, will be performed on the local machine.)
+named "SEEKR"). Into this environment, install seekr. Then, make 
+sure it is activated. (There is probably no need to make a seekrflow installation nor
+a parameterization environment on the remote machine, as it is presumed that 
+parameterization and, if any, will be performed on the local machine. However, if 
+one is running seekrflow on the head node of a remote machine, it will need to be 
+installated there.)
 
 .. code-block:: bash
 
@@ -293,7 +314,9 @@ the NCSA Delta supercomputer:
     variable in your shell initialization file (e.g., ~/.bashrc) for
     openmm to be able to find the CUDA compiler.
 
-Start the endpoint.
+At this point, I suggest opening a browser on any compute, navigate to 
+https://www.globus.org and log in (or register an account if you don't currently
+have one - then log in). Start the endpoint.
 
 .. code-block:: bash
 
@@ -375,7 +398,7 @@ endpoint name, and search the page for "UUID". This is the Collection ID
 for your remote Globus Compute Endpoint. Save this UUID for your seekrflow 
 configuration input file.
 
-Set up your .seekrflow_resources.json (optional)
+Set up your .seekrflow_resources.json (recommended)
 ------------------------------------------------
 
 One can save a lot of time preparing to submit remote jobs if one sets up 

@@ -31,10 +31,8 @@ for the solvent.
 
 Step 2: Parameterizing with Espaloma and Seekrflow
 --------------------------------------------------
-The only change will be to the arguments to the parameterize.py script, 
-(although these changes could also be made at the level of the 
-```seekrflow.json``` configuration file). We must point to the location of 
-the espaloma force field file.
+The only change will be to the parameterizer section of the input JSON. 
+We must point to the location of the espaloma force field file.
 
 .. code-block:: bash
 
@@ -47,7 +45,7 @@ force field file you have downloaded.
 .. code-block:: bash
 
     mamba activate SEEKRFLOW_PARAM
-    python ~/seekrflow/seekrflow/flow.py parameterize -i seekrflow_espaloma.json
+    python ~/seekrflow/seekrflow/parameterize.py seekrflow_espaloma.json
 
 .. note::
 
@@ -65,6 +63,18 @@ One may then run the rest of the workflow as before:
 .. code-block:: bash
 
     mamba activate SEEKR
-    python ~/seekrflow/seekrflow/flow.py prepare -i seekrflow_espaloma.json
-    python ~/seekrflow/seekrflow/flow.py run -i seekrflow_espaloma.json
-    python ~/seekr/seekr/analyze.py work_espaloma/root/model.xml
+    python ~/seekrflow/seekrflow/prepare.py seekrflow.json
+    python ~/seekrflow/seekrflow/client.py run -i seekrflow.json -o seekrflow_output.json -c seekrflow_control.json
+
+Then, in a different terminal, run the user interface to see the job progress and control the job:
+
+.. code-block:: bash
+
+    mamba activate SEEKR
+    python ~/seekrflow/seekrflow/tui.py seekrflow_control.json seekrflow_output.json
+
+And when the job is finished:
+
+.. code-block:: bash
+
+    python ~/seekr/seekr/analyze.py work/root/model.json
