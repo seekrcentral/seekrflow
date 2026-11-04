@@ -17,9 +17,11 @@ from typing import List, Dict
 
 from attrs import define, field, validators
 import cattrs
+from cattrs.strategies import include_subclasses
 import seekr.modules.structures as seekr_structures
 
 import seekrflow.modules.structures as structures
+import seekrflow.modules.batch_analysis.structures as batch_analysis_structures
 Seekrflow = structures.Seekrflow
 
 DEFAULT_TELEMETRY_POLL_INTERVAL = 30.0
@@ -176,10 +178,9 @@ class Batch:
             validators.gt(0.0),
         ),
     )
-    # TODO: implement
-    batch_analyses: list[typing.Any] = field(
-        factory=list,
-    )
+    batch_analysis: batch_analysis_structures.Batch_analysis | None \
+        = field(default=None, validator=validators.optional(
+            validators.instance_of(batch_analysis_structures.Batch_analysis)))
 
     # Populated after load; not part of JSON input - used to resolve relative paths
     # in inputs
@@ -206,6 +207,8 @@ class Batch:
         with open(batch_json, "r") as f:
             data = json.load(f)
         converter = cattrs.Converter()
+        include_subclasses(batch_analysis_structures.Reference_dataset, converter)
+        include_subclasses(batch_analysis_structures.Analysis_series, converter)
         batch: "Batch" = converter.structure(data, cls)
         batch._source_path = os.path.abspath(batch_json)
         batch._source_dir = os.path.dirname(batch._source_path)
@@ -289,6 +292,33 @@ class Batch:
                 if self._existing_seekrflow else []
         return seekrflow_objects
     
+    def create_model_objects(
+            self,
+            seekrflow_objects: List[Seekrflow] | None = None,
+            ) -> List[seekr_structures.Seekr_model]:
+        """
+        Create a list of model objects for all systems in this batch.
+        """
+        models = []
+        if seekrflow_objects is None:
+            seekrflow_objects = self.create_seekrflow_objects()
+        for seekrflow in seekrflow_objects:
+            if seekrflow.work_directory is not None:
+                seekrflow.work_directory = os.path.abspath(
+                    seekrflow.work_directory)
+                os.chdir(seekrflow.work_directory)
+            root_directory = str(seekrflow.get_root_directory())
+            model_filename = os.path.join(root_directory, "model.json")
+            if not os.path.isfile(model_filename):
+                raise FileNotFoundError(
+                    f"No prepared model for system {seekrflow.name!r}: "
+                    f"{model_filename} does not exist. Run prepare for this "
+                    f"batch before client.py run.")
+            model = seekr_structures.load_model(model_filename)
+            models.append(model)
+
+        return models
+
     def create_session(
             self,
             output_file: str | None,
@@ -300,18 +330,9 @@ class Batch:
         seekrflow_objects = self.create_seekrflow_objects()
         systemrun_objects = []
         curdir = os.getcwd()
-        for seekrflow in seekrflow_objects:
-            if seekrflow.work_directory is not None:
-                seekrflow.work_directory = os.path.abspath(seekrflow.work_directory)
-                os.chdir(seekrflow.work_directory)
-            root_directory = str(seekrflow.get_root_directory())
-            model_filename = os.path.join(root_directory, "model.json")
-            if not os.path.isfile(model_filename):
-                raise FileNotFoundError(
-                    f"No prepared model for system {seekrflow.name!r}: "
-                    f"{model_filename} does not exist. Run prepare for this "
-                    f"batch before client.py run.")
-            model = seekr_structures.load_model(model_filename)
+        model_objects = self.create_model_objects(seekrflow_objects)
+        for seekrflow, model in zip(
+                seekrflow_objects, model_objects):
             systemrun_objects.append(SystemRun(
                 name=seekrflow.name,
                 seekrflow=seekrflow,
