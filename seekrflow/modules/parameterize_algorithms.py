@@ -175,6 +175,11 @@ def parameterize_and_check_complex(
             param_dir)
     else:
         new_system = solvated_system
+    
+    # Remove the barostat from the system so it isn't saved in the XML file.
+    for force_index in range(new_system.getNumForces() - 1, -1, -1):
+        if isinstance(new_system.getForce(force_index), openmm.MonteCarloBarostat):
+            new_system.removeForce(force_index)
 
     with open(serialized_system_xml, "w") as wf:
         wf.write(openmm.XmlSerializer.serialize(new_system))

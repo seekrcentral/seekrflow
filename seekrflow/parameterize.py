@@ -75,6 +75,28 @@ def _assert_parameterize_system_contract(
             "populated. Leave system as null/blank when parameterizing, or "
             "set parameterizer to null when providing an existing system.")
 
+def _selected_ligand_residue(
+        traj: mdtraj.Trajectory,
+        indices: list[int],
+        member_name: str,
+        ) -> tuple[str, int]:
+    """
+    Return the residue name and PDB residue number of a small-molecule
+    selection. The component PDB saved afterward does not keep that number.
+    """
+    found: list[tuple[str, int]] = []
+    seen: set[tuple[str, int]] = set()
+    for index in indices:
+        residue = traj.topology.atom(int(index)).residue
+        key = (residue.name, int(residue.resSeq))
+        if key not in seen:
+            seen.add(key)
+            found.append(key)
+    if len(found) != 1:
+        raise ValueError(
+            f"Small molecule '{member_name}' covers {len(found)} residues "
+            f"{found}. Preserve one residue name and resSeq per component.")
+    return found[0]
 
 def fill_md_system_from_parameterize(
         seekrflow: structures.Seekrflow,
@@ -140,6 +162,7 @@ def split_components(
     traj = mdtraj.load(complex_pdb_filename)
     full_structure = parmed.load_file(complex_pdb_filename, skip_bonds=True)
     resolved: dict[str, list[int]] = {}
+    ligand_residues: dict[str, tuple[str, int]] = {}
     members = seekrflow.workflow.components.members
     assert len(members) > 0, \
         "Workflow.components.members must be non-empty to parameterize."
@@ -148,13 +171,16 @@ def split_components(
         assert len(indices) > 0, \
             f"Component '{member.name}' resolved to no atoms."
         resolved[member.name] = indices
+        if isinstance(member, components_module.Small_molecule_component):
+            ligand_residues[member.name] = _selected_ligand_residue(
+                traj, indices, member.name)
         # ParmEd uses 1-based atom numbers in selection strings.
         selection = "@" + ",".join(str(i + 1) for i in indices)
         piece = full_structure[selection]
         out_path = os.path.join(
             param_directory, _component_pdb_filename(member.name))
         piece.save(str(out_path), overwrite=True)
-    return resolved
+    return resolved, ligand_residues
 
 
 def _apply_protein_fixer_pdb2pqr(
@@ -264,6 +290,7 @@ def _stamp_member_chain_ids(topology, members) -> None:
 def create_complex(
         seekrflow: structures.Seekrflow,
         param_directory: str,
+        ligand_residues: dict[str, tuple[str, int]] | None = None,
         ) -> typing.Tuple[str, str]:
     """
     Build the solvated, parameterized complex from Workflow components.
@@ -277,7 +304,9 @@ def create_complex(
     complex_md_topology = None
     complex_positions = None
     offmols = []
-    
+    if ligand_residues is None:
+        ligand_residues = {}
+
     solvent = [
         m for m in members
         if isinstance(m, components_module.Solvent_component)]
@@ -348,13 +377,28 @@ def create_complex(
                 pdb_to_sdf_settings=parameterizer.pdb_to_sdf_settings)
         member.sdf_file = sdf_dest
         chain = getattr(member.selector, "chain", None)
+        source = ligand_residues.get(member.name)
+        if source is None:
+            ligand_resname = member.parameterize_resname()
+            ligand_resseq = None
+        else:
+            source_name, ligand_resseq = source
+            requested = member.parameterize_resname()
+            if requested not in ("LIG", source_name):
+                raise ValueError(
+                    f"Small molecule '{member.name}' requests residue name "
+                    f"{requested!r}, but the complex PDB residue is "
+                    f"{source_name!r}. Use the crystal residue name so the "
+                    f"same selector works for parameterize and prepare.")
+            ligand_resname = source_name
         _lig_top, lig_md_top, lig_pos, offmol = \
             base.make_ligand_openmm_and_mdtraj_top(
                 sdf_dest,
                 component_pdb,
                 param_directory,
                 draw_ligand=True,
-                ligand_resname=member.parameterize_resname(),
+                ligand_resname=ligand_resname,
+                ligand_resseq=ligand_resseq,
                 chain=chain,
             )
         offmols.append(offmol)
@@ -435,10 +479,10 @@ def parameterize(
 
         os.chdir(seekrflow.work_directory)
         try:
-            split_components(
+            _resolved, ligand_residues = split_components(
                 seekrflow, param_dir, parameterizer.complex_pdb_filename)
             serialized_system_xml, output_pdb_filename = create_complex(
-                seekrflow, param_dir)
+                seekrflow, param_dir, ligand_residues)
         finally:
             os.chdir(batch.batch_directory)
             

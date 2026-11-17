@@ -202,6 +202,7 @@ def make_ligand_openmm_and_mdtraj_top(
         param_directory: str,
         draw_ligand: bool = True,
         ligand_resname: str = "",
+        ligand_resseq: int | None = None,
         chain: str | None = None,
         ) -> typing.Tuple[
         "openmm.app.Topology",
@@ -235,29 +236,21 @@ def make_ligand_openmm_and_mdtraj_top(
         img = Draw.MolToImage(mol_2d, size=(300, 300))
         img.save(os.path.join(param_directory,  f"{ligand_basename_without_extension}.png"))
     ligand_pdb = parmed.load_file(str(ligand_pdb_filename), skip_bonds=True)
-    #ligand_positions_in_A_pdb = ligand_pdb.coordinates
-    #conf = mol.GetConformer()
     _copy_pdb_coordinates_onto_mol(mol, ligand_pdb)
-    #assert ligand_positions_in_A_pdb.shape[0] == mol.GetNumAtoms(), (
-    #    f"Ligand PDB has {ligand_positions_in_A_pdb.shape[0]} atoms but SDF "
-    #    f"mol has {mol.GetNumAtoms()} (file={ligand_sdf_filename!r}). "
-    #    "Atom counts must match so PDB coordinates can be copied onto the "
-    #    "SDF conformer."
-    #)
-    #for i in range(mol.GetNumAtoms()):
-    #    conf.SetAtomPosition(i, Point3D(ligand_positions_in_A_pdb[i,0],
-    #                                    ligand_positions_in_A_pdb[i,1],
-    #                                    ligand_positions_in_A_pdb[i,2]))
-    # NOTE: we don't want to optimize atomic positions after assigning from PDB because
-    # the optimization is performed in a vacuum.
-    #rdForceFieldHelpers.MMFFOptimizeMolecule(mol)
-    offmol = Molecule.from_rdkit(mol)
+    mol = Chem.AddHs(mol, addCoords=True)
+    Chem.AssignStereochemistryFrom3D(mol)
+    offmol = Molecule.from_rdkit(mol, hydrogens_are_explicit=True)
+    #offmol = Molecule.from_rdkit(mol)
     ligand_positions = to_openmm(offmol.conformers[0])
     ligand_topology = offmol.to_topology().to_openmm()
     if chain:
         chain_str = chain
         for ligand_chain in ligand_topology.chains():
             ligand_chain.id = chain_str
+    for residue in ligand_topology.residues():
+        residue.name = ligand_resname if ligand_resname else "LIG"
+        if ligand_resseq is not None:
+            residue.id = str(int(ligand_resseq))
     output_pdb_filename_ligand = os.path.join(
         param_directory, "ligand_with_connections.pdb")
     openmm_app.PDBFile.writeFile(

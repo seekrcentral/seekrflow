@@ -29,6 +29,7 @@ dependencies = [
     "parmed",
     "rdkit",
     "rich",
+    "six",
     "fabric",
     "networkx",
     "biopython",

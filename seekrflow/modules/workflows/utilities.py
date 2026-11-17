@@ -314,18 +314,15 @@ def select_both_from_mdtraj_and_indices(
         
     return filtered_md_indices, filtered_ref_indices
 
-#####################################################################################################
-    #print("nonprotein_solvated_indices:", nonprotein_solvated_indices)
-    #print("nonprotein_unsolvated_indices:", nonprotein_unsolvated_indices)
-    # Loop through the solvated and unsolvated atoms in pair using zip, and
-    # assert that elements are the same, at least
-#    for solv_idx, unsolv_idx in zip(nonprotein_solvated_indices, nonprotein_unsolvated_indices):
-#        solv_atom = md_mdtraj.topology.atom(solv_idx)
-#        unsolv_atom = ref_mdtraj.topology.atom(unsolv_idx)
-#        if solv_atom.element != unsolv_atom.element:
-#            print("ERROR: Non-matching elements found between solvated and unsolvated "
-#                  "structures for non-protein atom:")
-#            print(f"  Solvated atom index: {solv_idx}, name: {solv_atom.name}, "
-#                  f"element: {solv_atom.element}")
-#            print(f"  Unsolvated atom index: {unsolv_idx}, name: {unsolv_atom.name}, "
-#                  f"element: {unsolv_atom.element}")
+def stack_reference_coordinates(
+        ref_traj, md_traj, ref_indices) -> np.ndarray:
+    n_ref = ref_traj.n_frames
+    n_md = md_traj.n_frames
+    if n_ref != 1 and n_ref != n_md:
+        raise ValueError(
+            f"Reference structure has {n_ref} frames and the solvated "
+            f"structure has {n_md}. Use one reference frame for every "
+            f"swarm member, or the same number of frames in both files.")
+    if n_ref == 1:
+        return np.atleast_2d(ref_traj.xyz[0, ref_indices])
+    return ref_traj.xyz[:, ref_indices].reshape(-1, 3)

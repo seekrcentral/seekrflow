@@ -51,6 +51,9 @@ from seekr.modules.scales.brownian_dynamics.preparer import Input_stage_bd
 from seekr.modules.scales.logistic\
     .anchor_starting_structures_from_reporter_logistic_stage import (
         Input_stage_anchor_starting_structures_from_reporter)
+from seekr.modules.scales.logistic\
+    .swarm_structure_to_reporter_logistic_stage import (
+        Input_stage_swarm_structure_to_reporter)
 from seekr.modules.sampling_methods.preparer import (
     Conventional_md_input, Metadynamics_md_input, Steered_md_input,
     MMVT_md_input, NAM_bd_input)
@@ -331,6 +334,13 @@ def _make_input_stage(
         stage.input_stage_name = input_stage_name
         stage.reporter_name = item.reporter_name
         stage.number_of_velocity_resamples = item.number_of_velocity_resamples
+        return stage
+    if isinstance(item, stage_procedures_module.Logistic_swarm_to_reporter_stage_item):
+        stage = Input_stage_swarm_structure_to_reporter()
+        stage.name = item.name
+        stage.input_stage_name = input_stage_name
+        stage.set_name = item.set_name
+        stage.extension = item.extension
         return stage
     raise ValueError(f"Unknown stage item {type(item).__name__}.")
 

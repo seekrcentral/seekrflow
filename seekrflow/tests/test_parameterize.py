@@ -82,11 +82,13 @@ def test_split_components_writes_receptor_and_ligand(tmp_path):
     pdb = _write_complex(tmp_path)
     param = tmp_path / "parameterize"
     param.mkdir()
-    resolved = parameterize.split_components(_flow(pdb), str(param), str(pdb))
+    resolved, ligand_residues = parameterize.split_components(
+        _flow(pdb), str(param), str(pdb))
     receptor = parmed.load_file(str(param / "receptor.pdb"))
     ligand = parmed.load_file(str(param / "ligand.pdb"))
     assert len(receptor.atoms) == 5
     assert len(ligand.atoms) == 4
+    assert ligand_residues["ligand"] == ("LIG", 1)
     assert set(resolved) == {"receptor", "ligand"}
 
 
@@ -130,7 +132,7 @@ def test_parameterize_copies_pdb_strips_hydrogens_and_sdf(tmp_path, monkeypatch)
     monkeypatch.setattr(
         client_structures.Batch, "create_seekrflow_objects",
         lambda self: [flow])
-    monkeypatch.setattr(parameterize, "split_components", lambda *args: {})
+    monkeypatch.setattr(parameterize, "split_components", lambda *args: ({}, {}))
     monkeypatch.setattr(
         parameterize, "create_complex",
         lambda *args: ("complex_system.xml", "complex_solvent.pdb"))
@@ -210,7 +212,8 @@ def test_create_complex_provided_sdf_skips_conversion(tmp_path, monkeypatch):
 
     def fake_ligand(
             ligand_sdf_filename, ligand_pdb_filename, param_directory,
-            draw_ligand=True, ligand_resname="LIG", chain=None):
+            draw_ligand=True, ligand_resname="LIG", ligand_resseq=None, 
+            chain=None):
         with open(ligand_sdf_filename) as handle:
             assert "mock sdf" in handle.read()
         return (

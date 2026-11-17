@@ -372,10 +372,25 @@ class Logistic_swarm_from_reporter_stage_item(Stage_item_base):
     number_of_velocity_resamples: int = field(
         default=1, validator=validators.instance_of(int))
 
+@define
+class Logistic_swarm_to_reporter_stage_item(Stage_item_base):
+    """
+    A logistic stage that writes a position reporter from the ending
+    structures of the previous stage's swarms.
+    """
+    type: typing.Literal["swarm_structures_to_reporter_stage"] \
+        = "swarm_structures_to_reporter_stage"
+    scope: str = field(
+        default="unpartitioned", validator=validators.instance_of(str))
+    set_name: str = field(
+        default="main", validator=validators.instance_of(str))
+    extension: str = field(
+        default="xtc", validator=validators.in_(["dcd", "pdb", "xtc"]))
 
 Stage_item = MD_stage_item | BD_stage_item \
     | Logistic_swarm_from_reporter_stage_item \
-    | Logistic_anchor_from_reporter_stage_item
+    | Logistic_anchor_from_reporter_stage_item \
+    | Logistic_swarm_to_reporter_stage_item
 
 
 # ======================================================================
@@ -780,7 +795,7 @@ class Equilibration_globular_stage_procedure(Stage_procedure_base):
                 ref_mdtraj = mdtraj.load(ctx.md_structure_filename)
             md_mdtraj = mdtraj.load(ctx.md_structure_filename)
             ref_atom_indices, md_atom_indices = utilities_module\
-                .obtain_md_ref_structure_map(ref_mdtraj, md_mdtraj, 
+                .obtain_md_ref_structure_map(ref_mdtraj[0], md_mdtraj[0],
                                              self.align_selection_str)
             restraints: list[Restraint_spec] = []
             
@@ -797,9 +812,17 @@ class Equilibration_globular_stage_procedure(Stage_procedure_base):
                 "should be the same"
             backbone_coordinates_filename = os.path.join(
                 ctx.root_directory, f"{self.name}_backbone_restraint_coordinates.npy")
-            np.savetxt(backbone_coordinates_filename, 
-                       ref_mdtraj.xyz[0, protein_backbone_ref_indices])
             if row.get("backbone_force_constant", 0.0) > 0.0:
+                if len(protein_backbone_ref_indices) == 0:
+                    raise ValueError(
+                        "Backbone restraint requested with force constant "
+                        f"{row['backbone_force_constant']}, but selection "
+                        f"{backbone_selection!r} matched no atoms. Set "
+                        "backbone_force_constant to 0 to omit this restraint."
+                    )
+                coords = utilities_module.stack_reference_coordinates(
+                    ref_mdtraj, md_mdtraj, protein_backbone_ref_indices)
+                np.savetxt(backbone_coordinates_filename, coords)
                 restraints.append(Positional_restraint_spec(
                     selection_name=BACKBONE_SELECTION_NAME,
                     force_constant=float(row["backbone_force_constant"]),
@@ -820,9 +843,17 @@ class Equilibration_globular_stage_procedure(Stage_procedure_base):
                 "should be the same"
             sidechain_coordinates_filename = os.path.join(
                 ctx.root_directory, f"{self.name}_sidechain_restraint_coordinates.npy")
-            np.savetxt(sidechain_coordinates_filename, 
-                       ref_mdtraj.xyz[0, protein_sidechain_ref_indices])
             if row.get("sidechain_force_constant", 0.0) > 0.0:
+                if len(protein_sidechain_ref_indices) == 0:
+                    raise ValueError(
+                        "Sidechain restraint requested with force constant "
+                        f"{row['sidechain_force_constant']}, but selection "
+                        f"{sidechain_selection!r} matched no atoms. Set "
+                        "sidechain_force_constant to 0 to omit this restraint."
+                    )
+                coords = utilities_module.stack_reference_coordinates(
+                    ref_mdtraj, md_mdtraj, protein_sidechain_ref_indices)
+                np.savetxt(sidechain_coordinates_filename, coords)
                 restraints.append(Positional_restraint_spec(
                     selection_name=SIDECHAIN_SELECTION_NAME,
                     force_constant=float(row["sidechain_force_constant"]),
@@ -843,9 +874,17 @@ class Equilibration_globular_stage_procedure(Stage_procedure_base):
                 "should be the same"
             nonprotein_coordinates_filename = os.path.join(
                 ctx.root_directory, f"{self.name}_nonprotein_restraint_coordinates.npy")
-            np.savetxt(nonprotein_coordinates_filename, 
-                       ref_mdtraj.xyz[0, nonprotein_ref_indices])
             if row.get("nonprotein_force_constant", 0.0) > 0.0:
+                if len(nonprotein_ref_indices) == 0:
+                    raise ValueError(
+                        "Nonprotein restraint requested with force constant "
+                        f"{row['nonprotein_force_constant']}, but selection "
+                        f"{nonprotein_selection!r} matched no atoms. Set "
+                        "nonprotein_force_constant to 0 to omit this restraint."
+                    )
+                coords = utilities_module.stack_reference_coordinates(
+                    ref_mdtraj, md_mdtraj, nonprotein_ref_indices)
+                np.savetxt(nonprotein_coordinates_filename, coords)
                 restraints.append(Positional_restraint_spec(
                     selection_name=NONPROTEIN_SELECTION_NAME,
                     force_constant=float(row["nonprotein_force_constant"]),
@@ -917,7 +956,7 @@ class Equilibration_membrane_stage_procedure(Stage_procedure_base):
         md_mdtraj = mdtraj.load(ctx.md_structure_filename)
         ref_atom_indices, md_atom_indices = utilities_module\
             .obtain_md_ref_structure_map(
-                ref_mdtraj, md_mdtraj, self.align_selection_str)
+                ref_mdtraj[0], md_mdtraj[0], self.align_selection_str)
 
         lipid_atoms = membrane_utils.identify_lipid_atoms(md_mdtraj)
         phosphorus_indices = [int(i) for i in lipid_atoms["phosphorus"]]
@@ -976,10 +1015,17 @@ class Equilibration_membrane_stage_procedure(Stage_procedure_base):
             backbone_coordinates_filename = os.path.join(
                 ctx.root_directory,
                 f"{self.name}_backbone_restraint_coordinates.npy")
-            np.savetxt(
-                backbone_coordinates_filename,
-                ref_mdtraj.xyz[0, protein_backbone_ref_indices])
             if row.get("backbone_force_constant", 0.0) > 0.0:
+                if len(protein_backbone_ref_indices) == 0:
+                    raise ValueError(
+                        "Backbone restraint requested with force constant "
+                        f"{row['backbone_force_constant']}, but selection "
+                        f"{backbone_selection!r} matched no atoms. Set "
+                        "backbone_force_constant to 0 to omit this restraint."
+                    )
+                coords = utilities_module.stack_reference_coordinates(
+                    ref_mdtraj, md_mdtraj, protein_backbone_ref_indices)
+                np.savetxt(backbone_coordinates_filename, coords)
                 restraints.append(Positional_restraint_spec(
                     selection_name=BACKBONE_SELECTION_NAME,
                     force_constant=float(row["backbone_force_constant"]),
@@ -1002,10 +1048,17 @@ class Equilibration_membrane_stage_procedure(Stage_procedure_base):
             sidechain_coordinates_filename = os.path.join(
                 ctx.root_directory,
                 f"{self.name}_sidechain_restraint_coordinates.npy")
-            np.savetxt(
-                sidechain_coordinates_filename,
-                ref_mdtraj.xyz[0, protein_sidechain_ref_indices])
             if row.get("sidechain_force_constant", 0.0) > 0.0:
+                if len(protein_sidechain_ref_indices) == 0:
+                    raise ValueError(
+                        "Sidechain restraint requested with force constant "
+                        f"{row['sidechain_force_constant']}, but selection "
+                        f"{sidechain_selection!r} matched no atoms. Set "
+                        "sidechain_force_constant to 0 to omit this restraint."
+                    )
+                coords = utilities_module.stack_reference_coordinates(
+                    ref_mdtraj, md_mdtraj, protein_sidechain_ref_indices)
+                np.savetxt(sidechain_coordinates_filename, coords)
                 restraints.append(Positional_restraint_spec(
                     selection_name=SIDECHAIN_SELECTION_NAME,
                     force_constant=float(row["sidechain_force_constant"]),
@@ -1027,10 +1080,18 @@ class Equilibration_membrane_stage_procedure(Stage_procedure_base):
             nonprotein_coordinates_filename = os.path.join(
                 ctx.root_directory,
                 f"{self.name}_nonprotein_restraint_coordinates.npy")
-            np.savetxt(
-                nonprotein_coordinates_filename,
-                ref_mdtraj.xyz[0, nonprotein_ref_indices])
+            
             if row.get("nonprotein_force_constant", 0.0) > 0.0:
+                if len(nonprotein_ref_indices) == 0:
+                    raise ValueError(
+                        "Nonprotein restraint requested with force constant "
+                        f"{row['nonprotein_force_constant']}, but selection "
+                        f"{nonprotein_selection!r} matched no atoms. Set "
+                        "nonprotein_force_constant to 0 to omit this restraint."
+                    )
+                coords = utilities_module.stack_reference_coordinates(
+                    ref_mdtraj, md_mdtraj, nonprotein_ref_indices)
+                np.savetxt(nonprotein_coordinates_filename, coords)
                 restraints.append(Positional_restraint_spec(
                     selection_name=NONPROTEIN_SELECTION_NAME,
                     force_constant=float(row["nonprotein_force_constant"]),
