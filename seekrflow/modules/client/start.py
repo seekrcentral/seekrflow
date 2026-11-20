@@ -166,7 +166,7 @@ def handle_transfer(
                 transfer_stages.update(all_stage_names)
             elif fstage not in all_stage_names:
                 raise ValueError(
-                    f"Unknown stage {fstage!r} in --force_rerun for {system_name!r}. "
+                    f"Unknown stage {fstage!r} in --transfer-from-remote-only for {system_name!r}. "
                     f"Available: {all_stage_names}")
             else:
                 transfer_stages.add(fstage)

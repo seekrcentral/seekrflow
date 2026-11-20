@@ -151,7 +151,8 @@ def parameterize_and_check_complex(
         param_dir, parameterize_structures.COMPLEX_NO_SOLVENT_PDB)
     openmm_app.PDBFile.writeFile(
         nonsolvated_topology, nonsolvated_positions_minimized,
-        file=open(output_pdb_filename_nosolv, "w"))
+        file=open(output_pdb_filename_nosolv, "w"),
+        keepIds=True)
 
     solv_modeller = openmm_app.Modeller(
         nonsolvated_topology, nonsolvated_positions_minimized)
@@ -196,12 +197,14 @@ def parameterize_and_check_complex(
         param_dir, parameterize_structures.COMPLEX_SOLVENT_PDB)
     openmm_app.PDBFile.writeFile(
         solvated_topology, solvated_positions,
-        file=open(output_pdb_filename, "w"))
+        file=open(output_pdb_filename, "w"),
+        keepIds=True)
     traj = mdtraj.load(output_pdb_filename)
     traj.topology = mdtraj.Topology.from_openmm(solvated_topology)
     traj.image_molecules(inplace=True)
     openmm_app.PDBFile.writeFile(
         solvated_topology, traj.xyz[0] * 10.0,
-        file=open(output_pdb_filename, "w"))
+        file=open(output_pdb_filename, "w"),
+        keepIds=True)
 
     return serialized_system_xml, output_pdb_filename

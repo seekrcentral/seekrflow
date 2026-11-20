@@ -219,6 +219,10 @@ class Resource_base:
     Base class for resources.
     """
     type: typing.Literal["base"] = "base"
+    use_cuPotential: bool = field(
+        default=False,
+        validator=validators.instance_of(bool),
+    )
     
 
 @define
@@ -633,7 +637,7 @@ class Run_settings:
     resource: the machine that a protocol will run on
     """
     resources: typing.List[
-        Resource_remote_slurm | Resource_remote_pbs | Resource_cloud_aws
+        Resource_remote_slurm | Resource_remote_pbs | Resource_cloud_aws | Resource_direct
         ] = field(default=Factory(list),)
     # A placement with an empty ``target`` ([]) matches every stage and acts
     #  as the default; more specific (longer) targets override it.

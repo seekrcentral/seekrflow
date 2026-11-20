@@ -105,6 +105,7 @@ class StageSpec:
     stage_name: str
     force_overwrite: bool
     benchmark: bool
+    use_cuPotential: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)

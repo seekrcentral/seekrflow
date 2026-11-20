@@ -269,7 +269,8 @@ async def do_job(
                     f"model, {stage_index}, {run_unit.anchor!r}, None, "
                     f"force_overwrite={stage_spec.force_overwrite}, " 
                     f"swarm_id={run_unit.swarm_id!r}, "
-                    f"benchmark={stage_spec.benchmark}"
+                    f"benchmark={stage_spec.benchmark}, "
+                    f"use_cuPotential={stage_spec.use_cuPotential}, "
                     f")"
                 )
                 with open(output_file_path, "w") as f:

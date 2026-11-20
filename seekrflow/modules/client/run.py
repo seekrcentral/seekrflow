@@ -136,6 +136,7 @@ class StageWorkflow:
         default=None, repr=False)
     force_overwrite: Dict[str, bool] = attrs.field(factory=dict)
     benchmark_mode: Dict[str, bool] = attrs.field(factory=dict)
+    use_cuPotential: Dict[str, bool] = attrs.field(factory=dict)
     
     # Derived / mutable state
     dependency_tasks: list = attrs.field(factory=list)
@@ -528,6 +529,7 @@ class StageWorkflow:
                         stage_name=stage.name,
                         force_overwrite=self.force_overwrite[stage.name],
                         benchmark=self.benchmark_mode[stage.name],
+                        use_cuPotential=self.use_cuPotential[stage.name],
                     )
                     stage_specs.append(stage_spec)
                 
@@ -692,6 +694,7 @@ class StageWorkflow:
                 "stage_state": self.stage_state.get(stage.name, "unknown"),
                 "force_overwrite": self.force_overwrite[stage.name],
                 "benchmark_mode": self.benchmark_mode[stage.name],
+                "use_cuPotential": self.use_cuPotential[stage.name],
                 "semaphore": self.semaphore,
                 "progress": self.progress.get(stage.name, {}),
             }
@@ -853,6 +856,8 @@ class SeekrPipeline:
                 = stage.name in self.systemrun.force_rerun_stages
             stage_workflow.benchmark_mode[stage.name] \
                 = (stage.name == self.systemrun.benchmark_stage)
+            stage_workflow.use_cuPotential[stage.name] \
+                = resource.use_cuPotential
             stage_semaphore = self.systemrun.semaphore_dict.get(stage.name, "go")
             if stage_workflow_semaphore is None:
                 stage_workflow_semaphore = stage_semaphore
