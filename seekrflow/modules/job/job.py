@@ -255,7 +255,7 @@ async def do_job(
         for group_index in range(0, group_size, job_spec.concurrency):
             group_run_units = job_spec.run_units[group_index:group_index+job_spec.concurrency]
             procs = []
-            for run_unit in group_run_units:
+            for slot, run_unit in enumerate(group_run_units):
                 output_basename = get_output_file_basename(
                     stage_spec.stage_name, run_unit.anchor, run_unit.swarm_id)
                 output_file_path = pathlib.Path(job_spec.remote_root_dir) / "logs" \
@@ -269,6 +269,7 @@ async def do_job(
                     f"model, {stage_index}, {run_unit.anchor!r}, None, "
                     f"force_overwrite={stage_spec.force_overwrite}, " 
                     f"swarm_id={run_unit.swarm_id!r}, "
+                    f"device_index={slot}, "
                     f"benchmark={stage_spec.benchmark}, "
                     f"use_cuPotential={stage_spec.use_cuPotential}, "
                     f")"
