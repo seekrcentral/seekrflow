@@ -102,6 +102,10 @@ def run_python_snippet_workload(payload: dict):
     Run a python snippet on the remote worker - return raw stdout/stderr
     """
     import shlex, pathlib, subprocess
+    # Via submit_workload the payload arrives as (payload,), like the other
+    # workloads' args; called directly it is the dict itself.
+    if isinstance(payload, (tuple, list)):
+        payload = payload[0]
     root_dir = payload["root_dir"]
     snippet = payload["snippet"]
     worker_init = payload.get("worker_init", "")
