@@ -266,7 +266,7 @@ async def do_job(
                     f"import seekr.run as seekr_run;"
                     f"model = structures.load_model('{model_filename}');"
                     f"seekr_run.run("
-                    f"model, {stage_index}, {run_unit.anchor!r}, None, "
+                    f"model, {stage_index}, {run_unit.anchor!r}, "
                     f"force_overwrite={stage_spec.force_overwrite}, " 
                     f"swarm_id={run_unit.swarm_id!r}, "
                     f"device_index={slot}, "
