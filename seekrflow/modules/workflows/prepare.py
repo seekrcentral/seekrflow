@@ -66,7 +66,7 @@ from seekr.modules.anchor_schemes.preparer import (
     Anchors_as_voronoi_cells_anchor_scheme, Voronoi_cell)
 from seekr.modules.restraints.preparer import (
     Positional_restraint_input, Z_restraint_input, Torsion_restraint_input,
-    Pairwise_restraint_input, Proximity_restraint_input)
+    Pairwise_restraint_input, Proximity_restraint_input, Center_of_mass_restraint_input)
 from seekr.modules.reporters.preparer import (
     State_reporter_input, Position_reporter_input, Anchor_reporter_input)
 from seekr.modules.base import (
@@ -232,6 +232,11 @@ def _map_restraint(restraint: typing.Any) -> typing.Any:
             selection2_name=restraint.selection2_name,
             radius=restraint.radius,
             force_constant=restraint.force_constant)
+    if isinstance(restraint, stage_procedures_module.Center_of_mass_restraint_spec):
+        return Center_of_mass_restraint_input(
+            selection_names=restraint.selection_names,
+            force_constant=restraint.force_constant,
+            coordinates_filename=restraint.coordinates_filename)
     raise ValueError(f"Unknown restraint spec {type(restraint).__name__}.")
 
 

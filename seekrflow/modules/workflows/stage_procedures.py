@@ -220,11 +220,25 @@ class Torsion_restraint_spec(Restraint_spec_base):
     force_constant: float = field(
         default=10.0, validator=validators.instance_of(float))
 
+@define
+class Center_of_mass_restraint_spec(Restraint_spec_base):
+    type: typing.Literal["center_of_mass"] = "center_of_mass"
+    selection_names: list[str] = field(
+        default=Factory(list),
+        validator=validators.deep_iterable(
+            member_validator=validators.instance_of(str),
+            iterable_validator=validators.instance_of(list),
+        ))
+    force_constant: float = field(
+        default=10.0, validator=validators.instance_of(float))
+    coordinates_filename: str | None = field(
+        default=None, validator=validators.optional(
+            validators.instance_of(str)))
 
 Restraint_spec = (
     Positional_restraint_spec | Z_restraint_spec
     | Pairwise_restraint_spec | Proximity_restraint_spec
-    | Torsion_restraint_spec
+    | Torsion_restraint_spec | Center_of_mass_restraint_spec
 )
 
 
@@ -750,14 +764,70 @@ class Explicit_stage_procedure(Stage_procedure_base):
         ]
 
 
+def _prepare_com_restraints(
+        procedure: typing.Any,
+        ctx: typing.Any,
+        ) -> tuple[list[str], str | None]:
+    """
+    Build center-of-mass selections and the shared coordinate file when any
+    schedule row has a positive ``com_force_constant``.
+    """
+    positive = any(
+        float(row.get("com_force_constant", 0.0)) > 0.0
+        for row in procedure.schedule)
+    if not positive:
+        return [], None
+    if not procedure.com_reference_structure_filename:
+        raise ValueError(
+            "A positive com_force_constant requires "
+            "com_reference_structure_filename.")
+    com_ref_traj = mdtraj.load(procedure.com_reference_structure_filename)
+    md_traj = mdtraj.load(ctx.md_structure_filename)
+    groups, coords = utilities_module.com_reference_groups(
+        com_ref_traj, md_traj)
+    coordinates_filename = os.path.join(
+        ctx.root_directory,
+        f"{procedure.name}_com_restraint_coordinates.txt")
+    np.savetxt(coordinates_filename, coords)
+    selection_names: list[str] = []
+    for group in groups:
+        selection_name = (
+            f"{procedure.name}_com_res_{group.chain_id}_"
+            f"{group.res_seq}_{group.resname}")
+        ctx.selections["molecular_dynamics"][selection_name] = list(
+            group.atom_indices)
+        selection_names.append(selection_name)
+    return selection_names, coordinates_filename
+
+
+def _append_com_restraint(
+        restraints: list[Restraint_spec],
+        row: dict,
+        selection_names: list[str],
+        coordinates_filename: str | None,
+        ) -> None:
+    force_constant = float(row.get("com_force_constant", 0.0))
+    if force_constant > 0.0:
+        restraints.append(Center_of_mass_restraint_spec(
+            selection_names=list(selection_names),
+            force_constant=force_constant,
+            coordinates_filename=coordinates_filename,
+        ))
+
+
 @define
 class Equilibration_globular_stage_procedure(Stage_procedure_base):
     """
     A heat-ramp + progressive restraint-relaxation equilibration, expanded from
     a schedule of positional-restraint holds on a single named selection.
+
+    An optional COM reference structure restrains every residue it contains
+    when a schedule row sets a positive ``com_force_constant``.
     """
     type: typing.Literal["equilibration_globular"] = "equilibration_globular"
     reference_structure_filename: str | None = field(
+        default=None, validator=validators.optional(validators.instance_of(str)))
+    com_reference_structure_filename: str | None = field(
         default=None, validator=validators.optional(validators.instance_of(str)))
     align_selection_str: str = field(    
         default="protein and not type H")
@@ -772,6 +842,8 @@ class Equilibration_globular_stage_procedure(Stage_procedure_base):
             input_stage_name: str = INITIAL,
             ) -> list[Resolved_stage_item]:
         target_temperature = getattr(ctx, "target_temperature", 298.15)
+        com_selection_names, com_coordinates_filename = \
+            _prepare_com_restraints(self, ctx)
         items: list[Stage_item_base] = []
         for row in self.schedule:
             sampling = Conventional_sampling_spec()
@@ -893,6 +965,10 @@ class Equilibration_globular_stage_procedure(Stage_procedure_base):
             ctx.selections["molecular_dynamics"][NONPROTEIN_SELECTION_NAME] \
                 = nonprotein_md_indices
 
+            _append_com_restraint(
+                restraints, row, com_selection_names,
+                com_coordinates_filename)
+
             items.append(MD_stage_item(
                 name=row["name"],
                 run_minimization=bool(row.get("run_minimization", False)),
@@ -932,9 +1008,13 @@ class Equilibration_membrane_stage_procedure(Stage_procedure_base):
     restraints follow CHARMM-GUI practice: phosphorus Z-only planar
     restraints plus cis double-bond and glycerol C2 improper torsions.
     There is no full-XYZ lipid headgroup restraint.
+
+    Protein center-of-mass restraints match the globular procedure.
     """
     type: typing.Literal["equilibration_membrane"] = "equilibration_membrane"
     reference_structure_filename: str | None = field(
+        default=None, validator=validators.optional(validators.instance_of(str)))
+    com_reference_structure_filename: str | None = field(
         default=None, validator=validators.optional(validators.instance_of(str)))
     align_selection_str: str = field(
         default="protein and not type H")
@@ -949,6 +1029,8 @@ class Equilibration_membrane_stage_procedure(Stage_procedure_base):
             input_stage_name: str = INITIAL,
             ) -> list[Resolved_stage_item]:
         target_temperature = getattr(ctx, "target_temperature", 298.15)
+        com_selection_names, com_coordinates_filename = \
+            _prepare_com_restraints(self, ctx)
         if self.reference_structure_filename is not None:
             ref_mdtraj = mdtraj.load(self.reference_structure_filename)
         else:
@@ -1099,6 +1181,10 @@ class Equilibration_membrane_stage_procedure(Stage_procedure_base):
                 ))
             ctx.selections["molecular_dynamics"][NONPROTEIN_SELECTION_NAME] \
                 = nonprotein_md_indices
+
+            _append_com_restraint(
+                restraints, row, com_selection_names,
+                com_coordinates_filename)
 
             # Lipid phosphorus Z-only
             if (row.get("phosphorus_atoms_force_constant", 0.0) > 0.0

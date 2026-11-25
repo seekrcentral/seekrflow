@@ -114,6 +114,9 @@ class PDBFixer_settings:
             ) -> None:
         """
         Run PDBFixer on the given PDB file and write the fixed PDB.
+
+        ``keepIds`` preserves the input residue numbers, including numbers
+        PDBFixer assigns to residues it inserts from SEQRES.
         """
         from pdbfixer import PDBFixer
         import openmm.app as openmm_app
@@ -132,11 +135,11 @@ class PDBFixer_settings:
                 fixer.removeChains(remove)
         elif self.remove_extra_chains and num_chains > 1:
             fixer.removeChains(range(1, num_chains))
-        if self.find_missing_residues:
-            fixer.findMissingResidues()
         if self.find_and_replace_nonstandard_residues:
             fixer.findNonstandardResidues()
             fixer.replaceNonstandardResidues()
+        if self.find_missing_residues:
+            fixer.findMissingResidues()
         if self.remove_heterogens:
             fixer.removeHeterogens(keepWater=True)
         if self.find_and_add_missing_atoms:
@@ -144,8 +147,9 @@ class PDBFixer_settings:
             fixer.addMissingAtoms()
         if self.add_missing_hydrogens_pH is not None:
             fixer.addMissingHydrogens(pH=self.add_missing_hydrogens_pH)
-        openmm_app.PDBFile.writeFile(
-            fixer.topology, fixer.positions, open(output_pdb_filename, "w"))
+        with open(output_pdb_filename, "w") as handle:
+            openmm_app.PDBFile.writeFile(
+                fixer.topology, fixer.positions, handle, keepIds=True)
         return
 
 

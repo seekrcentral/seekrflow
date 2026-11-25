@@ -12,6 +12,7 @@ import mdtraj
 from Bio import Align
 from scipy.spatial.distance import cdist
 from scipy.optimize import linear_sum_assignment
+from seekr.modules.base import mdtraj_center_of_mass
 
 d3to1 = {'CYS': 'C', 'ASP': 'D', 'SER': 'S', 'GLN': 'Q', 'LYS': 'K',
  'ILE': 'I', 'PRO': 'P', 'THR': 'T', 'PHE': 'F', 'ASN': 'N', 
@@ -326,3 +327,83 @@ def stack_reference_coordinates(
     if n_ref == 1:
         return np.atleast_2d(ref_traj.xyz[0, ref_indices])
     return ref_traj.xyz[:, ref_indices].reshape(-1, 3)
+
+
+class Com_residue_group(typing.NamedTuple):
+    """
+    One solvated residue restrained to a COM-file residue.
+    """
+    chain_id: str
+    res_seq: int
+    resname: str
+    atom_indices: list[int]
+
+
+def _chain_id(residue: typing.Any) -> str:
+    chain_id = getattr(residue.chain, "chain_id", None)
+    if chain_id is None:
+        return ""
+    return str(chain_id).strip()
+
+
+def _residue_key(residue: typing.Any) -> tuple[str, int]:
+    return (_chain_id(residue), int(residue.resSeq))
+
+
+def _residue_label(residue: typing.Any) -> str:
+    chain = _chain_id(residue) or "?"
+    return f"{residue.name} chain {chain} resSeq {residue.resSeq}"
+
+
+def com_reference_groups(
+        com_ref_traj: mdtraj.Trajectory,
+        md_traj: mdtraj.Trajectory,
+        ) -> tuple[list[Com_residue_group], np.ndarray]:
+    """
+    Match every COM-file residue to one solvated residue and stack targets.
+
+    The match key is chain id plus ``resSeq``, in COM-file topology order.
+    Coordinates have one row per residue within each frame, so ``N`` frames
+    produce ``N`` blocks of ``n_groups`` rows.
+    """
+    if com_ref_traj.topology.n_residues == 0:
+        raise ValueError(
+            "COM reference structure contains no residues to restrain.")
+
+    by_key: dict[tuple[str, int], list] = {}
+    for residue in md_traj.topology.residues:
+        by_key.setdefault(_residue_key(residue), []).append(residue)
+
+    groups: list[Com_residue_group] = []
+    centers: list[np.ndarray] = []
+    seen_keys: set[tuple[str, int]] = set()
+    for ref_residue in com_ref_traj.topology.residues:
+        key = _residue_key(ref_residue)
+        if key in seen_keys:
+            raise ValueError(
+                "COM reference residues collapse to the same identity: "
+                f"{_residue_label(ref_residue)}.")
+        seen_keys.add(key)
+        candidates = by_key.get(key, [])
+        chain, res_seq = key
+        identity = f"chain {chain or '?'} resSeq {res_seq}"
+        if len(candidates) != 1:
+            if not candidates:
+                raise ValueError(
+                    f"COM reference residue {_residue_label(ref_residue)} "
+                    f"has no solvated residue with {identity}.")
+            raise ValueError(
+                f"COM reference residue {_residue_label(ref_residue)} "
+                f"matches {len(candidates)} solvated residues with {identity}.")
+        md_residue = candidates[0]
+        ref_atom_indices = [int(atom.index) for atom in ref_residue.atoms]
+        groups.append(Com_residue_group(
+            chain_id=_chain_id(md_residue),
+            res_seq=int(md_residue.resSeq),
+            resname=md_residue.name,
+            atom_indices=[int(atom.index) for atom in md_residue.atoms],
+        ))
+        centers.append(mdtraj_center_of_mass(
+            com_ref_traj.atom_slice(ref_atom_indices)))
+
+    return groups, np.stack(centers, axis=1).reshape(-1, 3)

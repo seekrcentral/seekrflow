@@ -135,6 +135,47 @@ def _component_sdf_filename(component_name: str) -> str:
     return f"{component_name}.sdf"
 
 
+def _write_protein_pdb(traj, indices, out_path, source_pdb) -> list[int]:
+    """
+    Write a protein component with every atom of the selected residues and
+    the SEQRES records for those chains.
+
+    A CA-only selector still yields full residues. MDTraj keeps resSeq;
+    ParmEd's PDB writer would renumber and drop SEQRES, so PDBFixer would
+    not see the missing loops.
+    """
+    selected = {traj.topology.atom(int(i)).residue for i in indices}
+    keep = set(selected)
+    for chain in {residue.chain for residue in selected}:
+        numbers = [int(residue.resSeq) for residue in selected if residue.chain is chain]
+        low, high = min(numbers), max(numbers)
+        for residue in chain.residues:
+            names = {atom.name for atom in residue.atoms}
+            if low <= int(residue.resSeq) <= high and {"N", "CA", "C"} <= names:
+                keep.add(residue)
+    indices = [atom.index for atom in traj.topology.atoms if atom.residue in keep]
+    traj.atom_slice(indices).save(out_path)
+    chain_ids = []
+    for index in indices:
+        chain_id = traj.topology.atom(int(index)).residue.chain.chain_id
+        if chain_id and chain_id not in chain_ids:
+            chain_ids.append(chain_id)
+    records = []
+    with open(source_pdb) as handle:
+        for line in handle:
+            if line.startswith("SEQRES") and len(line) > 11 and line[11] in chain_ids:
+                records.append(line if line.endswith("\n") else line + "\n")
+    if records:
+        with open(out_path) as handle:
+            lines = handle.readlines()
+        at = next((i for i, line in enumerate(lines)
+                   if line.startswith(("ATOM", "HETATM"))), len(lines))
+        lines[at:at] = records
+        with open(out_path, "w") as handle:
+            handle.writelines(lines)
+    return indices
+
+
 def make_small_molecule_sdf_from_pdb(
         ligand_pdb_filename: str,
         ligand_sdf_filename: str,
@@ -170,16 +211,20 @@ def split_components(
         indices = member.resolve(traj)
         assert len(indices) > 0, \
             f"Component '{member.name}' resolved to no atoms."
+        out_path = os.path.join(
+            param_directory, _component_pdb_filename(member.name))
+        if isinstance(member, components_module.Protein_component):
+            indices = _write_protein_pdb(
+                traj, indices, out_path, complex_pdb_filename)
+        else:
+            # ParmEd uses 1-based atom numbers in selection strings.
+            selection = "@" + ",".join(str(i + 1) for i in indices)
+            piece = full_structure[selection]
+            piece.save(str(out_path), overwrite=True)
         resolved[member.name] = indices
         if isinstance(member, components_module.Small_molecule_component):
             ligand_residues[member.name] = _selected_ligand_residue(
                 traj, indices, member.name)
-        # ParmEd uses 1-based atom numbers in selection strings.
-        selection = "@" + ",".join(str(i + 1) for i in indices)
-        piece = full_structure[selection]
-        out_path = os.path.join(
-            param_directory, _component_pdb_filename(member.name))
-        piece.save(str(out_path), overwrite=True)
     return resolved, ligand_residues
 
 
